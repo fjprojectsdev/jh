@@ -87,7 +87,7 @@ async function startBot() {
                 }
                 
                 // Criar servidor HTTP temporário
-                const port = process.env.QR_SERVER_PORT || 3001;
+                const port = process.env.PORT || process.env.QR_SERVER_PORT || 3001;
                 
                 qrServer = http.createServer((req, res) => {
                     if (req.url === '/qr' || req.url === '/qr.png' || req.url === '/') {
@@ -118,8 +118,8 @@ async function startBot() {
                     
                     if (isProduction) {
                         // Em produção (Railway), mostrar apenas o link público
-                        const railwayUrl = process.env.RAILWAY_STATIC_URL || process.env.RAILWAY_PUBLIC_DOMAIN;
-                        const publicUrl = railwayUrl ? `https://${railwayUrl}/qr.png` : `http://0.0.0.0:${port}/qr.png`;
+                        const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN || process.env.RAILWAY_STATIC_URL;
+                        const publicUrl = railwayDomain ? `https://${railwayDomain}/qr.png` : `https://${process.env.RAILWAY_PROJECT_NAME || 'app'}.up.railway.app/qr.png`;
                         
                         console.log("\n🔗 LINK DO QR CODE:");
                         console.log(publicUrl);
