@@ -51,15 +51,15 @@ async function startBot() {
             console.log("║ Escaneie este QR code no WhatsApp Web                      ║");
             console.log("╚════════════════════════════════════════════════════════════╝\n");
             
-            // Gerar QR code no terminal
-            qrcode.generate(qr, { small: true });
+            // Gerar QR code no terminal (tamanho maior para melhor leitura)
+            qrcode.generate(qr, { small: false });
             
             // Criar servidor HTTP temporário para servir a imagem do QR code
             try {
-                // Gerar imagem do QR code em base64
+                // Gerar imagem do QR code em base64 (tamanho maior)
                 const qrImageDataUrl = await QRCode.toDataURL(qr, {
-                    width: 500,
-                    margin: 2,
+                    width: 800,
+                    margin: 4,
                     color: {
                         dark: '#000000',
                         light: '#FFFFFF'
@@ -72,22 +72,35 @@ async function startBot() {
                 
                 // Fechar servidor anterior se existir
                 if (qrServer) {
-                    qrServer.close();
+                    qrServer.close(() => {
+                        console.log('🔄 Servidor QR anterior fechado');
+                    });
+                    qrServer = null;
                 }
                 
                 // Criar servidor HTTP temporário
                 const port = process.env.QR_SERVER_PORT || 3001;
+                
                 qrServer = http.createServer((req, res) => {
                     if (req.url === '/qr' || req.url === '/qr.png' || req.url === '/') {
                         res.writeHead(200, {
                             'Content-Type': 'image/png',
                             'Content-Length': qrImageBuffer.length,
-                            'Cache-Control': 'no-cache'
+                            'Cache-Control': 'no-cache',
+                            'Access-Control-Allow-Origin': '*'
                         });
                         res.end(qrImageBuffer);
                     } else {
-                        res.writeHead(404);
+                        res.writeHead(404, { 'Content-Type': 'text/plain' });
                         res.end('Not Found');
+                    }
+                });
+                
+                qrServer.on('error', (err) => {
+                    if (err.code === 'EADDRINUSE') {
+                        console.error(`❌ Porta ${port} já está em uso. Tente usar outra porta.`);
+                    } else {
+                        console.error('❌ Erro no servidor QR code:', err);
                     }
                 });
                 
@@ -115,18 +128,14 @@ async function startBot() {
                     console.log("║ Opção 1: Escaneie o QR code acima no WhatsApp             ║");
                     console.log("║                                                             ║");
                     console.log("║ Opção 2: Acesse o link abaixo para ver a imagem do QR:    ║");
-                    console.log(`║ ${localUrl.padEnd(58)} ║`);
+                    console.log("║                                                             ║");
+                    console.log(`║ ${localUrl}`);
                     if (networkUrl) {
                         console.log("║                                                             ║");
                         console.log("║ Link alternativo (rede local):                             ║");
-                        const urlParts = networkUrl.length > 58 ? [
-                            networkUrl.substring(0, 58),
-                            networkUrl.substring(58)
-                        ] : [networkUrl];
-                        urlParts.forEach(part => {
-                            console.log(`║ ${part.padEnd(58)} ║`);
-                        });
+                        console.log(`║ ${networkUrl}`);
                     }
+                    console.log("║                                                             ║");
                     console.log("╚════════════════════════════════════════════════════════════╝\n");
                     console.log("💡 Dica: Abra o link no navegador para ver a imagem do QR code");
                     console.log("   e escaneie com o WhatsApp Web.\n");
