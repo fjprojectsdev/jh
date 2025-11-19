@@ -39,8 +39,23 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr && connection !== 'open') {
-            console.log("🚨 Escaneie este QR code no WhatsApp:");
+            console.log("\n╔════════════════════════════════════════════════════════════╗");
+            console.log("║           🔐 AUTENTICAÇÃO WHATSAPP REQUERIDA 🔐              ║");
+            console.log("╠════════════════════════════════════════════════════════════╣");
+            console.log("║ Escaneie este QR code no WhatsApp ou acesse o link abaixo ║");
+            console.log("╚════════════════════════════════════════════════════════════╝\n");
+            
+            // Gerar QR code
             qrcode.generate(qr, { small: true });
+            
+            // Exibir link de acesso
+            console.log("\n╔════════════════════════════════════════════════════════════╗");
+            console.log("║                    🔗 LINK DE ACESSO 🔗                     ║");
+            console.log("╠════════════════════════════════════════════════════════════╣");
+            console.log(`║ ${qr.padEnd(58)} ║`);
+            console.log("╚════════════════════════════════════════════════════════════╝\n");
+            console.log("💡 Dica: Você pode escanear o QR code acima ou copiar o link");
+            console.log("   e abrir no navegador para conectar o bot ao WhatsApp.\n");
         }
 
         console.log('📡 Status da conexão:', connection);
