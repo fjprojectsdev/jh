@@ -51,8 +51,16 @@ async function startBot() {
             console.log("║ Escaneie este QR code no WhatsApp Web                      ║");
             console.log("╚════════════════════════════════════════════════════════════╝\n");
             
-            // Gerar QR code no terminal (tamanho maior para melhor leitura)
-            qrcode.generate(qr, { small: false });
+            // Detectar se está no Railway ou produção
+            const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
+            
+            if (isProduction) {
+                // Em produção, mostrar apenas QR code compacto (3 linhas)
+                qrcode.generate(qr, { small: true });
+            } else {
+                // Local, mostrar QR code maior
+                qrcode.generate(qr, { small: false });
+            }
             
             // Criar servidor HTTP temporário para servir a imagem do QR code
             try {
@@ -105,40 +113,54 @@ async function startBot() {
                 });
                 
                 qrServer.listen(port, '0.0.0.0', () => {
-                    const localUrl = `http://localhost:${port}/qr.png`;
+                    // Detectar se está no Railway ou produção
+                    const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
                     
-                    // Obter IP da rede local
-                    const networkInterfaces = os.networkInterfaces();
-                    let networkIp = null;
-                    for (const interfaceName of Object.keys(networkInterfaces)) {
-                        for (const iface of networkInterfaces[interfaceName]) {
-                            if (iface.family === 'IPv4' && !iface.internal) {
-                                networkIp = iface.address;
-                                break;
+                    if (isProduction) {
+                        // Em produção (Railway), mostrar apenas o link público
+                        const railwayUrl = process.env.RAILWAY_STATIC_URL || process.env.RAILWAY_PUBLIC_DOMAIN;
+                        const publicUrl = railwayUrl ? `https://${railwayUrl}/qr.png` : `http://0.0.0.0:${port}/qr.png`;
+                        
+                        console.log("\n🔗 LINK DO QR CODE:");
+                        console.log(publicUrl);
+                        console.log("\n💡 Abra este link no navegador e escaneie o QR code com o WhatsApp\n");
+                    } else {
+                        // Ambiente local, mostrar links detalhados
+                        const localUrl = `http://localhost:${port}/qr.png`;
+                        
+                        // Obter IP da rede local
+                        const networkInterfaces = os.networkInterfaces();
+                        let networkIp = null;
+                        for (const interfaceName of Object.keys(networkInterfaces)) {
+                            for (const iface of networkInterfaces[interfaceName]) {
+                                if (iface.family === 'IPv4' && !iface.internal) {
+                                    networkIp = iface.address;
+                                    break;
+                                }
                             }
+                            if (networkIp) break;
                         }
-                        if (networkIp) break;
-                    }
-                    
-                    const networkUrl = networkIp ? `http://${networkIp}:${port}/qr.png` : null;
-                    
-                    console.log("\n╔════════════════════════════════════════════════════════════╗");
-                    console.log("║                    🔗 LINK DE ACESSO 🔗                     ║");
-                    console.log("╠════════════════════════════════════════════════════════════╣");
-                    console.log("║ Opção 1: Escaneie o QR code acima no WhatsApp             ║");
-                    console.log("║                                                             ║");
-                    console.log("║ Opção 2: Acesse o link abaixo para ver a imagem do QR:    ║");
-                    console.log("║                                                             ║");
-                    console.log(`║ ${localUrl}`);
-                    if (networkUrl) {
+                        
+                        const networkUrl = networkIp ? `http://${networkIp}:${port}/qr.png` : null;
+                        
+                        console.log("\n╔════════════════════════════════════════════════════════════╗");
+                        console.log("║                    🔗 LINK DE ACESSO 🔗                     ║");
+                        console.log("╠════════════════════════════════════════════════════════════╣");
+                        console.log("║ Opção 1: Escaneie o QR code acima no WhatsApp             ║");
                         console.log("║                                                             ║");
-                        console.log("║ Link alternativo (rede local):                             ║");
-                        console.log(`║ ${networkUrl}`);
+                        console.log("║ Opção 2: Acesse o link abaixo para ver a imagem do QR:    ║");
+                        console.log("║                                                             ║");
+                        console.log(`║ ${localUrl}`);
+                        if (networkUrl) {
+                            console.log("║                                                             ║");
+                            console.log("║ Link alternativo (rede local):                             ║");
+                            console.log(`║ ${networkUrl}`);
+                        }
+                        console.log("║                                                             ║");
+                        console.log("╚════════════════════════════════════════════════════════════╝\n");
+                        console.log("💡 Dica: Abra o link no navegador para ver a imagem do QR code");
+                        console.log("   e escaneie com o WhatsApp Web.\n");
                     }
-                    console.log("║                                                             ║");
-                    console.log("╚════════════════════════════════════════════════════════════╝\n");
-                    console.log("💡 Dica: Abra o link no navegador para ver a imagem do QR code");
-                    console.log("   e escaneie com o WhatsApp Web.\n");
                 });
                 
             } catch (error) {
