@@ -45,10 +45,20 @@ async function startBot() {
 
     await ensureCoreConfigFiles();
 
-
-
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-    const { version } = await fetchLatestBaileysVersion();
+    
+    let version;
+    try {
+        const result = await Promise.race([
+            fetchLatestBaileysVersion(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000))
+        ]);
+        version = result.version;
+        console.log('✅ Versão Baileys:', version.join('.'));
+    } catch {
+        version = [2, 3000, 1017531287];
+        console.log('⚠️ Usando versão padrão Baileys');
+    }
 
     const sock = makeWASocket({
         version,
@@ -69,6 +79,17 @@ async function startBot() {
             console.log("╠════════════════════════════════════════════════════════════╣");
             console.log("║ Escaneie este QR code no WhatsApp Web                      ║");
             console.log("╚════════════════════════════════════════════════════════════╝\n");
+            
+            qrcode.generate(qr, { small: true });
+            
+            try {
+                const qrDataUrl = await QRCode.toDataURL(qr, { width: 600 });
+                console.log("\n🔗 LINK DO QR CODE (copie e cole no navegador):");
+                console.log(qrDataUrl);
+                console.log("\n");
+            } catch (e) {
+                console.log("Erro ao gerar link QR:", e.message);
+            }
             
             // Detectar se está no Railway ou produção
             const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
