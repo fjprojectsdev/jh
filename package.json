@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
+    "start": "node railway-init.js && node index.js",
     "dev": "node watcher.js",
     "test-iptv": "node test-iptv.js",
     "test-iptv-melhorado": "node test-iptv-melhorado.js",
