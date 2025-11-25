@@ -4,6 +4,9 @@ import { getGroupStatus } from './groupStats.js';
 import { addAllowedGroup, listAllowedGroups, removeAllowedGroup } from './adminCommands.js';
 import { addAdmin, removeAdmin, listAdmins, getAdminStats, isAuthorized } from './authManager.js';
 import { addBannedWord, removeBannedWord, listBannedWords } from './antiSpam.js';
+import { analyzeLeadIntent, getLeads } from './aiSales.js';
+import { analyzeMessage } from './aiModeration.js';
+import { addPromoGroup, removePromoGroup, listPromoGroups, setPromoInterval, togglePromo, getPromoConfig } from './autoPromo.js';
 import { checkRateLimit } from './rateLimiter.js';
 import { logger } from './logger.js';
 import { formatStats } from './stats.js';
@@ -287,7 +290,7 @@ export async function handleGroupMessages(sock, message) {
     }
     
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/addtermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/addtermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo')) {
         
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -314,7 +317,7 @@ export async function handleGroupMessages(sock, message) {
                 }
             }
             
-            if (normalizedText.includes('/descricao')) {
+            if (normalizedText.startsWith('/descricao')) {
                 try {
                     const metadata = await sock.groupMetadata(groupId);
                     const desc = metadata.desc || 'Sem descrição';
@@ -322,7 +325,7 @@ export async function handleGroupMessages(sock, message) {
                 } catch (e) {
                     await sock.sendMessage(groupId, { text: '❌ Erro ao ler descrição.' });
                 }
-            } else if (normalizedText.includes('/regras')) {
+            } else if (normalizedText.startsWith('/regras')) {
                 try {
                     const metadata = await sock.groupMetadata(groupId);
                     const desc = metadata.desc?.trim();
@@ -369,7 +372,7 @@ _Use o comando /ajuda ou marque um administrador._ 💬
                 } catch (e) {
                     console.error('Erro ao enviar regras:', e);
                 }
-            } else if (normalizedText.includes('/fechar')) {
+            } else if (normalizedText.startsWith('/fechar')) {
                 await sock.groupSettingUpdate(groupId, 'announcement');
                 const closeMessage = `🕛 Mensagem de Fechamento (00:00)
 
@@ -379,7 +382,7 @@ Agradecemos a participação de todos 💬
 Descansem bem 😴💤
 Voltamos com tudo às 07:00 da manhã! ☀️💪`;
                 await sock.sendMessage(groupId, { text: closeMessage });
-            } else if (normalizedText.includes('/abrir')) {
+            } else if (normalizedText.startsWith('/abrir')) {
                 await sock.groupSettingUpdate(groupId, 'not_announcement');
                 const openMessage = `🌅 Mensagem de Abertura (07:00)
 
@@ -388,19 +391,19 @@ Voltamos com tudo às 07:00 da manhã! ☀️💪`;
 Desejamos a todos um ótimo início de dia 💫
 Vamos com foco, energia positiva e boas conversas 💬✨`;
                 await sock.sendMessage(groupId, { text: openMessage });
-            } else if (normalizedText.includes('/status')) {
+            } else if (normalizedText.startsWith('/status')) {
                 const statusMessage = await getGroupStatus(sock, groupId);
                 await sock.sendMessage(groupId, { text: statusMessage });
-            } else if (normalizedText.includes('/stats')) {
+            } else if (normalizedText.startsWith('/stats')) {
                 const statsMessage = formatStats();
                 await sock.sendMessage(groupId, { text: statsMessage });
                 logger.info('Comando /stats', { userId: senderId });
-            } else if (normalizedText.includes('/hora')) {
+            } else if (normalizedText.startsWith('/hora')) {
                 const now = new Date();
                 const hora = now.toLocaleTimeString('pt-BR');
                 const data = now.toLocaleDateString('pt-BR');
                 await sock.sendMessage(groupId, { text: `🕒 *Horário do Bot:*\n\n📅 Data: ${data}\n⏰ Hora: ${hora}` });
-            } else if (normalizedText.includes('/fixar')) {
+            } else if (normalizedText.startsWith('/fixar')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 let messageToPin = text.replace(/\/fixar/i, '').trim();
                 if (messageToPin) {
@@ -417,14 +420,14 @@ ${messageToPin}
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/fixar sua mensagem aqui`' });
                 }
-            } else if (normalizedText.includes('/aviso')) {
+            } else if (normalizedText.startsWith('/aviso')) {
                 const avisoMsg = text.replace(/\/aviso/i, '').trim();
                 if (avisoMsg) {
                     await mentionAllInvisible(sock, groupId, avisoMsg);
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/aviso sua mensagem`' });
                 }
-            } else if (normalizedText.includes('/link')) {
+            } else if (normalizedText.startsWith('/link')) {
                 try {
                     const inviteCode = await sock.groupInviteCode(groupId);
                     const link = `https://chat.whatsapp.com/${inviteCode}`;
@@ -432,7 +435,7 @@ ${messageToPin}
                 } catch (e) {
                     await sock.sendMessage(groupId, { text: '❌ Erro ao gerar link. Bot precisa ser admin.' });
                 }
-            } else if (normalizedText.includes('/promover')) {
+            } else if (normalizedText.startsWith('/promover')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 if (mentionedJids.length > 0) {
                     try {
@@ -444,7 +447,7 @@ ${messageToPin}
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/promover @usuario`' });
                 }
-            } else if (normalizedText.includes('/rebaixar')) {
+            } else if (normalizedText.startsWith('/rebaixar')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 if (mentionedJids.length > 0) {
                     try {
@@ -456,7 +459,7 @@ ${messageToPin}
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/rebaixar @usuario`' });
                 }
-            } else if (normalizedText.includes('/agendar')) {
+            } else if (normalizedText.startsWith('/agendar')) {
                 const parts = text.replace(/\/agendar/i, '').trim().split(' ');
                 const time = parts[0];
                 const msg = parts.slice(1).join(' ');
@@ -467,7 +470,7 @@ ${messageToPin}
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/agendar 14:30 Sua mensagem`' });
                 }
-            } else if (normalizedText.includes('/manutencao')) {
+            } else if (normalizedText.startsWith('/manutencao')) {
                 const mode = text.replace(/\/manutencao/i, '').trim().toLowerCase();
                 if (mode === 'on') {
                     enableMaintenance();
@@ -478,7 +481,7 @@ ${messageToPin}
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/manutencao on` ou `/manutencao off`' });
                 }
-            } else if (normalizedText.includes('/banir')) {
+            } else if (normalizedText.startsWith('/banir')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 if (mentionedJids.length > 0) {
                     const groupMetadata = await sock.groupMetadata(groupId);
@@ -508,7 +511,7 @@ Um membro foi banido do grupo:
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/banir @membro`' });
                 }
-            } else if (normalizedText.includes('/testbot')) {
+            } else if (normalizedText.startsWith('/testbot')) {
                 try {
                     const groupMetadata = await sock.groupMetadata(groupId);
                     const botJid = sock.user.id;
@@ -585,7 +588,7 @@ Um membro foi banido do grupo:
                     });
                     await sock.sendMessage(senderId, { text: adminList });
                 }
-            } else if (normalizedText.includes('/adicionartermo')) {
+            } else if (normalizedText.startsWith('/adicionartermo')) {
                 const termo = text.replace(/\/adicionartermo/i, '').trim();
                 if (termo) {
                     const result = addBannedWord(termo);
@@ -593,7 +596,7 @@ Um membro foi banido do grupo:
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/adicionartermo palavra ou frase`' });
                 }
-            } else if (normalizedText.includes('/removertermo')) {
+            } else if (normalizedText.startsWith('/removertermo')) {
                 const termo = text.replace(/\/removertermo/i, '').trim();
                 if (termo) {
                     const result = removeBannedWord(termo);
@@ -601,7 +604,7 @@ Um membro foi banido do grupo:
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/removertermo palavra ou frase`' });
                 }
-            } else if (normalizedText.includes('/listartermos')) {
+            } else if (normalizedText.startsWith('/listartermos')) {
                 const termos = listBannedWords();
                 if (termos.length === 0) {
                     await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum termo proibido cadastrado.' });
@@ -721,7 +724,93 @@ ${comando}
                 } else {
                     await sock.sendMessage(groupId, { text: 'ℹ️ Não há nenhum lembrete ativo neste grupo.' });
                 }
-            } else if (normalizedText.includes('/comandos')) {
+            } else if (normalizedText.startsWith('/testia')) {
+                const testMsg = text.replace(/\/testia/i, '').trim() || 'Olá, quero saber mais sobre seus serviços';
+                try {
+                    const aiSales = await analyzeLeadIntent(testMsg, senderId);
+                    const aiMod = await analyzeMessage(testMsg);
+                    
+                    let result = `🧪 *TESTE DE IA*\n━━━━━━━━━━━━━━━━\n\n`;
+                    result += `📝 Mensagem: "${testMsg}"\n\n`;
+                    result += `💼 *IA Vendas:*\n`;
+                    result += `• Intent: ${aiSales.intent}\n`;
+                    result += `• Confiança: ${aiSales.confidence}%\n`;
+                    result += `• Resposta: ${aiSales.response}\n`;
+                    result += `• Precisa humano: ${aiSales.needsHuman ? 'Sim' : 'Não'}\n\n`;
+                    result += `🛡️ *IA Moderação:*\n`;
+                    result += `• Seguro: ${aiMod.safe ? 'Sim' : 'Não'}\n`;
+                    result += `• Motivo: ${aiMod.reason}`;
+                    
+                    await sock.sendMessage(groupId, { text: result });
+                } catch (e) {
+                    await sock.sendMessage(groupId, { text: `❌ Erro: ${e.message}` });
+                }
+            } else if (normalizedText.startsWith('/leads')) {
+                const leads = getLeads();
+                if (leads.length === 0) {
+                    await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum lead registrado ainda.' });
+                } else {
+                    let msg = `📊 *LEADS CAPTURADOS* (${leads.length})\n━━━━━━━━━━━━━━━━\n\n`;
+                    leads.slice(-10).reverse().forEach((lead, i) => {
+                        const date = new Date(lead.timestamp).toLocaleString('pt-BR');
+                        msg += `${i + 1}. 📱 ${lead.phone}\n`;
+                        msg += `   • Intent: ${lead.intent} (${lead.confidence}%)\n`;
+                        msg += `   • Conversas: ${lead.conversationCount}\n`;
+                        msg += `   • Data: ${date}\n\n`;
+                    });
+                    if (leads.length > 10) msg += `\n... e mais ${leads.length - 10} leads`;
+                    await sock.sendMessage(groupId, { text: msg });
+                }
+            } else if (normalizedText.startsWith('/promo')) {
+                const args = text.split(' ');
+                const subCmd = args[1]?.toLowerCase();
+                
+                if (subCmd === 'add') {
+                    const gm = await sock.groupMetadata(groupId);
+                    addPromoGroup(groupId, gm.subject);
+                    await sock.sendMessage(groupId, { text: '✅ Grupo adicionado à lista de promoção!' });
+                } else if (subCmd === 'remove') {
+                    removePromoGroup(groupId);
+                    await sock.sendMessage(groupId, { text: '❌ Grupo removido da lista de promoção!' });
+                } else if (subCmd === 'list') {
+                    const groups = listPromoGroups();
+                    if (groups.length === 0) {
+                        await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum grupo na lista de promoção.' });
+                    } else {
+                        let msg = `📊 *GRUPOS DE PROMOÇÃO* (${groups.length})\n\n`;
+                        groups.forEach((g, i) => {
+                            const lastPromo = g.lastPromo ? new Date(g.lastPromo).toLocaleString('pt-BR') : 'Nunca';
+                            msg += `${i + 1}. ${g.name}\n   Último: ${lastPromo}\n\n`;
+                        });
+                        await sock.sendMessage(groupId, { text: msg });
+                    }
+                } else if (subCmd === 'interval') {
+                    const hours = parseInt(args[2]);
+                    if (hours && hours > 0) {
+                        setPromoInterval(hours);
+                        await sock.sendMessage(groupId, { text: `⏰ Intervalo definido: ${hours}h` });
+                    } else {
+                        await sock.sendMessage(groupId, { text: '❌ Use: /promo interval 6' });
+                    }
+                } else if (subCmd === 'on') {
+                    togglePromo(true);
+                    await sock.sendMessage(groupId, { text: '✅ Auto-promoção ATIVADA!' });
+                } else if (subCmd === 'off') {
+                    togglePromo(false);
+                    await sock.sendMessage(groupId, { text: '❌ Auto-promoção DESATIVADA!' });
+                } else if (subCmd === 'config') {
+                    const config = getPromoConfig();
+                    let msg = `⚙️ *CONFIGURAÇÃO DE PROMO*\n\n`;
+                    msg += `• Status: ${config.enabled ? '✅ Ativo' : '❌ Inativo'}\n`;
+                    msg += `• Intervalo: ${config.intervalHours}h\n`;
+                    msg += `• Grupos: ${config.groups.length}\n`;
+                    msg += `• Mensagens: ${config.messages.length}`;
+                    await sock.sendMessage(groupId, { text: msg });
+                } else {
+                    const help = `📊 *COMANDOS DE PROMOÇÃO*\n\n• /promo add - Adiciona grupo atual\n• /promo remove - Remove grupo atual\n• /promo list - Lista grupos\n• /promo interval [horas] - Define intervalo\n• /promo on - Ativa\n• /promo off - Desativa\n• /promo config - Ver configuração`;
+                    await sock.sendMessage(groupId, { text: help });
+                }
+            } else if (normalizedText.startsWith('/comandos')) {
                 // Enviar lista apenas no PV
                 await sock.sendMessage(senderId, { text: '📱 *Lista de comandos enviada no privado!*\n\nVerifique suas mensagens privadas.' });
                 

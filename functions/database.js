@@ -117,3 +117,105 @@ export async function getAdminLogs(limit = 50) {
     const { data } = await supabase.from('admin_logs').select('*').order('timestamp', { ascending: false }).limit(limit);
     return data || [];
 }
+
+// Leads
+export async function saveLead(leadData) {
+    const { error } = await supabase.from('leads').upsert({
+        user_id: leadData.id,
+        phone: leadData.phone,
+        last_message: leadData.lastMessage,
+        intent: leadData.intent,
+        confidence: leadData.confidence,
+        conversation_count: leadData.conversationCount,
+        updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' });
+    return !error;
+}
+
+export async function getLeads(limit = 50) {
+    const { data } = await supabase.from('leads').select('*').order('updated_at', { ascending: false }).limit(limit);
+    return data || [];
+}
+
+export async function getLeadByUserId(userId) {
+    const { data } = await supabase.from('leads').select('*').eq('user_id', userId).single();
+    return data;
+}
+
+// Allowed Users
+export async function getAllowedUsers() {
+    const { data } = await supabase.from('allowed_users').select('user_id');
+    return data ? data.map(row => row.user_id) : [];
+}
+
+export async function addAllowedUser(userId, name = null) {
+    const { error } = await supabase.from('allowed_users').insert({ user_id: userId, name });
+    return !error;
+}
+
+export async function removeAllowedUser(userId) {
+    const { error } = await supabase.from('allowed_users').delete().eq('user_id', userId);
+    return !error;
+}
+
+// Blacklist
+export async function getBlacklist() {
+    const { data } = await supabase.from('blacklist').select('*');
+    return data || [];
+}
+
+export async function addToBlacklist(userId, reason = null) {
+    const { error } = await supabase.from('blacklist').insert({ user_id: userId, reason });
+    return !error;
+}
+
+export async function removeFromBlacklist(userId) {
+    const { error } = await supabase.from('blacklist').delete().eq('user_id', userId);
+    return !error;
+}
+
+export async function isBlacklisted(userId) {
+    const { data } = await supabase.from('blacklist').select('user_id').eq('user_id', userId).single();
+    return !!data;
+}
+
+// Auto-Promoção
+export async function getPromoGroups() {
+    const { data } = await supabase.from('promo_groups').select('*').order('created_at', { ascending: false });
+    return data || [];
+}
+
+export async function addPromoGroup(groupId, groupName) {
+    const { error } = await supabase.from('promo_groups').insert({ group_id: groupId, group_name: groupName });
+    return !error;
+}
+
+export async function removePromoGroup(groupId) {
+    const { error } = await supabase.from('promo_groups').delete().eq('group_id', groupId);
+    return !error;
+}
+
+export async function updatePromoGroupLastSent(groupId) {
+    const { error } = await supabase.from('promo_groups').update({ last_promo: new Date().toISOString() }).eq('group_id', groupId);
+    return !error;
+}
+
+export async function getPromoConfig() {
+    const { data } = await supabase.from('promo_config').select('*').single();
+    return data || { enabled: true, intervalHours: 6 };
+}
+
+export async function setPromoConfig(key, value) {
+    const { error } = await supabase.from('promo_config').upsert({ id: 1, [key]: value });
+    return !error;
+}
+
+export async function getPromoMessages() {
+    const { data } = await supabase.from('promo_messages').select('*').eq('active', true);
+    return data || [];
+}
+
+export async function addPromoMessage(message) {
+    const { error } = await supabase.from('promo_messages').insert({ message, active: true });
+    return !error;
+}

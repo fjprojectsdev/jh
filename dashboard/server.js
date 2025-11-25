@@ -32,7 +32,8 @@ const FILES = {
     GROUPS: path.join(DATA_DIR, 'allowed_groups.json'),
     ADMINS: path.join(DATA_DIR, 'admins.json'),
     REMINDERS: path.join(DATA_DIR, 'lembretes.json'),
-    LOGS: path.join(DATA_DIR, 'bot.log')
+    LOGS: path.join(DATA_DIR, 'bot.log'),
+    LEADS: path.join(DATA_DIR, 'leads.json')
 };
 
 // --- Helpers ---
@@ -125,12 +126,14 @@ app.get('/api/stats', async (req, res) => {
         const groups = await readJson(FILES.GROUPS);
         const adminsData = await readJson(FILES.ADMINS);
         const reminders = await readJson(FILES.REMINDERS);
+        const leads = await readJson(FILES.LEADS);
         
         res.json({
             bannedWords: banned.length || 0,
             allowedGroups: groups.length || 0,
             admins: adminsData.admins ? adminsData.admins.length : 0,
-            lembretes: Object.keys(reminders).length || 0
+            lembretes: Object.keys(reminders).length || 0,
+            leads: leads.length || 0
         });
     } catch (err) {
         res.status(500).json({ error: "Erro ao ler dados" });
@@ -205,6 +208,25 @@ app.delete('/api/allowed-groups/:name', async (req, res) => {
 app.get('/api/admins', async (req, res) => {
     const data = await readJson(FILES.ADMINS);
     res.json(data.admins || []);
+});
+
+// --- Leads ---
+
+app.get('/api/leads', async (req, res) => {
+    try {
+        // Tentar Supabase primeiro
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseUrl = 'https://lxqyacryiizzcyrkcfya.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4cXlhY3J5aWl6emN5cmtjZnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MjE1ODQsImV4cCI6MjA3OTM5NzU4NH0.hiZwcpP-3O8miqAkZ9ht9QGtngJw8Hc0Gg6xAaMQRAE';
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        
+        const { data } = await supabase.from('leads').select('*').order('updated_at', { ascending: false }).limit(50);
+        res.json(data || []);
+    } catch (e) {
+        // Fallback para JSON
+        const leads = await readJson(FILES.LEADS);
+        res.json(leads.reverse().slice(0, 50));
+    }
 });
 
 // --- Logs ---

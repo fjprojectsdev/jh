@@ -27,8 +27,11 @@ import { detectClientInterest, sendAttendanceMessage, shouldSendAttendance, send
 import { getAdmins } from './functions/authManager.js';
 import { scheduleSupabaseBackup } from './functions/supabaseBackup.js';
 import { analyzeMessage, isAIEnabled } from './functions/aiModeration.js';
+import { analyzeLeadIntent, isAISalesEnabled } from './functions/aiSales.js';
+import { startAutoPromo } from './functions/autoPromo.js';
 
 console.log('🤖 IA de Moderação:', isAIEnabled() ? '✅ ATIVA (Groq)' : '❌ Desabilitada');
+console.log('💼 IA de Vendas:', isAISalesEnabled() ? '✅ ATIVA (Groq)' : '❌ Desabilitada');
 
 // Variável para armazenar o servidor HTTP temporário
 let qrServer = null;
@@ -217,6 +220,7 @@ async function startBot() {
             scheduleBackups();
             startScheduler(sock);
             scheduleSupabaseBackup();
+            startAutoPromo(sock);
         }
 
         if (connection === 'close') {
@@ -237,190 +241,146 @@ async function startBot() {
         const messages = msgUpsert.messages;
 
         for (const message of messages) {
-            if (!message.key.fromMe && message.message) {
-                // Ignorar mensagens do próprio bot
-                const botId = sock.user?.id;
-                const msgSender = message.key.participant || message.key.remoteJid;
-                if (msgSender === botId) {
-                    continue;
-                }
-                // Ignorar mensagens antigas (enviadas antes da inicialização do bot)
-                const messageTimestamp = message.messageTimestamp ? parseInt(message.messageTimestamp) * 1000 : Date.now();
-                if (messageTimestamp < botStartTime) {
-                    console.log('⏭️ Ignorando mensagem antiga:', new Date(messageTimestamp).toLocaleString());
+            // ========== 1. FILTROS INICIAIS (Fast Return) ==========
+            if (!message.message) continue;
+            if (message.key.fromMe) continue;
+            
+            const messageTimestamp = message.messageTimestamp ? parseInt(message.messageTimestamp) * 1000 : Date.now();
+            if (messageTimestamp < botStartTime) continue;
+
+            // ========== 2. SEPARAÇÃO DE CONTEXTO ==========
+            const isGroup = message.key.remoteJid?.endsWith('@g.us');
+            const senderId = message.key.participant || message.key.remoteJid;
+            const chatId = message.key.remoteJid;
+            
+            const contentType = getContentType(message.message);
+            const content = message.message[contentType];
+            const messageText = content?.text || content;
+            
+            if (typeof messageText !== 'string') continue;
+
+            // ========== 3. FLUXO PRIVADO (VENDAS) ==========
+            if (!isGroup) {
+                console.log('📱 FLUXO VENDAS:', senderId);
+                
+                // Comando direto para atendente
+                if (messageText.toLowerCase().trim() === '/valores') {
+                    await sock.sendMessage(senderId, { text: '✅ Recebemos sua solicitação! Um atendente entrará em contato em breve.' });
+                    await notifyAttendants(sock, senderId, senderId.split('@')[0], getAdmins);
                     continue;
                 }
                 
-                // Carregar grupos permitidos
-                    let ALLOWED_GROUP_NAMES = new Set();
+                // IA para qualificar lead
+                if (isAISalesEnabled()) {
                     try {
-                        const allowedPath = path.join(__dirname, 'allowed_groups.json');
-                        if (fs.existsSync(allowedPath)) {
-                            const raw = fs.readFileSync(allowedPath, 'utf8');
-                            const parsed = JSON.parse(raw);
-                            if (Array.isArray(parsed)) {
-                                ALLOWED_GROUP_NAMES = new Set(parsed.map(s => s.trim()).filter(Boolean));
-                            }
+                        const aiResponse = await Promise.race([
+                            analyzeLeadIntent(messageText, senderId),
+                            new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 5000))
+                        ]);
+                        
+                        console.log('🤖 IA:', aiResponse.intent, `(${aiResponse.confidence}%)`);
+                        
+                        await sock.sendMessage(senderId, { text: aiResponse.response });
+                        
+                        // Se cliente demonstrou interesse alto, notificar atendentes
+                        if (aiResponse.needsHuman || (aiResponse.intent === 'interested' && aiResponse.confidence > 70)) {
+                            await notifyAttendants(sock, senderId, senderId.split('@')[0], getAdmins);
                         }
-                    } catch (e) {
-                        console.warn('⚠️ Falha ao ler allowed_groups.json:', e.message);
-                    }
-                // processar mensagens imediatamente
-
-                const senderId = message.key.participant || message.key.remoteJid;
-                const isGroup = message.key.remoteJid && message.key.remoteJid.endsWith('@g.us');
-                const groupId = isGroup ? message.key.remoteJid : null;
-                
-                console.log('🔍 DEBUG - Mensagem recebida:');
-                console.log('- senderId:', senderId);
-                console.log('- isGroup:', isGroup);
-                console.log('- remoteJid:', message.key.remoteJid);
-
-                // Se for mensagem de grupo, buscar metadados e validar pela lista de grupos autorizados
-                let groupSubject = null;
-                let groupMetadataForCheck = null;
-                if (isGroup) {
-                    try {
-                        groupMetadataForCheck = await sock.groupMetadata(groupId);
-                        groupSubject = groupMetadataForCheck.subject || '';
-                        console.log('🔍 DEBUG - Nome do grupo:', groupSubject);
-                        console.log('🔍 DEBUG - Grupos autorizados:', Array.from(ALLOWED_GROUP_NAMES));
-                    } catch (e) {
-                        console.warn('⚠️ Falha ao obter metadata do grupo:', e.message);
-                    }
-
-                    // Verificar se o grupo está na lista de autorizados
-                    if (!groupSubject || !ALLOWED_GROUP_NAMES.has(groupSubject)) {
-                        console.log('⏭️ Grupo NÃO autorizado — ignorando:', groupSubject || groupId);
-                        console.log('🔍 DEBUG - Lista completa de grupos permitidos:', ALLOWED_GROUP_NAMES);
+                        
                         continue;
-                    } else {
-                        console.log('✅ Grupo AUTORIZADO - processando:', groupSubject);
+                    } catch (e) {
+                        console.warn('⚠️ IA vendas falhou:', e.message);
                     }
-                } else {
-                    // Para mensagens privadas, permitir processamento
-                    console.log('📱 Processando mensagem privada de:', senderId);
                 }
+                
+                // Fallback se IA estiver desabilitada
+                if (messageText.toLowerCase().trim() === 'sim' && isVerified(senderId)) {
+                    await sendAttendanceMessage(sock, senderId);
+                    continue;
+                }
+                
+                if (detectClientInterest(messageText) && shouldSendAttendance(senderId)) {
+                    await sendVerificationMessage(sock, senderId);
+                    markAsVerified(senderId);
+                    continue;
+                }
+                
+                await sock.sendMessage(senderId, { 
+                    text: '👋 Olá! Sou o iMavyBot.\n\nDigite *sim* se tiver interesse em nossos serviços ou */valores* para falar com um atendente.' 
+                });
+                continue;
+            }
 
-                const contentType = getContentType(message.message);
-                const content = message.message[contentType];
+            // ========== 4. FLUXO DE GRUPO ==========
+            // Validar grupo autorizado
+            let ALLOWED_GROUP_NAMES = new Set();
+            try {
+                const allowedPath = path.join(__dirname, 'allowed_groups.json');
+                if (fs.existsSync(allowedPath)) {
+                    const parsed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
+                    if (Array.isArray(parsed)) {
+                        ALLOWED_GROUP_NAMES = new Set(parsed.map(s => s.trim()).filter(Boolean));
+                    }
+                }
+            } catch (e) {
+                console.warn('⚠️ Falha ao ler allowed_groups.json:', e.message);
+            }
 
-                console.log('\n╔════════════════════════════════════════════════════════════╗');
-                console.log('║           📨 NOVA MENSAGEM RECEBIDA                       ║');
-                console.log('╠════════════════════════════════════════════════════════════╣');
-                // Tentar obter JID real do participante quando for mensagem de grupo
-                let jidForNumber = senderId;
+            let groupSubject = null;
+            try {
+                const groupMetadata = await sock.groupMetadata(chatId);
+                groupSubject = groupMetadata.subject || '';
+            } catch (e) {
+                console.warn('⚠️ Falha ao obter metadata do grupo:', e.message);
+            }
+
+            if (!groupSubject || !ALLOWED_GROUP_NAMES.has(groupSubject)) {
+                console.log('⏭️ Grupo NÃO autorizado:', groupSubject || chatId);
+                continue;
+            }
+
+            console.log('✅ Grupo autorizado:', groupSubject);
+
+            // 4.1. COMANDOS (prioridade máxima)
+            if (messageText.startsWith('/')) {
+                console.log('⚡ COMANDO detectado:', messageText.split(' ')[0]);
+                await handleGroupMessages(sock, message);
+                continue;
+            }
+
+            // 4.2. MODERAÇÃO
+            const violation = checkViolation(messageText);
+            let aiViolation = null;
+
+            if (isAIEnabled() && messageText.length > 10 && !violation.violated) {
                 try {
-                    if (isGroup && groupMetadataForCheck && groupMetadataForCheck.participants) {
-                        const participant = groupMetadataForCheck.participants.find(p => p.id === senderId || p.id === (senderId));
-                        if (participant && participant.jid) {
-                            jidForNumber = participant.jid;
-                        }
+                    const aiResult = await Promise.race([
+                        analyzeMessage(messageText),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 5000))
+                    ]);
+                    if (!aiResult.safe) {
+                        aiViolation = { violated: true, type: `IA: ${aiResult.reason}` };
                     }
                 } catch (e) {
-                    // falha ao acessar participant, continuar com senderId
+                    console.warn('⚠️ IA timeout/erro:', e.message);
                 }
+            }
 
-                const senderNumber = getNumberFromJid(jidForNumber) || '';
-                const senderNumberIntl = senderNumber ? formatNumberInternational(senderNumber) : '';
-                console.log('║ 📋 Tipo:', contentType.padEnd(45), '║');
-                console.log('║ 👤 De:', senderId.substring(0, 45).padEnd(47), '║');
-                console.log('║ 📞 Número:', (senderNumberIntl || senderNumber).padEnd(43), '║');
-                if (groupId) console.log('║ 👥 Grupo:', groupId.substring(0, 42).padEnd(44), '║');
-                console.log('║ 💬 Texto:', (content?.text || 'N/A').substring(0, 43).padEnd(45), '║');
+            const finalViolation = violation.violated ? violation : aiViolation;
 
-                // Debug: se for PV e não conseguimos extrair um número razoável, logar informações para análise
-                if (!isGroup) {
-                    const numDigits = (senderNumber || '').replace(/\D/g, '').length;
-                    if (!senderNumber || numDigits < 8) {
-                        console.warn('⚠️ DEBUG: PV sem número extraído ou número curto. Exibindo chaves relevantes para inspeção.');
-                        console.warn('⚠️ DEBUG senderId:', senderId);
-                        try {
-                            console.warn('⚠️ DEBUG message.key:', JSON.stringify(message.key));
-                        } catch (e) {
-                            console.warn('⚠️ DEBUG: falha ao serializar message.key');
-                        }
-                    }
-                }
-                console.log('╚════════════════════════════════════════════════════════════╝\n');
-
-                const messageText = content?.text || content;
+            if (finalViolation?.violated) {
+                console.log('🚨 VIOLAÇÃO:', finalViolation.type);
                 
-                // Atendimento automático em PV
-                if (!isGroup && typeof messageText === 'string') {
-                    console.log('📱 Processando mensagem privada de:', senderId);
-                    
-                    // Comando /valores - notifica atendentes
-                    if (messageText.toLowerCase().trim() === '/valores') {
-                        await sock.sendMessage(senderId, { text: '✅ Recebemos sua solicitação! Um atendente entrará em contato em breve.' });
-                        await notifyAttendants(sock, senderId, senderId.split('@')[0], getAdmins);
-                        continue;
-                    }
-                    
-                    // Verifica se usuário confirmou interesse
-                    if (messageText.toLowerCase().trim() === 'sim' && isVerified(senderId)) {
-                        await sendAttendanceMessage(sock, senderId);
-                        continue;
-                    }
-                    
-                    // Detecta interesse e envia verificação
-                    if (detectClientInterest(messageText) && shouldSendAttendance(senderId)) {
-                        await sendVerificationMessage(sock, senderId);
-                        markAsVerified(senderId);
-                        continue;
-                    }
+                try {
+                    await sock.sendMessage(chatId, { delete: message.key });
+                } catch (e) {
+                    console.error('Erro ao deletar:', e.message);
                 }
-
-                // Verificar violações em grupos
-                if (isGroup && typeof messageText === 'string') {
-                    // 1. Verificar palavras banidas
-                    const violation = checkViolation(messageText);
-                    
-                    // 2. Verificar com IA (se habilitada)
-                    let aiViolation = null;
-                    if (isAIEnabled() && messageText.length > 10) {
-                        const aiResult = await analyzeMessage(messageText);
-                        if (!aiResult.safe) {
-                            aiViolation = { violated: true, type: `IA: ${aiResult.reason}` };
-                        }
-                    }
-                    
-                    const finalViolation = violation.violated ? violation : aiViolation;
-                    
-                    if (finalViolation?.violated) {
-                        console.log('🚨 VIOLAÇÃO:', finalViolation.type);
-                        
-                        // Deletar mensagem
-                        try {
-                            await sock.sendMessage(groupId, { delete: message.key });
-                        } catch (e) {
-                            console.error('Erro ao deletar:', e.message);
-                        }
-                        
-                        // Notificar admins
-                        await notifyAdmins(sock, groupId, {
-                            userId: senderId,
-                            message: messageText
-                        });
-                        
-                        // Sistema de strikes
-                        await addStrike(senderId, { type: finalViolation.type, message: messageText });
-                        await applyPunishment(sock, groupId, senderId);
-                        
-                        continue;
-                    }
-                }
-
-                await handleGroupMessages(sock, message);
                 
-                // Teste manual de boas-vindas
-                if (isGroup && messageText === '/testar_boasvindas') {
-                    console.log('\n🧪 ═══════════════════════════════════════════════════════');
-                    console.log('🧪 TESTE DE BOAS-VINDAS');
-                    console.log('🧪 ═══════════════════════════════════════════════════════\n');
-                    const msgBoasVindas = await sendWelcomeMessage(sock, groupId, senderId);
-                    console.log(msgBoasVindas ? '✅ ➜ Boas-vindas enviada\n' : '❌ ➜ Falha ao enviar boas-vindas\n');
-                }
+                await notifyAdmins(sock, chatId, { userId: senderId, message: messageText });
+                await addStrike(senderId, { type: finalViolation.type, message: messageText });
+                await applyPunishment(sock, chatId, senderId);
+                continue;
             }
         }
     });
