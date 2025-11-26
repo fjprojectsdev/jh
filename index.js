@@ -317,22 +317,21 @@ async function startBot() {
 
             // ========== 3. FLUXO PRIVADO (VENDAS) ==========
             if (!isGroup) {
-                // Modo desenvolvedor ativo
-                if (isDevModeActive(senderId)) {
-                    console.log('🛠️ MODO DEV ATIVO:', senderId);
-                    
-                    // Comandos rápidos no modo dev
-                    if (messageText.startsWith('/dev')) {
-                        await handleDevCommand(sock, message, messageText);
-                        continue;
-                    }
-                    
-                    // Conversa natural com IA
-                    await handleDevConversation(sock, senderId, messageText);
+                console.log('📱 FLUXO PRIVADO:', senderId);
+                
+                // Comando /dev (ativar modo desenvolvedor)
+                if (messageText.startsWith('/dev')) {
+                    console.log('🛠️ COMANDO /dev detectado');
+                    await handleDevCommand(sock, message, messageText);
                     continue;
                 }
                 
-                console.log('📱 FLUXO VENDAS:', senderId);
+                // Modo desenvolvedor ativo
+                if (isDevModeActive(senderId)) {
+                    console.log('🛠️ MODO DEV ATIVO:', senderId);
+                    await handleDevConversation(sock, senderId, messageText);
+                    continue;
+                }
                 
                 // Delay humanizado (2-5 segundos)
                 const humanDelay = Math.floor(Math.random() * 3000) + 2000;
