@@ -151,19 +151,31 @@ Quando o dev pedir para criar algo, retorne JSON:
 {
   "type": "code" | "advice" | "question",
   "response": "sua resposta em texto",
-  "commandName": "nome do comando (se type=code)",
+  "commandName": "nome do comando sem espaços (ex: sorteio, enquete)",
+  "commandTrigger": "gatilho do comando (ex: !sorteio, /enquete)",
   "code": "código completo (se type=code)",
-  "usage": "exemplo de uso (se type=code)"
+  "usage": "exemplo de uso (se type=code)",
+  "isPublic": true/false (se qualquer um pode usar ou só admins)
 }
 
 Se for apenas conversa/conselho, use type="advice" ou "question".
 
-Estrutura de código:
-export async function handleNome(sock, message, text) {
+ESTRUTURA OBRIGATÓRIA do código:
+export async function handleNomeDoComando(sock, message, text) {
   const chatId = message.key.remoteJid;
-  // seu código aqui
+  const senderId = message.key.participant || message.key.remoteJid;
+  
+  // Lógica do comando aqui
+  
   await sock.sendMessage(chatId, { text: 'resposta' });
-}`;
+}
+
+IMPORTANTE:
+- Use await para operações assíncronas
+- Sempre extraia chatId e senderId
+- Crie lógica completa e funcional
+- Use Map() para armazenar estados temporários
+- Mencione usuários com mentions: [userId]`;
 
         const messages = [
             { role: "system", content: systemPrompt },
@@ -185,7 +197,6 @@ export async function handleNome(sock, message, text) {
         addToHistory(senderId, 'assistant', result.response);
         
         if (result.type === 'code') {
-            // Criar arquivo com o código
             const fileName = `${result.commandName}.js`;
             const customDir = path.join(__dirname, 'custom');
             
@@ -196,7 +207,10 @@ export async function handleNome(sock, message, text) {
             const filePath = path.join(customDir, fileName);
             fs.writeFileSync(filePath, result.code);
             
-            const msg = `${result.response}\n\n✅ Código criado!\n📁 Arquivo: functions/custom/${fileName}\n💬 Uso: ${result.usage}\n\n🔄 Use /dev restart para aplicar`;
+            // Auto-integrar ao groupResponder
+            await integrateCommand(result.commandName, result.commandTrigger, result.isPublic);
+            
+            const msg = `${result.response}\n\n✅ Comando criado e integrado!\n📁 Arquivo: functions/custom/${fileName}\n🔑 Gatilho: ${result.commandTrigger}\n👥 Público: ${result.isPublic ? 'Sim' : 'Só admins'}\n💬 Uso: ${result.usage}\n\n✅ Já está funcionando! Teste agora.`;
             await sock.sendMessage(chatId, { text: msg });
         } else {
             await sock.sendMessage(chatId, { text: result.response });
@@ -205,4 +219,49 @@ export async function handleNome(sock, message, text) {
     } catch (e) {
         await sock.sendMessage(chatId, { text: `❌ Erro: ${e.message}` });
     }
+}
+
+async function integrateCommand(commandName, trigger, isPublic) {
+    const responderPath = path.join(__dirname, 'groupResponder.js');
+    let content = fs.readFileSync(responderPath, 'utf8');
+    
+    // Adicionar import
+    const importLine = `import { handle${capitalize(commandName)} } from './custom/${commandName}.js';`;
+    if (!content.includes(importLine)) {
+        const importPos = content.indexOf("import { handleSorteio }");
+        if (importPos > -1) {
+            content = content.replace(
+                "import { handleSorteio } from './custom/sorteio.js';",
+                `import { handleSorteio } from './custom/sorteio.js';\n${importLine}`
+            );
+        }
+    }
+    
+    // Adicionar handler
+    const handlerCode = `
+    // Comando ${trigger} (${isPublic ? 'público' : 'admin'})
+    if (normalizedText.startsWith('${trigger.toLowerCase()}')) {
+        ${isPublic ? '' : `
+        const authorized = await isAuthorized(senderId);
+        if (!authorized) {
+            await sock.sendMessage(groupId, { text: '❌ Apenas admins podem usar este comando.' });
+            return;
+        }`}
+        if (isGroup) {
+            await handle${capitalize(commandName)}(sock, message, text);
+        }
+        return;
+    }`;
+    
+    // Inserir antes dos comandos administrativos
+    const insertPos = content.indexOf('// Comandos administrativos');
+    if (insertPos > -1 && !content.includes(`Comando ${trigger}`)) {
+        content = content.slice(0, insertPos) + handlerCode + '\n\n    ' + content.slice(insertPos);
+    }
+    
+    fs.writeFileSync(responderPath, content);
+}
+
+function capitalize(str) {
+    return str.charAt(0).toUpperCase() + str.slice(1);
 }
