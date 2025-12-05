@@ -19,7 +19,7 @@ export async function sendWelcomeMessage(sock, groupId, newMemberJid) {
 
 👋 Olá, @${userNumber}!
 
-É um prazer ter você aqui.
+É um prazer tê-lo(a) aqui.
 
 Antes de começar a interagir:
 

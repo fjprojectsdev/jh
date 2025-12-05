@@ -142,24 +142,18 @@ export async function handleGroupMessages(sock, message) {
 
 * 🔒 /fechar - Fecha o grupo
 * 🔓 /abrir - Abre o grupo
-* 📌 /fixar [mensagem] - Fixa mensagem
 * 🚫 /banir @membro - Bane membro
 * 📢 /aviso [mensagem] - Menciona todos
-* ⏰ /agendar HH:MM mensagem - Agenda mensagem
 * 📢 /lembrete + mensagem 1h 24h - Lembrete automático
 * 🛑 /stoplembrete - Para lembrete
 * 🚫 /adicionartermo [palavra] - Bloqueia palavra
 * ✏️ /removertermo [palavra] - Remove palavra
 * 📝 /listartermos - Lista palavras bloqueadas
-* 🛠️ /adicionargrupo [nome] - Adiciona grupo
-* 🗑️ /removergrupo [nome] - Remove grupo
-* 📋 /listargrupos - Lista grupos permitidos
 * 👮 /adicionaradmin @usuario - Adiciona admin
 * 🗑️ /removeradmin @usuario - Remove admin
 * 📋 /listaradmins - Lista admins
 * 👑 /promover @usuario - Promove a admin
 * 👤 /rebaixar @usuario - Rebaixa admin
-* 🔧 /manutencao on/off - Modo manutenção
 ━━━━━━━━━━━━━━━━
 📊 *COMANDOS DE INFORMAÇÃO:*
 
@@ -168,20 +162,6 @@ export async function handleGroupMessages(sock, message) {
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot
 * 📱 /comandos - Lista de comandos
-━━━━━━━━━━━━━━━━
-🤖 *COMANDOS ESPECIAIS:*
-
-* 🧪 /testia [mensagem] - Testa IA
-* 📊 /leads - Lista leads capturados
-
-📢 *AUTO-PROMOÇÃO:*
-* /promo add - Adiciona grupo
-* /promo remove - Remove grupo
-* /promo list - Lista grupos
-* /promo interval [horas] - Define intervalo
-* /promo on - Ativa
-* /promo off - Desativa
-* /promo config - Ver configuração
 ━━━━━━━━━━━━━━━━
 🔒 *Sistema de Segurança Ativo*
 * Anti-spam automático com IA
@@ -324,7 +304,7 @@ export async function handleGroupMessages(sock, message) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/addtermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo')) {
         
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -385,13 +365,13 @@ _Conversas fora do tema principal atrapalham todos._
 _Nada de conteúdo adulto, político, religioso ou violento._
 
 ❗ *Use o bom senso.*
-_Se não agregou, não envie._
+_Se não agregou valor, não envie._
 
 ❗ *Apenas administradores podem alterar o grupo.*
-_Nome, foto e descrição são gerenciados pelos ADMs._
+_Nome, foto e descrição são gerenciados pelos administradores._
 
 ❗ *Dúvidas?*
-_Use o comando /ajuda ou marque um administrador._ 💬
+_Use o comando /comandos ou marque um administrador._ 💬
 ━━━━━━━━━━━━━━━━━━━
 🕒 *Horários do Grupo:*
 ☀ _Abertura automática:_ *07:00*
@@ -436,7 +416,10 @@ Vamos com foco, energia positiva e boas conversas 💬✨`;
                 const now = new Date();
                 const hora = now.toLocaleTimeString('pt-BR');
                 const data = now.toLocaleDateString('pt-BR');
-                await sock.sendMessage(groupId, { text: `🕒 *Horário do Bot:*\n\n📅 Data: ${data}\n⏰ Hora: ${hora}` });
+                await sock.sendMessage(groupId, { text: `🕒 *Horário do Bot:*
+
+📅 Data: ${data}
+⏰ Hora: ${hora}` });
             } else if (normalizedText.startsWith('/fixar')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 let messageToPin = text.replace(/\/fixar/i, '').trim();
@@ -698,7 +681,7 @@ Um membro foi banido do grupo:
 ━━━━━━━━━━━━━━━━━━
 > 📅 Data: ${dia}/${mes}/${ano}
 > 🕒 Horário: ${hora}:${min}
-> 🔔 Status: Notificação enviada à todos os membros.
+> 🔔 Status: Notificação enviada a todos os membros.
 ━━━━━━━━━━━━━━━━━━
 
 ${comando}
@@ -852,24 +835,18 @@ ${comando}
 
 * 🔒 /fechar - Fecha o grupo
 * 🔓 /abrir - Abre o grupo
-* 📌 /fixar [mensagem] - Fixa mensagem
 * 🚫 /banir @membro - Bane membro
 * 📢 /aviso [mensagem] - Menciona todos
-* ⏰ /agendar HH:MM mensagem - Agenda mensagem
 * 📢 /lembrete + mensagem 1h 24h - Lembrete automático
 * 🛑 /stoplembrete - Para lembrete
 * 🚫 /adicionartermo [palavra] - Bloqueia palavra
 * ✏️ /removertermo [palavra] - Remove palavra
 * 📝 /listartermos - Lista palavras bloqueadas
-* 🛠️ /adicionargrupo [nome] - Adiciona grupo
-* 🗑️ /removergrupo [nome] - Remove grupo
-* 📋 /listargrupos - Lista grupos permitidos
 * 👮 /adicionaradmin @usuario - Adiciona admin
 * 🗑️ /removeradmin @usuario - Remove admin
 * 📋 /listaradmins - Lista admins
 * 👑 /promover @usuario - Promove a admin
 * 👤 /rebaixar @usuario - Rebaixa admin
-* 🔧 /manutencao on/off - Modo manutenção
 ━━━━━━━━━━━━━━━━
 📊 *COMANDOS DE INFORMAÇÃO:*
 
@@ -878,20 +855,6 @@ ${comando}
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot
 * 📱 /comandos - Lista de comandos
-━━━━━━━━━━━━━━━━
-🤖 *COMANDOS ESPECIAIS:*
-
-* 🧪 /testia [mensagem] - Testa IA
-* 📊 /leads - Lista leads capturados
-
-📢 *AUTO-PROMOÇÃO:*
-* /promo add - Adiciona grupo
-* /promo remove - Remove grupo
-* /promo list - Lista grupos
-* /promo interval [horas] - Define intervalo
-* /promo on - Ativa
-* /promo off - Desativa
-* /promo config - Ver configuração
 ━━━━━━━━━━━━━━━━
 🔒 *Sistema de Segurança Ativo*
 * Anti-spam automático com IA

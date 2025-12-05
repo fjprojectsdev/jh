@@ -367,11 +367,11 @@ async function startBot() {
                         
                         continue;
                     } catch (e) {
-                        console.error('❌ IA vendas ERRO:', e.message);
+                        console.error('❌ IA de vendas - ERRO:', e.message);
                         console.error('Stack:', e.stack);
                     }
                 } else {
-                    console.log('⚠️ IA DESABILITADA - usando fallback');
+                    console.log('⚠️ IA DESABILITADA - usando resposta padrão');
                 }
                 
                 // Fallback: resposta padrão

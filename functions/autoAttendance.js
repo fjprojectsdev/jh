@@ -103,10 +103,20 @@ export async function notifyAttendants(sock, clientId, clientNumber, getAdmins) 
     
     const admins = await getAdmins();
     
+    // Excluir admin cliente que não precisa receber notificações
+    const excludedAdmins = ['225919675449527@lid'];
+    
     for (const admin of admins) {
         try {
             const adminJid = admin.id || admin.user_id;
             const formattedJid = adminJid.includes('@') ? adminJid : `${adminJid}@s.whatsapp.net`;
+            
+            // Pular admin excluído
+            if (excludedAdmins.includes(adminJid) || excludedAdmins.includes(formattedJid)) {
+                console.log(`⏭️ Pulando notificação para admin cliente: ${formattedJid}`);
+                continue;
+            }
+            
             await sock.sendMessage(formattedJid, { text: msg });
             console.log(`✅ Notificação enviada para admin: ${formattedJid}`);
         } catch (e) {
