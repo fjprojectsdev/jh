@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.2",
-    "@supabase/supabase-js": "^2.84.0",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@supabase/supabase-js": "^2.45.0",
+    "@whiskeysockets/baileys": "^6.7.8",
     "axios": "^1.13.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
@@ -32,6 +32,10 @@
   },
   "description": "",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC"
