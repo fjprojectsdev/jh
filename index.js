@@ -426,7 +426,15 @@ async function startBot() {
             }
 
             // 4.2. MODERAÇÃO
-            const violation = checkViolation(messageText);
+            // Verificar se é admin do grupo
+            let isGroupAdmin = false;
+            try {
+                const groupMetadata = await sock.groupMetadata(chatId);
+                const participant = groupMetadata.participants.find(p => p.id === senderId);
+                isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+            } catch (e) {}
+            
+            const violation = checkViolation(messageText, isGroupAdmin);
             let aiViolation = null;
 
             if (isAIEnabled() && messageText.length > 10 && !violation.violated) {

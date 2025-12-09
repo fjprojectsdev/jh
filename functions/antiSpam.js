@@ -25,9 +25,27 @@ const CASINO_PATTERNS = [
     /\b(ganhos|lucros|rendimento|investimento|oportunidade|renda)\b/i
 ];
 
-export function checkViolation(text) {
+export function checkViolation(text, isAdmin = false) {
     const bannedWords = loadBannedWords();
     const lowerText = text.toLowerCase();
+    
+    // Verificar links (apenas para não-admins)
+    if (!isAdmin) {
+        const linkPatterns = [
+            /https?:\/\/[^\s]+/gi,
+            /www\.[^\s]+/gi,
+            /[a-z0-9-]+\.(com|net|org|br|io|app|me|link|site|online|store|shop)[^\s]*/gi,
+            /wa\.me\/[^\s]+/gi,
+            /chat\.whatsapp\.com\/[^\s]+/gi,
+            /t\.me\/[^\s]+/gi
+        ];
+        
+        for (const pattern of linkPatterns) {
+            if (pattern.test(text)) {
+                return { violated: true, type: 'link não autorizado' };
+            }
+        }
+    }
     
     // Verificar termos personalizados
     for (const term of bannedWords) {
