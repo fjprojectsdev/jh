@@ -1,8 +1,5 @@
 // index.js
 import 'dotenv/config';
-
-// Configurar timezone para Brasília
-process.env.TZ = 'America/Sao_Paulo';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, getContentType } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
@@ -35,7 +32,6 @@ import { startAutoPromo } from './functions/autoPromo.js';
 import { handleConnectionUpdate, resetReconnectAttempts } from './functions/connectionManager.js';
 import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup } from './keepalive.js';
 import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from './functions/devCommands.js';
-import { handleAntiPayment } from './functions/antiPayment.js';
 
 console.log('🤖 IA de Moderação:', isAIEnabled() ? '✅ ATIVA (Groq)' : '❌ Desabilitada');
 console.log('💼 IA de Vendas:', isAISalesEnabled() ? '✅ ATIVA (Groq)' : '❌ Desabilitada');
@@ -304,10 +300,6 @@ async function startBot() {
             // ========== 1. FILTROS INICIAIS (Fast Return) ==========
             if (!message.message) continue;
             if (message.key.fromMe) continue;
-            
-            // ========== ANTI-PAGAMENTO (Prioridade máxima) ==========
-            const wasPaymentBanned = await handleAntiPayment(sock, message);
-            if (wasPaymentBanned) continue;
             
             const messageTimestamp = message.messageTimestamp ? parseInt(message.messageTimestamp) * 1000 : Date.now();
             if (messageTimestamp < botStartTime) continue;

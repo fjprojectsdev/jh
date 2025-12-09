@@ -29,11 +29,10 @@ function saveScheduled() {
 export function scheduleMessage(groupId, time, message) {
     const [hours, minutes] = time.split(':').map(Number);
     const now = new Date();
-    const brasiliaDate = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-    const scheduled = new Date(brasiliaDate);
+    const scheduled = new Date();
     scheduled.setHours(hours, minutes, 0, 0);
     
-    if (scheduled <= brasiliaDate) {
+    if (scheduled <= now) {
         scheduled.setDate(scheduled.getDate() + 1);
     }
     
@@ -41,7 +40,7 @@ export function scheduleMessage(groupId, time, message) {
     scheduledMessages.push({ id, groupId, time, message, timestamp: scheduled.getTime() });
     saveScheduled();
     
-    return { id, scheduledFor: scheduled.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) };
+    return { id, scheduledFor: scheduled.toLocaleString('pt-BR') };
 }
 
 export function startScheduler(sock) {

@@ -4,7 +4,6 @@ import { getGroupStatus } from './groupStats.js';
 import { addAllowedGroup, listAllowedGroups, removeAllowedGroup } from './adminCommands.js';
 import { addAdmin, removeAdmin, listAdmins, getAdminStats, isAuthorized } from './authManager.js';
 import { addBannedWord, removeBannedWord, listBannedWords } from './antiSpam.js';
-import { addToPaymentWhitelist, removeFromPaymentWhitelist, getPaymentBans } from './antiPayment.js';
 import { analyzeLeadIntent, getLeads } from './aiSales.js';
 import { analyzeMessage } from './aiModeration.js';
 import { addPromoGroup, removePromoGroup, listPromoGroups, setPromoInterval, togglePromo, getPromoConfig } from './autoPromo.js';
@@ -60,12 +59,11 @@ function restartLembrete(sock, groupId, config) {
     lembretesAtivos[groupId] = {
         interval: setInterval(async () => {
             const agora = new Date();
-            const brasiliaDate = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-            const d = `${brasiliaDate.getDate()}`.padStart(2, '0');
-            const m = `${brasiliaDate.getMonth()+1}`.padStart(2, '0');
-            const a = brasiliaDate.getFullYear();
-            const h = `${brasiliaDate.getHours()}`.padStart(2, '0');
-            const mn = `${brasiliaDate.getMinutes()}`.padStart(2, '0');
+            const d = `${agora.getDate()}`.padStart(2, '0');
+            const m = `${agora.getMonth()+1}`.padStart(2, '0');
+            const a = agora.getFullYear();
+            const h = `${agora.getHours()}`.padStart(2, '0');
+            const mn = `${agora.getMinutes()}`.padStart(2, '0');
             
             const repeticao = `🚨 *LEMBRETE AUTOMÁTICO* 🚨\n━━━━━━━━━━━━━━━━━━\n> 📅 Data: ${d}/${m}/${a}\n> 🕒 Horário: ${h}:${mn}\n> 🔔 Status: Lembrete automático ativo.\n━━━━━━━━━━━━━━━━━━\n\n${comando}\n\n*_iMavyAgent — Automação Inteligente_*`;
             
@@ -306,7 +304,7 @@ export async function handleGroupMessages(sock, message) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/paymentwhitelist') || normalizedText.includes('/paymentbans')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo')) {
         
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -416,8 +414,8 @@ Vamos com foco, energia positiva e boas conversas 💬✨`;
                 logger.info('Comando /stats', { userId: senderId });
             } else if (normalizedText.startsWith('/hora')) {
                 const now = new Date();
-                const hora = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-                const data = now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                const hora = now.toLocaleTimeString('pt-BR');
+                const data = now.toLocaleDateString('pt-BR');
                 await sock.sendMessage(groupId, { text: `🕒 *Horário do Bot:*
 
 📅 Data: ${data}
@@ -427,8 +425,8 @@ Vamos com foco, energia positiva e boas conversas 💬✨`;
                 let messageToPin = text.replace(/\/fixar/i, '').trim();
                 if (messageToPin) {
                     const agora = new Date();
-                    const data = agora.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-                    const hora = agora.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+                    const data = agora.toLocaleDateString('pt-BR');
+                    const hora = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                     const pinnedMsg = `📌 MENSAGEM IMPORTANTE 📌
 ━━━━━━━━━━━━━━━━━━━
 ${messageToPin}
@@ -511,7 +509,7 @@ ${messageToPin}
                         
                         // Notificar administradores
                         const admins = groupMetadata.participants.filter(p => p.admin && p.id !== memberId).map(p => p.id);
-                        const dataHora = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                        const dataHora = new Date().toLocaleString('pt-BR');
                         const adminNotification = `🔥👮 *ATENÇÃO, ADMINISTRADORES!* 👮🔥
 
 Um membro foi banido do grupo:
@@ -673,19 +671,11 @@ Um membro foi banido do grupo:
                 
                 // MENSAGEM FORMATADA
                 const data = new Date();
-                const brasiliaDate = new Date(data.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-                const dia = `${brasiliaDate.getDate()}`.padStart(2, '0');
-                const mes = `${brasiliaDate.getMonth()+1}`.padStart(2, '0');
-                const ano = brasiliaDate.getFullYear();
-                const hora = `${brasiliaDate.getHours()}`.padStart(2, '0');
-                const min = `${brasiliaDate.getMinutes()}`.padStart(2, '0');
-                
-                const brasiliaDate = new Date(data.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-                const dia = `${brasiliaDate.getDate()}`.padStart(2, '0');
-                const mes = `${brasiliaDate.getMonth()+1}`.padStart(2, '0');
-                const ano = brasiliaDate.getFullYear();
-                const hora = `${brasiliaDate.getHours()}`.padStart(2, '0');
-                const min = `${brasiliaDate.getMinutes()}`.padStart(2, '0');
+                const dia = `${data.getDate()}`.padStart(2, '0');
+                const mes = `${data.getMonth()+1}`.padStart(2, '0');
+                const ano = data.getFullYear();
+                const hora = `${data.getHours()}`.padStart(2, '0');
+                const min = `${data.getMinutes()}`.padStart(2, '0');
                 
                 const msgFormatada = `🚨 *LEMBRETE GLOBAL DO SISTEMA* 🚨
 ━━━━━━━━━━━━━━━━━━
@@ -709,12 +699,11 @@ ${comando}
                 lembretesAtivos[groupId] = {
                     interval: setInterval(async () => {
                     const agora = new Date();
-                    const brasiliaDate = new Date(agora.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-                    const d = `${brasiliaDate.getDate()}`.padStart(2, '0');
-                    const m = `${brasiliaDate.getMonth()+1}`.padStart(2, '0');
-                    const a = brasiliaDate.getFullYear();
-                    const h = `${brasiliaDate.getHours()}`.padStart(2, '0');
-                    const mn = `${brasiliaDate.getMinutes()}`.padStart(2, '0');
+                    const d = `${agora.getDate()}`.padStart(2, '0');
+                    const m = `${agora.getMonth()+1}`.padStart(2, '0');
+                    const a = agora.getFullYear();
+                    const h = `${agora.getHours()}`.padStart(2, '0');
+                    const mn = `${agora.getMinutes()}`.padStart(2, '0');
                     
                     const repeticao = `🚨 *LEMBRETE AUTOMÁTICO* 🚨
 ━━━━━━━━━━━━━━━━━━
@@ -781,7 +770,7 @@ ${comando}
                     let msg = `📊 *LEADS CAPTURADOS* (${leads.length})\n━━━━━━━━━━━━━━━━\n\n`;
                     const leadsArray = Array.isArray(leads) ? leads : Object.values(leads);
                     leadsArray.slice(-10).reverse().forEach((lead, i) => {
-                        const date = new Date(lead.timestamp).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                        const date = new Date(lead.timestamp).toLocaleString('pt-BR');
                         msg += `${i + 1}. 📱 ${lead.phone}\n`;
                         msg += `   • Intent: ${lead.intent} (${lead.confidence}%)\n`;
                         msg += `   • Conversas: ${lead.conversationCount}\n`;
@@ -808,7 +797,7 @@ ${comando}
                     } else {
                         let msg = `📊 *GRUPOS DE PROMOÇÃO* (${groups.length})\n\n`;
                         groups.forEach((g, i) => {
-                            const lastPromo = g.lastPromo ? new Date(g.lastPromo).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }) : 'Nunca';
+                            const lastPromo = g.lastPromo ? new Date(g.lastPromo).toLocaleString('pt-BR') : 'Nunca';
                             msg += `${i + 1}. ${g.name}\n   Último: ${lastPromo}\n\n`;
                         });
                         await sock.sendMessage(groupId, { text: msg });
@@ -838,34 +827,6 @@ ${comando}
                 } else {
                     const help = `📊 *COMANDOS DE PROMOÇÃO*\n\n• /promo add - Adiciona grupo atual\n• /promo remove - Remove grupo atual\n• /promo list - Lista grupos\n• /promo interval [horas] - Define intervalo\n• /promo on - Ativa\n• /promo off - Desativa\n• /promo config - Ver configuração`;
                     await sock.sendMessage(groupId, { text: help });
-                }
-            } else if (normalizedText.startsWith('/paymentwhitelist')) {
-                const args = text.split(' ');
-                const action = args[1]?.toLowerCase();
-                const userId = args[2];
-                
-                if (action === 'add' && userId) {
-                    const result = addToPaymentWhitelist(userId);
-                    await sock.sendMessage(groupId, { text: result.message });
-                } else if (action === 'remove' && userId) {
-                    const result = removeFromPaymentWhitelist(userId);
-                    await sock.sendMessage(groupId, { text: result.message });
-                } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: /paymentwhitelist add|remove <userId>' });
-                }
-            } else if (normalizedText.startsWith('/paymentbans')) {
-                const bans = getPaymentBans();
-                if (bans.length === 0) {
-                    await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum ban de pagamento registrado.' });
-                } else {
-                    let msg = `🚫 *BANS DE PAGAMENTO* (${bans.length})\n━━━━━━━━━━━━━━━━\n\n`;
-                    bans.slice(-10).reverse().forEach((ban, i) => {
-                        msg += `${i + 1}. 📱 ${ban.senderId.split('@')[0]}\n`;
-                        msg += `   • Data: ${ban.date}\n`;
-                        msg += `   • Razão: ${ban.reason}\n\n`;
-                    });
-                    if (bans.length > 10) msg += `\n... e mais ${bans.length - 10} bans`;
-                    await sock.sendMessage(groupId, { text: msg });
                 }
             } else if (normalizedText.startsWith('/comandos')) {
                 const comandosMsg = `🤖 *LISTA COMPLETA DE COMANDOS* 🤖
