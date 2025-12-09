@@ -1,11 +1,11 @@
 import cron from 'node-cron';
-import * as db from './database.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = path.join(__dirname, '..', 'schedule_config.json');
+const ALLOWED_FILE = path.join(__dirname, '..', 'allowed_groups.json');
 
 function getScheduleConfig() {
     try {
@@ -14,6 +14,15 @@ function getScheduleConfig() {
         }
     } catch (e) {}
     return { openTime: '07:00', closeTime: '00:00' };
+}
+
+function getAllowedGroups() {
+    try {
+        if (fs.existsSync(ALLOWED_FILE)) {
+            return JSON.parse(fs.readFileSync(ALLOWED_FILE, 'utf8'));
+        }
+    } catch (e) {}
+    return [];
 }
 
 export function scheduleGroupMessages(sock) {
@@ -25,9 +34,9 @@ export function scheduleGroupMessages(sock) {
     
     // Fechar grupos
     cron.schedule(`${closeMin} ${closeHour} * * *`, async () => {
-        console.log('🌙 Executando fechamento automático...');
+        console.log('🌙 Fechamento automático iniciado');
         try {
-            const allowedGroups = await db.getAllowedGroups();
+            const allowedGroups = getAllowedGroups();
             const allGroups = await sock.groupFetchAllParticipating();
             
             for (const groupId in allGroups) {
@@ -37,21 +46,20 @@ export function scheduleGroupMessages(sock) {
                     await sock.sendMessage(groupId, { 
                         text: '🌙 *Grupo fechado!* 🌙\n\nO horário de descanso chegou 😴✨\nMensagens estarão desativadas até às 07:00.\nAproveite para recarregar as energias 🔋💤\nNos vemos amanhã! 🌞💬' 
                     });
-                    console.log(`✅ Grupo "${group.subject}" fechado`);
-                    await db.logAdminAction('SYSTEM', 'auto_close', null, groupId, 'Fechamento automático 00:00');
                     await new Promise(r => setTimeout(r, 2000));
                 }
             }
+            console.log('✅ Fechamento concluído');
         } catch (err) {
-            console.error('❌ Erro ao fechar grupos:', err);
+            console.error('❌ Erro ao fechar:', err.message);
         }
     }, { timezone: 'America/Sao_Paulo' });
     
     // Abrir grupos
     cron.schedule(`${openMin} ${openHour} * * *`, async () => {
-        console.log('☀️ Executando abertura automática...');
+        console.log('☀️ Abertura automática iniciada');
         try {
-            const allowedGroups = await db.getAllowedGroups();
+            const allowedGroups = getAllowedGroups();
             const allGroups = await sock.groupFetchAllParticipating();
             
             for (const groupId in allGroups) {
@@ -61,13 +69,12 @@ export function scheduleGroupMessages(sock) {
                     await sock.sendMessage(groupId, { 
                         text: '☀️ *Bom dia!* ☀️\n\nO grupo está aberto novamente! 🎉\nVamos começar o dia com energia! 💪✨' 
                     });
-                    console.log(`✅ Grupo "${group.subject}" aberto`);
-                    await db.logAdminAction('SYSTEM', 'auto_open', null, groupId, 'Abertura automática 07:00');
                     await new Promise(r => setTimeout(r, 2000));
                 }
             }
+            console.log('✅ Abertura concluída');
         } catch (err) {
-            console.error('❌ Erro ao abrir grupos:', err);
+            console.error('❌ Erro ao abrir:', err.message);
         }
     }, { timezone: 'America/Sao_Paulo' });
     
