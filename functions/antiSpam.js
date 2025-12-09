@@ -18,11 +18,11 @@ function saveBannedWords(words) {
 }
 
 const CASINO_PATTERNS = [
-    /\b(cassino|casino|bet|aposta|jogo|ganhar dinheiro|renda extra|lucro garantido)\b/i,
-    /\b(fortune|tiger|mines|aviator|spaceman|double|crash|roleta)\b/i,
-    /\b(deposito|saque|pix|bônus|bonus|cadastr|link na bio|chama no pv)\b/i,
-    /\b(plataforma|sala vip|grupo vip|sinais|estrategia|hack|bug)\b/i,
-    /\b(ganhos|lucros|rendimento|investimento|oportunidade|renda)\b/i
+    /\b(cassino|casino|bet365|betano|aposta online)\b/i,
+    /\b(fortune tiger|tiger fortune|mines|aviator|spaceman|crash game|roleta online)\b/i,
+    /\b(deposito minimo|saque rapido|cadastr.*bonus|link na bio|chama no pv.*ganhar)\b/i,
+    /\b(sala vip|grupo vip.*sinais|sinais.*vip|hack.*jogo|bug.*plataforma)\b/i,
+    /\b(ganhos garantidos|lucro facil|renda passiva|investimento.*retorno)\b/i
 ];
 
 export function checkViolation(text, isAdmin = false) {

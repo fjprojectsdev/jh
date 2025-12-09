@@ -434,6 +434,9 @@ async function startBot() {
                 isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
             } catch (e) {}
             
+            // Admins podem falar tudo
+            if (isGroupAdmin) continue;
+            
             const violation = checkViolation(messageText, isGroupAdmin);
             let aiViolation = null;
 
