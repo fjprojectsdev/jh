@@ -414,8 +414,8 @@ Vamos com foco, energia positiva e boas conversas 💬✨`;
                 logger.info('Comando /stats', { userId: senderId });
             } else if (normalizedText.startsWith('/hora')) {
                 const now = new Date();
-                const hora = now.toLocaleTimeString('pt-BR');
-                const data = now.toLocaleDateString('pt-BR');
+                const hora = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+                const data = now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
                 await sock.sendMessage(groupId, { text: `🕒 *Horário do Bot:*
 
 📅 Data: ${data}
