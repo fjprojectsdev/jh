@@ -1,11 +1,30 @@
 import cron from 'node-cron';
 import * as db from './database.js';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG_FILE = path.join(__dirname, '..', 'schedule_config.json');
+
+function getScheduleConfig() {
+    try {
+        if (fs.existsSync(CONFIG_FILE)) {
+            return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+        }
+    } catch (e) {}
+    return { openTime: '07:00', closeTime: '00:00' };
+}
 
 export function scheduleGroupMessages(sock) {
-    console.log('📅 Agendador automático ativado (00:00 fechar | 07:00 abrir)');
+    const config = getScheduleConfig();
+    const [closeHour, closeMin] = config.closeTime.split(':');
+    const [openHour, openMin] = config.openTime.split(':');
     
-    // Fechar grupos às 00:00
-    cron.schedule('0 0 * * *', async () => {
+    console.log(`📅 Agendador: ${config.closeTime} fechar | ${config.openTime} abrir`);
+    
+    // Fechar grupos
+    cron.schedule(`${closeMin} ${closeHour} * * *`, async () => {
         console.log('🌙 Executando fechamento automático...');
         try {
             const allowedGroups = await db.getAllowedGroups();
@@ -28,8 +47,8 @@ export function scheduleGroupMessages(sock) {
         }
     }, { timezone: 'America/Sao_Paulo' });
     
-    // Abrir grupos às 07:00
-    cron.schedule('0 7 * * *', async () => {
+    // Abrir grupos
+    cron.schedule(`${openMin} ${openHour} * * *`, async () => {
         console.log('☀️ Executando abertura automática...');
         try {
             const allowedGroups = await db.getAllowedGroups();
@@ -52,5 +71,5 @@ export function scheduleGroupMessages(sock) {
         }
     }, { timezone: 'America/Sao_Paulo' });
     
-    console.log('✅ Cron jobs registrados: 00:00 (fechar) | 07:00 (abrir)');
+    console.log(`✅ Cron jobs: ${config.closeTime} (fechar) | ${config.openTime} (abrir)`);
 }
