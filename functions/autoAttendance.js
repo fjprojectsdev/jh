@@ -8,30 +8,22 @@ const KEYWORDS = [
 
 
 
-const ATTENDANCE_MESSAGE = `🤖 *iMavyBot - Seu Grupo no Piloto Automático*
+const ATTENDANCE_MESSAGE = `👋 Olá! Aqui estão nossos planos atualizados:
 
-✅ Ótimo! Vou te mostrar como economizar HORAS por dia:
+📦 *1 Grupo* – R$ 100/mês
+Comandos padrão, IA de moderação, anti-link, anti-flood, boas-vindas e suporte normal.
 
-⚡ *PROBLEMAS QUE RESOLVO:*
-• Spam e links indesejados → DELETADOS automaticamente
-• Membros sem educação → 3 strikes e BAN
-• Esqueceu de abrir/fechar grupo → AUTOMÁTICO
-• Avisos importantes → LEMBRETES automáticos
-• Novos membros perdidos → BOAS-VINDAS automáticas
+📦 *2 Grupos* – R$ 200/mês
+Tudo do plano anterior + moderação IA em até 2 grupos simultâneos.
 
-💰 *INVESTIMENTO:*
-*R$ 97/mês* por grupo (menos que R$ 3/dia)
+⭐ *3 Grupos (MAIS VENDIDO)* – R$ 250/mês
+Tudo do plano anterior + suporte para até 3 grupos. Melhor custo-benefício!
 
-🎁 *BÔNUS:*
-• 7 dias GRÁTIS para testar
-• Suporte via WhatsApp
-• Atualizações incluídas
-
-📱 *QUERO TESTAR GRÁTIS:*
-Digite */valores* e te adiciono no grupo de demonstração AGORA!
+👑 *Premium Empresarial* – R$ 1.000/mês
+Bot personalizado com nome, logo, mensagens e comportamento da sua empresa. Até 3 grupos incluídos + suporte prioritário e consultoria.
 
 ━━━━━━━━━━━━━━━━
-_iMavyBot - Moderação Inteligente 24/7_`;
+💬 Quer que eu te ajude a contratar o melhor plano para o seu caso?`;
 
 export function detectClientInterest(text) {
     const lowerText = text.toLowerCase();
