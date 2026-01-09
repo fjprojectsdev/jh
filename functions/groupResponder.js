@@ -65,7 +65,15 @@ function restartLembrete(sock, groupId, config) {
             const h = `${agora.getHours()}`.padStart(2, '0');
             const mn = `${agora.getMinutes()}`.padStart(2, '0');
             
-            const repeticao = `🚨 *LEMBRETE AUTOMÁTICO* 🚨\n━━━━━━━━━━━━━━━━━━\n> 📅 Data: ${d}/${m}/${a}\n> 🕒 Horário: ${h}:${mn}\n> 🔔 Status: Lembrete automático ativo.\n━━━━━━━━━━━━━━━━━━\n\n${comando}\n\n*_iMavyAgent — Automação Inteligente_*`;
+            const repeticao = `Notificação Global — Sistema
+
+Data: ${d}/${m}/${a}
+Horário: ${h}:${mn}
+Status: Enviado a todos os membros
+
+${comando}
+
+iMavyAgent — Automação Inteligente`;
             
             await mentionAllInvisible(sock, groupId, repeticao);
         }, intervaloMs),
@@ -388,22 +396,18 @@ _Use o comando /comandos ou marque um administrador._ 💬
                 }
             } else if (normalizedText.startsWith('/fechar')) {
                 await sock.groupSettingUpdate(groupId, 'announcement');
-                const closeMessage = `🕛 Mensagem de Fechamento (00:00)
+                const closeMessage = `Grupo Temporariamente Fechado
 
-🌙 Encerramento do Grupo 🌙
-🔒 O grupo está sendo fechado agora (00:00)!
-Agradecemos a participação de todos 💬
-Descansem bem 😴💤
-Voltamos com tudo às 07:00 da manhã! ☀️💪`;
+O envio de mensagens está desativado até 07:00.
+
+A funcionalidade será reativada automaticamente no horário programado.`;
                 await sock.sendMessage(groupId, { text: closeMessage });
             } else if (normalizedText.startsWith('/abrir')) {
                 await sock.groupSettingUpdate(groupId, 'not_announcement');
-                const openMessage = `🌅 Mensagem de Abertura (07:00)
+                const openMessage = `Grupo Aberto
 
-☀️ Bom dia, pessoal! ☀️
-🔓 O grupo foi reaberto (07:00)!
-Desejamos a todos um ótimo início de dia 💫
-Vamos com foco, energia positiva e boas conversas 💬✨`;
+As mensagens foram reativadas.
+Desejamos a todos um excelente dia.`;
                 await sock.sendMessage(groupId, { text: openMessage });
             } else if (normalizedText.startsWith('/status')) {
                 const statusMessage = await getGroupStatus(sock, groupId);
@@ -677,18 +681,18 @@ Um membro foi banido do grupo:
                 const hora = `${data.getHours()}`.padStart(2, '0');
                 const min = `${data.getMinutes()}`.padStart(2, '0');
                 
-                const msgFormatada = `🚨 *LEMBRETE GLOBAL DO SISTEMA* 🚨
-━━━━━━━━━━━━━━━━━━
-> 📅 Data: ${dia}/${mes}/${ano}
-> 🕒 Horário: ${hora}:${min}
-> 🔔 Status: Notificação enviada a todos os membros.
-━━━━━━━━━━━━━━━━━━
+                const msgFormatada = `Notificação Global — Sistema
+
+Data: ${dia}/${mes}/${ano}
+Horário: ${hora}:${min}
+Status: Enviado a todos os membros
 
 ${comando}
-━━━━━━━━━━━━━━━━━━
-⛔ *Configurado para repetir a cada ${intervalo}h*
-⏰ *Encerramento automático em ${encerramento}h*
-*_iMavyAgent — Automação Inteligente_*`;
+
+• Frequência: a cada ${intervalo} hora(s)
+• Encerramento automático em ${encerramento} hora(s)
+
+iMavyAgent — Automação Inteligente`;
                 
                 // Enviar primeira vez
                 await mentionAllInvisible(sock, groupId, msgFormatada);
@@ -705,16 +709,15 @@ ${comando}
                     const h = `${agora.getHours()}`.padStart(2, '0');
                     const mn = `${agora.getMinutes()}`.padStart(2, '0');
                     
-                    const repeticao = `🚨 *LEMBRETE AUTOMÁTICO* 🚨
-━━━━━━━━━━━━━━━━━━
-> 📅 Data: ${d}/${m}/${a}
-> 🕒 Horário: ${h}:${mn}
-> 🔔 Status: Lembrete automático ativo.
-━━━━━━━━━━━━━━━━━━
+                    const repeticao = `Notificação Global — Sistema
+
+Data: ${d}/${m}/${a}
+Horário: ${h}:${mn}
+Status: Enviado a todos os membros
 
 ${comando}
 
-*_iMavyAgent — Automação Inteligente_*`;
+iMavyAgent — Automação Inteligente`;
                     
                     await mentionAllInvisible(sock, groupId, repeticao);
                 }, intervaloMs),

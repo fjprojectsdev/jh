@@ -5,6 +5,11 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BANNED_FILE = path.join(__dirname, '..', 'banned_words.json');
 
+// Cache de mensagens recentes por usuário
+const messageCache = new Map();
+const SPAM_WINDOW = 10000; // 10 segundos
+const MAX_REPEATED = 2; // Máximo de mensagens iguais
+
 function loadBannedWords() {
     try {
         return JSON.parse(fs.readFileSync(BANNED_FILE, 'utf8'));
@@ -17,24 +22,15 @@ function saveBannedWords(words) {
     fs.writeFileSync(BANNED_FILE, JSON.stringify(words, null, 2));
 }
 
-const CASINO_PATTERNS = [
-    /\b(cassino|casino|bet365|betano|aposta online)\b/i,
-    /\b(fortune tiger|tiger fortune|mines|aviator|spaceman|crash game|roleta online)\b/i,
-    /\b(deposito minimo|saque rapido|cadastr.*bonus|link na bio|chama no pv.*ganhar)\b/i,
-    /\b(sala vip|grupo vip.*sinais|sinais.*vip|hack.*jogo|bug.*plataforma)\b/i,
-    /\b(ganhos garantidos|lucro facil|renda passiva|investimento.*retorno)\b/i
-];
-
-export function checkViolation(text, isAdmin = false) {
+export function checkViolation(text, senderId, isAdmin = false) {
     const bannedWords = loadBannedWords();
-    const lowerText = text.toLowerCase();
     
-    // Verificar links (apenas para não-admins)
+    // 1. VERIFICAR LINKS (apenas para não-admins)
     if (!isAdmin) {
         const linkPatterns = [
             /https?:\/\/[^\s]+/gi,
             /www\.[^\s]+/gi,
-            /[a-z0-9-]+\.(com|net|org|br|io|app|me|link|site|online|store|shop)[^\s]*/gi,
+            /[a-z0-9-]+\.(com|net|org|br|io|app|me|link|site|online|store|shop|xyz|top|click)[^\s]*/gi,
             /wa\.me\/[^\s]+/gi,
             /chat\.whatsapp\.com\/[^\s]+/gi,
             /t\.me\/[^\s]+/gi
@@ -47,24 +43,50 @@ export function checkViolation(text, isAdmin = false) {
         }
     }
     
-    // Verificar termos personalizados
+    // 2. VERIFICAR SPAM DE REPETIÇÃO (apenas para não-admins)
+    if (!isAdmin && senderId) {
+        const now = Date.now();
+        
+        if (!messageCache.has(senderId)) {
+            messageCache.set(senderId, []);
+        }
+        
+        const userMessages = messageCache.get(senderId);
+        
+        // Limpar mensagens antigas
+        const recentMessages = userMessages.filter(msg => now - msg.timestamp < SPAM_WINDOW);
+        
+        // Contar mensagens idênticas
+        const sameMessages = recentMessages.filter(msg => msg.text === text);
+        
+        if (sameMessages.length >= MAX_REPEATED) {
+            return { violated: true, type: 'spam de repetição' };
+        }
+        
+        // Adicionar mensagem atual
+        recentMessages.push({ text, timestamp: now });
+        messageCache.set(senderId, recentMessages);
+        
+        // Limpar cache periodicamente
+        if (messageCache.size > 1000) {
+            const oldestAllowed = now - SPAM_WINDOW;
+            for (const [userId, messages] of messageCache.entries()) {
+                const filtered = messages.filter(msg => msg.timestamp > oldestAllowed);
+                if (filtered.length === 0) {
+                    messageCache.delete(userId);
+                } else {
+                    messageCache.set(userId, filtered);
+                }
+            }
+        }
+    }
+    
+    // 3. VERIFICAR TERMOS PROIBIDOS (se houver)
+    const lowerText = text.toLowerCase();
     for (const term of bannedWords) {
         if (lowerText.includes(term.toLowerCase())) {
             return { violated: true, type: `termo proibido: "${term}"` };
         }
-    }
-    
-    // Detectar padrões de cassino
-    let casinoMatches = 0;
-    for (const pattern of CASINO_PATTERNS) {
-        if (pattern.test(text)) {
-            casinoMatches++;
-        }
-    }
-    
-    // Se encontrar 2 ou mais padrões, é spam de cassino
-    if (casinoMatches >= 2) {
-        return { violated: true, type: 'spam de cassino/apostas detectado' };
     }
     
     return { violated: false };
@@ -78,7 +100,14 @@ export async function notifyAdmins(sock, groupId, violationData) {
         const userNumber = violationData.userId.split('@')[0];
         const dateTime = new Date().toLocaleString('pt-BR');
         
-        const adminMessage = `🚨 *ALERTA DE VIOLAÇÃO*\n\n👤 *Usuário:* ${userNumber}\n🕒 *Data/Hora:* ${dateTime}\n\n📝 *Mensagem bloqueada:*\n${violationData.message}`;
+        const adminMessage = `Alerta de Moderação
+
+Usuário: ${userNumber}
+Data/Hora: ${dateTime}
+Tipo: ${violationData.type || 'Violação detectada'}
+
+Mensagem bloqueada:
+${violationData.message}`;
         
         for (const adminId of admins) {
             await sock.sendMessage(adminId, { text: adminMessage });
@@ -93,12 +122,12 @@ export function addBannedWord(word) {
     const term = word.trim();
     
     if (words.includes(term)) {
-        return { success: false, message: `⚠️ Termo "${term}" já existe!` };
+        return { success: false, message: `Termo "${term}" já existe na lista.` };
     }
     
     words.push(term);
     saveBannedWords(words);
-    return { success: true, message: `✅ Termo "${term}" adicionado!` };
+    return { success: true, message: `Termo "${term}" adicionado com sucesso.` };
 }
 
 export function removeBannedWord(word) {
@@ -107,12 +136,12 @@ export function removeBannedWord(word) {
     const index = words.indexOf(term);
     
     if (index === -1) {
-        return { success: false, message: `⚠️ Termo "${term}" não encontrado!` };
+        return { success: false, message: `Termo "${term}" não encontrado.` };
     }
     
     words.splice(index, 1);
     saveBannedWords(words);
-    return { success: true, message: `✅ Termo "${term}" removido!` };
+    return { success: true, message: `Termo "${term}" removido com sucesso.` };
 }
 
 export function listBannedWords() {

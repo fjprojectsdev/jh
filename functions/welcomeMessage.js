@@ -13,25 +13,15 @@ export async function sendWelcomeMessage(sock, groupId, newMemberJid) {
         // Obter nome do usuário
         const userNumber = memberJid.split('@')[0];
         
-        const welcomeText = `🎉 Seja muito bem-vindo(a)! 🎉
+        const welcomeText = `Bem-vindo(a) ao grupo, @${userNumber}.
 
-━━━━━━━━━━━━━━━━━
+Antes de interagir, recomendamos a leitura das regras:
+/regras
 
-👋 Olá, @${userNumber}!
+Este espaço é voltado para troca construtiva e convivência respeitosa.
+Contamos com sua colaboração.
 
-É um prazer tê-lo(a) aqui.
-
-Antes de começar a interagir:
-
-📜 Leia as regras: /regras
-
-✨ Mantenha o respeito, compartilhe boas ideias e aproveite o espaço!
-Lembre-se: a convivência saudável depende de todos nós 💪
-
-━━━━━━━━━━━━━━━━━
-
-🤖 Mensagem automática enviada por: iMavyAgent
-━━━━━━━━━━━━━━━━━`;
+Mensagem automática — iMavyAgent`;
         
         await sock.sendMessage(groupId, { 
             text: welcomeText,

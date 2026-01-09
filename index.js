@@ -426,18 +426,24 @@ async function startBot() {
             }
 
             // 4.2. MODERAÇÃO
-            // Verificar se é admin do grupo
-            let isGroupAdmin = false;
+            // Verificar se é admin do bot ou do grupo
+            let isUserAdmin = false;
             try {
+                // Verificar se é admin do bot
+                const isBotAdmin = await isAuthorized(senderId);
+                
+                // Verificar se é admin do grupo
                 const groupMetadata = await sock.groupMetadata(chatId);
                 const participant = groupMetadata.participants.find(p => p.id === senderId);
-                isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+                const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+                
+                isUserAdmin = isBotAdmin || isGroupAdmin;
             } catch (e) {}
             
-            // Admins podem falar tudo
-            if (isGroupAdmin) continue;
+            // Admins podem enviar links e mensagens repetidas
+            if (isUserAdmin) continue;
             
-            const violation = checkViolation(messageText, isGroupAdmin);
+            const violation = checkViolation(messageText, senderId, isUserAdmin);
             let aiViolation = null;
 
             if (isAIEnabled() && messageText.length > 10 && !violation.violated) {

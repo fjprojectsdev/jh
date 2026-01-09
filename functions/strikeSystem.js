@@ -27,15 +27,14 @@ export async function applyPunishment(sock, groupId, userId) {
     try {
         if (strikeCount === 1) {
             // 1ª violação: Aviso
-            const avisoMsg = `⚠️ *PRIMEIRO AVISO* ⚠️
+            const avisoMsg = `Aviso de Moderação
 
-@${userNumber}, você recebeu seu primeiro aviso por violar as regras do grupo.
+@${userNumber}, foi registrado um aviso por violação das regras do grupo.
 
-> 📌 Strikes: 1/3
-> ⚠️ Não viole regras
-> 🚫 3 violações: Expulsão automática do grupo
+• Strikes: 1 de 3
+• Atingir 3 avisos resulta em remoção automática
 
-🛂 *Por favor, respeite as regras!*`;
+Consulte as regras para evitar novas ocorrências.`;
 
             await sock.sendMessage(groupId, { 
                 text: avisoMsg,
@@ -46,15 +45,14 @@ export async function applyPunishment(sock, groupId, userId) {
 
         } else if (strikeCount === 2) {
             // 2ª violação: Aviso severo
-            const avisoMsg = `🚨 *SEGUNDO AVISO - ÚLTIMA CHANCE* 🚨
+            const avisoMsg = `Aviso de Moderação — Atenção
 
-@${userNumber}, você recebeu seu segundo aviso!
+@${userNumber}, este é o seu segundo aviso.
 
-📌 *Strikes:* 2/3
-⚠️ *Próxima violação:* EXPULSÃO AUTOMÁTICA DO GRUPO
-🚫 *Esta é sua última chance!*
+• Strikes: 2 de 3
+• Próxima violação: remoção automática do grupo
 
-Respeite as regras ou será removido permanentemente!`;
+Recomendamos atenção total às regras para evitar penalidades.`;
 
             await sock.sendMessage(groupId, { 
                 text: avisoMsg,
@@ -65,15 +63,15 @@ Respeite as regras ou será removido permanentemente!`;
             
         } else if (strikeCount >= 3) {
             // 3ª violação: Expulsão
-            const avisoMsg = `🚫 *EXPULSÃO AUTOMÁTICA* 🚫
+            const avisoMsg = `Ação de Moderação Executada
 
-@${userNumber} foi expulso do grupo por acumular 3 violações.
+@${userNumber} foi removido do grupo após atingir o limite de avisos.
 
-📌 *Strikes:* 3/3
-⚠️ *Motivo:* Múltiplas violações das regras
-🚫 *Ação:* Expulsão permanente
+• Strikes: 3 de 3
+• Motivo: Violação recorrente das regras
+• Ação: Remoção automática
 
-As regras existem para manter a ordem do grupo!`;
+Esta medida visa preservar a ordem e a qualidade do grupo.`;
 
             await sock.sendMessage(groupId, { 
                 text: avisoMsg,
