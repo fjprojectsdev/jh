@@ -312,7 +312,7 @@ export async function handleGroupMessages(sock, message) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario')) {
         
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -447,6 +447,13 @@ ${messageToPin}
                     await mentionAllInvisible(sock, groupId, avisoMsg);
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/aviso sua mensagem`' });
+                }
+            } else if (normalizedText.startsWith('/todos')) {
+                const msg = text.replace(/\/todos/i, '').trim();
+                if (msg) {
+                    await mentionAllInvisible(sock, groupId, msg);
+                } else {
+                    await mentionAllInvisible(sock, groupId, 'Atenção membros do grupo.');
                 }
             } else if (normalizedText.startsWith('/link')) {
                 try {
