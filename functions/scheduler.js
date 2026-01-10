@@ -44,7 +44,7 @@ export function scheduleGroupMessages(sock) {
                 if (allowedGroups.includes(group.subject)) {
                     await sock.groupSettingUpdate(groupId, 'announcement');
                     await sock.sendMessage(groupId, { 
-                        text: '🌙 *Grupo fechado!* 🌙\n\nO horário de descanso chegou 😴✨\nMensagens estarão desativadas até às 07:00.\nAproveite para recarregar as energias 🔋💤\nNos vemos amanhã! 🌞💬' 
+                        text: 'Grupo Temporariamente Fechado\n\nO envio de mensagens está desativado até 07:00.\n\nA funcionalidade será reativada automaticamente no horário programado.' 
                     });
                     await new Promise(r => setTimeout(r, 2000));
                 }
@@ -67,7 +67,7 @@ export function scheduleGroupMessages(sock) {
                 if (allowedGroups.includes(group.subject)) {
                     await sock.groupSettingUpdate(groupId, 'not_announcement');
                     await sock.sendMessage(groupId, { 
-                        text: '☀️ *Bom dia!* ☀️\n\nO grupo está aberto novamente! 🎉\nVamos começar o dia com energia! 💪✨' 
+                        text: 'Grupo Aberto\n\nAs mensagens foram reativadas.\nDesejamos a todos um excelente dia.' 
                     });
                     await new Promise(r => setTimeout(r, 2000));
                 }
