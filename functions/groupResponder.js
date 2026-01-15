@@ -398,7 +398,7 @@ _Use o comando /comandos ou marque um administrador._ 💬
                 await sock.groupSettingUpdate(groupId, 'announcement');
                 const closeMessage = `Grupo Temporariamente Fechado
 
-O envio de mensagens está desativado até 07:00.
+O envio de mensagens está desativado até 08:00.
 
 A funcionalidade será reativada automaticamente no horário programado.`;
                 await sock.sendMessage(groupId, { text: closeMessage });

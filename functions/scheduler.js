@@ -44,7 +44,7 @@ export function scheduleGroupMessages(sock) {
                 if (allowedGroups.includes(group.subject)) {
                     await sock.groupSettingUpdate(groupId, 'announcement');
                     await sock.sendMessage(groupId, { 
-                        text: 'Grupo Temporariamente Fechado\n\nO envio de mensagens está desativado até 07:00.\n\nA funcionalidade será reativada automaticamente no horário programado.' 
+                        text: 'Grupo Temporariamente Fechado\n\nO envio de mensagens está desativado até 08:00.\n\nA funcionalidade será reativada automaticamente no horário programado.' 
                     });
                     await new Promise(r => setTimeout(r, 2000));
                 }
