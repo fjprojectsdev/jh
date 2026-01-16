@@ -379,14 +379,26 @@ async function startBot() {
             }
 
             // 4.2. MODERAÇÃO MINIMALISTA (2 regras simples)
-            // Verificar se é admin do grupo
+            // Verificar se é admin do bot ou do grupo
             let isUserAdmin = false;
             try {
+                // Verificar se é admin do bot
+                const isBotAdmin = await isAuthorized(senderId);
+                
+                // Verificar se é admin do grupo
                 const groupMetadata = await sock.groupMetadata(chatId);
                 const participant = groupMetadata.participants.find(p => p.id === senderId);
-                isUserAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+                const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+                
+                isUserAdmin = isBotAdmin || isGroupAdmin;
             } catch (e) {
                 console.error('Erro ao verificar admin:', e.message);
+            }
+            
+            // Admins são isentos de moderação
+            if (isUserAdmin) {
+                if (isCommand) continue;
+                continue;
             }
             
             // Aplicar anti-spam (2 regras: repeat + link)
@@ -400,9 +412,8 @@ async function startBot() {
                     console.error('❌ Erro ao deletar:', e.message);
                 }
                 
-                // Adicionar strike
-                await addStrike(senderId, { type: violation.rule, message: messageText });
-                const strikeCount = await getStrikes(senderId);
+                // Adicionar strike e obter contagem atualizada
+                const strikeCount = await addStrike(senderId, { type: violation.rule, message: messageText });
                 
                 // Notificar admins
                 await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount);
