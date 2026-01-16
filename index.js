@@ -310,7 +310,7 @@ async function startBot() {
             
             // Extrair texto usando getText()
             const messageText = getText(message);
-            if (!messageText) continue;
+            if (!messageText || messageText.trim() === '') continue;
 
             // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
             if (!isGroup) {
