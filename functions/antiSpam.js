@@ -51,6 +51,9 @@ function cleanOld(timestamps, now) {
 
 // Verificar violação
 export function checkViolation(messageText, chatId, userId, isAdmin) {
+    // Admins são isentos
+    if (isAdmin) return { violated: false };
+    
     const now = Date.now();
     const normalized = normalize(messageText);
     
