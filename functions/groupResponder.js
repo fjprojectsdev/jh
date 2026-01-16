@@ -3,7 +3,7 @@ import { getGroupStatus } from './groupStats.js';
 
 import { addAllowedGroup, listAllowedGroups, removeAllowedGroup } from './adminCommands.js';
 import { addAdmin, removeAdmin, listAdmins, getAdminStats, isAuthorized } from './authManager.js';
-import { addBannedWord, removeBannedWord, listBannedWords } from './antiSpam.js';
+import { addBannedWord, removeBannedWord, listBannedWords, addPartner, removePartner, listPartners } from './antiSpam.js';
 import { analyzeLeadIntent, getLeads } from './aiSales.js';
 import { analyzeMessage } from './aiModeration.js';
 import { addPromoGroup, removePromoGroup, listPromoGroups, setPromoInterval, togglePromo, getPromoConfig } from './autoPromo.js';
@@ -631,6 +631,30 @@ Um membro foi banido do grupo:
                     await sock.sendMessage(groupId, { text: result.message });
                 } else {
                     await sock.sendMessage(groupId, { text: '❌ Use: `/removertermo palavra ou frase`' });
+                }
+            } else if (normalizedText.startsWith('/adicionarparceiro')) {
+                const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                if (mentionedJids.length > 0) {
+                    const result = addPartner(mentionedJids[0]);
+                    await sock.sendMessage(groupId, { text: result.message });
+                } else {
+                    await sock.sendMessage(groupId, { text: '❌ Use: `/adicionarparceiro @usuario`' });
+                }
+            } else if (normalizedText.startsWith('/removerparceiro')) {
+                const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                if (mentionedJids.length > 0) {
+                    const result = removePartner(mentionedJids[0]);
+                    await sock.sendMessage(groupId, { text: result.message });
+                } else {
+                    await sock.sendMessage(groupId, { text: '❌ Use: `/removerparceiro @usuario`' });
+                }
+            } else if (normalizedText.startsWith('/listarparceiros')) {
+                const partners = listPartners();
+                if (partners.length === 0) {
+                    await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum parceiro cadastrado.' });
+                } else {
+                    const lista = partners.map((p, i) => `${i + 1}. ${p}`).join('\n');
+                    await sock.sendMessage(groupId, { text: `🤝 *PARCEIROS DO GRUPO*\n\n${lista}\n\n📊 Total: ${partners.length}` });
                 }
             } else if (normalizedText.startsWith('/listartermos')) {
                 const termos = listBannedWords();

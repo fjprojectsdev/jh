@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRIKES_FILE = path.join(__dirname, '..', 'strikes.json');
+const PARTNERS_FILE = path.join(__dirname, '..', 'partners.json');
 
 // Cache: userId+chatId -> { textMap: { normalizedText: [timestamps] } }
 const messageCache = new Map();
@@ -102,10 +103,57 @@ export function resetStrikes(chatId, userId) {
     saveStrikes(strikes);
 }
 
+// Carregar parceiros
+function loadPartners() {
+    try {
+        return JSON.parse(fs.readFileSync(PARTNERS_FILE, 'utf8'));
+    } catch {
+        return [];
+    }
+}
+
+// Salvar parceiros
+function savePartners(partners) {
+    fs.writeFileSync(PARTNERS_FILE, JSON.stringify(partners, null, 2));
+}
+
+// Verificar se é parceiro
+export function isPartner(userId) {
+    const partners = loadPartners();
+    return partners.includes(userId);
+}
+
+// Adicionar parceiro
+export function addPartner(userId) {
+    const partners = loadPartners();
+    if (partners.includes(userId)) {
+        return { success: false, message: 'Este usuário já é parceiro.' };
+    }
+    partners.push(userId);
+    savePartners(partners);
+    return { success: true, message: 'Parceiro adicionado com sucesso.' };
+}
+
+// Remover parceiro
+export function removePartner(userId) {
+    const partners = loadPartners();
+    const filtered = partners.filter(p => p !== userId);
+    if (filtered.length === partners.length) {
+        return { success: false, message: 'Parceiro não encontrado.' };
+    }
+    savePartners(filtered);
+    return { success: true, message: 'Parceiro removido com sucesso.' };
+}
+
+// Listar parceiros
+export function listPartners() {
+    return loadPartners();
+}
+
 // Verificar violação
 export function checkViolation(messageText, chatId, userId, isAdmin) {
-    // Admins são isentos
-    if (isAdmin) return { violated: false };
+    // Admins e parceiros são isentos
+    if (isAdmin || isPartner(userId)) return { violated: false };
     
     const now = Date.now();
     const normalized = normalize(messageText);
