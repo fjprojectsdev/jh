@@ -53,11 +53,10 @@ export async function isAuthorized(senderId) {
     console.log('🔍 DEBUG AUTH - senderId:', senderId);
     console.log('🔍 DEBUG AUTH - getNumberFromJid:', getNumberFromJid(senderId));
 
-    // 0. Admin hardcoded (fallback) - TODOS os formatos possíveis
+    // 0. Admin hardcoded (fallback)
     const hardcodedAdmins = [
         '556993613476@s.whatsapp.net', 
-        '5569993613476@s.whatsapp.net', 
-        '225919675449527@lid'
+        '5569993613476@s.whatsapp.net'
     ];
     
     for (const adminId of hardcodedAdmins) {
