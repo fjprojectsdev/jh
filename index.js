@@ -438,11 +438,13 @@ async function startBot() {
                 const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
                 
                 isUserAdmin = isBotAdmin || isGroupAdmin;
-            } catch (e) {}
+                
+                console.log(`🔍 Moderação - User: ${senderId.split('@')[0]} | Admin: ${isUserAdmin}`);
+            } catch (e) {
+                console.error('Erro ao verificar admin:', e.message);
+            }
             
-            // Admins podem enviar links e mensagens repetidas
-            if (isUserAdmin) continue;
-            
+            // Verificar violação (admins são isentos internamente)
             const violation = checkViolation(messageText, senderId, isUserAdmin);
             let aiViolation = null;
 
@@ -463,17 +465,28 @@ async function startBot() {
             const finalViolation = violation.violated ? violation : aiViolation;
 
             if (finalViolation?.violated) {
-                console.log('🚨 VIOLAÇÃO:', finalViolation.type);
+                console.log('🚨 VIOLAÇÃO DETECTADA:', finalViolation.type);
+                console.log('📝 Mensagem:', messageText);
+                console.log('👤 Usuário:', senderId);
                 
                 try {
+                    console.log('🗑️ Tentando deletar mensagem...');
                     await sock.sendMessage(chatId, { delete: message.key });
+                    console.log('✅ Mensagem deletada');
                 } catch (e) {
-                    console.error('Erro ao deletar:', e.message);
+                    console.error('❌ Erro ao deletar:', e.message);
                 }
                 
-                await notifyAdmins(sock, chatId, { userId: senderId, message: messageText });
+                console.log('📧 Notificando admins...');
+                await notifyAdmins(sock, chatId, { userId: senderId, message: messageText, type: finalViolation.type });
+                
+                console.log('⚠️ Adicionando strike...');
                 await addStrike(senderId, { type: finalViolation.type, message: messageText });
+                
+                console.log('🚫 Aplicando punição...');
                 await applyPunishment(sock, chatId, senderId);
+                
+                console.log('✅ Moderação concluída\n');
                 continue;
             }
         }
