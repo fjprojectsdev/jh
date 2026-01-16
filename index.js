@@ -427,27 +427,6 @@ async function startBot() {
                 // Bloquear processamento de comandos
                 continue;
             }
-
-            if (violation.violated) {
-                // Deletar mensagem
-                try {
-                    await sock.sendMessage(chatId, { delete: message.key });
-                } catch (e) {
-                    console.error('❌ Erro ao deletar:', e.message);
-                }
-                
-                // Adicionar strike e obter contagem atualizada
-                const strikeCount = await addStrike(senderId, { type: violation.rule, message: messageText });
-                
-                // Notificar admins
-                await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount);
-                
-                // Aplicar punição (avisos ou expulsão)
-                await applyPunishment(sock, chatId, senderId);
-                
-                // Bloquear processamento (não executar comandos)
-                continue;
-            }
             
             // Se foi comando e não violou, já foi processado
             if (isCommand) {
