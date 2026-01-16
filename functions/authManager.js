@@ -59,9 +59,19 @@ export async function isAuthorized(senderId) {
         '5569993613476@s.whatsapp.net'
     ];
     
+    // Comparação EXATA de JID primeiro
+    if (hardcodedAdmins.includes(senderId)) {
+        console.log('✅ DEBUG AUTH - AUTORIZADO por hardcoded (exato):', senderId);
+        return true;
+    }
+    
+    // Comparação por número (fallback)
+    const senderNumber = getNumberFromJid(senderId);
     for (const adminId of hardcodedAdmins) {
-        if (senderId === adminId || getNumberFromJid(senderId) === getNumberFromJid(adminId)) {
-            console.log('✅ DEBUG AUTH - AUTORIZADO por hardcoded:', adminId);
+        const adminNumber = getNumberFromJid(adminId);
+        console.log('🔍 DEBUG AUTH - Comparando:', senderNumber, 'vs', adminNumber);
+        if (senderNumber === adminNumber && senderNumber.length > 0) {
+            console.log('✅ DEBUG AUTH - AUTORIZADO por número:', adminId);
             return true;
         }
     }
