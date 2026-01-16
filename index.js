@@ -315,69 +315,21 @@ async function startBot() {
             
             if (typeof messageText !== 'string') continue;
 
-            // ========== 3. FLUXO PRIVADO (VENDAS) ==========
+            // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
             if (!isGroup) {
-                console.log('📱 FLUXO PRIVADO:', senderId);
-                console.log('🤖 IA Vendas Status:', isAISalesEnabled());
-                console.log('📝 Mensagem:', messageText);
-                
                 // Comando /dev (ativar modo desenvolvedor)
                 if (messageText.startsWith('/dev')) {
-                    console.log('🛠️ COMANDO /dev detectado');
                     await handleDevCommand(sock, message, messageText);
                     continue;
                 }
                 
                 // Modo desenvolvedor ativo
                 if (isDevModeActive(senderId)) {
-                    console.log('🛠️ MODO DEV ATIVO:', senderId);
                     await handleDevConversation(sock, senderId, messageText);
                     continue;
                 }
                 
-                // Delay humanizado (2-5 segundos)
-                const humanDelay = Math.floor(Math.random() * 3000) + 2000;
-                await new Promise(resolve => setTimeout(resolve, humanDelay));
-                
-                // Comando direto para atendente
-                if (messageText.toLowerCase().trim() === '/valores') {
-                    await sock.sendMessage(senderId, { text: '✅ Recebemos sua solicitação! Um atendente entrará em contato em breve.' });
-                    await notifyAttendants(sock, senderId, senderId.split('@')[0], getAdmins);
-                    continue;
-                }
-                
-                // IA para qualificar lead
-                if (isAISalesEnabled()) {
-                    console.log('✅ Iniciando análise de IA...');
-                    try {
-                        const aiResponse = await Promise.race([
-                            analyzeLeadIntent(messageText, senderId),
-                            new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 5000))
-                        ]);
-                        
-                        console.log('💼 IA Resposta:', JSON.stringify(aiResponse));
-                        
-                        await sock.sendMessage(senderId, { text: aiResponse.response });
-                        console.log('✅ Mensagem enviada com sucesso');
-                        
-                        // Se cliente demonstrou interesse alto, notificar atendentes
-                        if (aiResponse.needsHuman || (aiResponse.intent === 'interested' && aiResponse.confidence > 70)) {
-                            await notifyAttendants(sock, senderId, senderId.split('@')[0], getAdmins);
-                        }
-                        
-                        continue;
-                    } catch (e) {
-                        console.error('❌ IA de vendas - ERRO:', e.message);
-                        console.error('Stack:', e.stack);
-                    }
-                } else {
-                    console.log('⚠️ IA DESABILITADA - usando resposta padrão');
-                }
-                
-                // Fallback: resposta padrão
-                await sock.sendMessage(senderId, { 
-                    text: '👋 Olá! Sou o iMavyAgent.\n\nDigite */valores* para falar com um atendente.' 
-                });
+                // Ignorar mensagens privadas (atendimento desabilitado)
                 continue;
             }
 
