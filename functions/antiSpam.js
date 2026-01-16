@@ -146,6 +146,7 @@ export function checkViolation(messageText, chatId, userId, isAdmin) {
 export async function notifyAdmins(sock, chatId, userId, rule, strikeCount, messageText, error = null) {
     try {
         const groupMetadata = await sock.groupMetadata(chatId);
+        const groupName = groupMetadata.subject;
         const admins = groupMetadata.participants.filter(p => p.admin).map(p => p.id);
         
         const userNumber = userId.split('@')[0];
@@ -153,6 +154,7 @@ export async function notifyAdmins(sock, chatId, userId, rule, strikeCount, mess
         
         let adminMessage = `🚨 Anti-Spam
 
+Grupo: ${groupName}
 Usuário: ${userNumber}
 Regra: ${ruleText}
 Mensagem: "${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}"
@@ -162,8 +164,20 @@ Strikes: ${strikeCount}/3`;
             adminMessage += `\n\n⚠️ ${error}`;
         }
         
+        // Admin especial: 225919675449527@lid - apenas grupos CriptoNoPix
+        const specialAdmin = '225919675449527@lid';
+        const allowedGroups = ['CriptoNoPix é Vellora (1)', 'CriptoNoPix é Vellora (2)'];
+        
         for (const adminId of admins) {
-            await sock.sendMessage(adminId, { text: adminMessage });
+            // Se for o admin especial, verificar grupo
+            if (adminId === specialAdmin) {
+                if (allowedGroups.includes(groupName)) {
+                    await sock.sendMessage(adminId, { text: adminMessage });
+                }
+            } else {
+                // Outros admins recebem de todos os grupos
+                await sock.sendMessage(adminId, { text: adminMessage });
+            }
         }
     } catch (error) {
         console.error('Erro ao notificar admins:', error);
