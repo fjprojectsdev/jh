@@ -397,12 +397,10 @@ async function startBot() {
                 console.log(`🚨 VIOLAÇÃO: ${violation.rule} - User: ${senderId}`);
                 
                 // Deletar mensagem
-                let deleteError = null;
                 try {
                     await sock.sendMessage(chatId, { delete: message.key });
                     console.log('✅ Mensagem deletada');
                 } catch (e) {
-                    deleteError = `Não consegui apagar a mensagem (sem permissão).`;
                     console.error('❌ Erro ao deletar:', e.message);
                 }
                 
@@ -420,9 +418,6 @@ async function startBot() {
                 } catch (e) {
                     console.error('❌ Erro ao enviar aviso:', e.message);
                 }
-                
-                // Notificar admins
-                await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount, messageText, deleteError);
                 
                 // Aplicar punição se 3/3
                 if (strikeCount >= 3) {
