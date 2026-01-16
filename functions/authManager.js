@@ -57,8 +57,7 @@ export async function isAuthorized(senderId) {
     const hardcodedAdmins = [
         '556993613476@s.whatsapp.net', 
         '5569993613476@s.whatsapp.net', 
-        '225919675449527@lid',
-        senderId // Adicionar o próprio senderId como admin temporariamente
+        '225919675449527@lid'
     ];
     
     for (const adminId of hardcodedAdmins) {
