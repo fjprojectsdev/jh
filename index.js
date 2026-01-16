@@ -9,8 +9,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendWelcomeMessage } from './functions/welcomeMessage.js';
-import { checkViolation, notifyAdmins } from './functions/antiSpam.js';
-import { addStrike, applyPunishment } from './functions/strikeSystem.js';
+import { checkViolation, getText, notifyAdmins } from './functions/antiSpam.js';
+import { addStrike, applyPunishment, getStrikes } from './functions/strikeSystem.js';
 import { getGroupStatus } from './functions/groupStats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -309,11 +309,9 @@ async function startBot() {
             const senderId = message.key.participant || message.key.remoteJid;
             const chatId = message.key.remoteJid;
             
-            const contentType = getContentType(message.message);
-            const content = message.message[contentType];
-            const messageText = content?.text || content;
-            
-            if (typeof messageText !== 'string') continue;
+            // Extrair texto usando getText()
+            const messageText = getText(message);
+            if (!messageText) continue;
 
             // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
             if (!isGroup) {
@@ -380,91 +378,39 @@ async function startBot() {
                 // NÃO continue aqui - deixar moderação rodar
             }
 
-            // 4.2. MODERAÇÃO (SEMPRE roda, mesmo para comandos)
-            // Verificar se é admin do bot ou do grupo
+            // 4.2. MODERAÇÃO MINIMALISTA (2 regras simples)
+            // Verificar se é admin do grupo
             let isUserAdmin = false;
             try {
-                // Verificar se é admin do bot
-                const isBotAdmin = await isAuthorized(senderId);
-                
-                // Verificar se é admin do grupo
                 const groupMetadata = await sock.groupMetadata(chatId);
                 const participant = groupMetadata.participants.find(p => p.id === senderId);
-                const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
-                
-                isUserAdmin = isBotAdmin || isGroupAdmin;
-                
-                console.log(`🔍 Moderação - User: ${senderId.split('@')[0]} | Admin: ${isUserAdmin}`);
+                isUserAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
             } catch (e) {
                 console.error('Erro ao verificar admin:', e.message);
             }
             
-            // Verificar violação (admins são isentos internamente)
+            // Aplicar anti-spam (2 regras: repeat + link)
             const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
-            let aiViolation = null;
 
-            if (isAIEnabled() && messageText.length > 10 && !violation.violated) {
+            if (violation.violated) {
+                // Deletar mensagem
                 try {
-                    const aiResult = await Promise.race([
-                        analyzeMessage(messageText),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('AI timeout')), 5000))
-                    ]);
-                    if (!aiResult.safe) {
-                        aiViolation = { violated: true, type: `IA: ${aiResult.reason}` };
-                    }
-                } catch (e) {
-                    console.warn('⚠️ IA timeout/erro:', e.message);
-                }
-            }
-
-            const finalViolation = violation.violated ? violation : aiViolation;
-
-            if (finalViolation?.violated) {
-                console.log('🚨 VIOLAÇÃO DETECTADA:', finalViolation.type);
-                console.log('📝 Mensagem:', messageText);
-                console.log('👤 Usuário:', senderId);
-                console.log('📊 Regra:', finalViolation.rule || 'UNKNOWN');
-                
-                try {
-                    console.log('🗑️ Tentando deletar mensagem...');
                     await sock.sendMessage(chatId, { delete: message.key });
-                    console.log('✅ Mensagem deletada');
                 } catch (e) {
                     console.error('❌ Erro ao deletar:', e.message);
-                    // Se não conseguir deletar, notificar admins
-                    await notifyAdmins(sock, chatId, { 
-                        userId: senderId, 
-                        message: messageText, 
-                        type: `${finalViolation.type} (BOT SEM PERMISSÃO PARA DELETAR)` 
-                    });
                 }
                 
-                console.log('📧 Notificando admins...');
-                await notifyAdmins(sock, chatId, { userId: senderId, message: messageText, type: finalViolation.type });
+                // Adicionar strike
+                await addStrike(senderId, { type: violation.rule, message: messageText });
+                const strikeCount = await getStrikes(senderId);
                 
-                console.log('⚠️ Adicionando strike...');
-                await addStrike(senderId, { type: finalViolation.type, message: messageText });
+                // Notificar admins
+                await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount);
                 
-                console.log('🚫 Aplicando punição...');
-                try {
-                    await applyPunishment(sock, chatId, senderId);
-                } catch (e) {
-                    console.error('❌ Erro ao aplicar punição:', e.message);
-                    // Se não conseguir banir, notificar admins
-                    await notifyAdmins(sock, chatId, { 
-                        userId: senderId, 
-                        message: `ATENÇÃO: Usuário atingiu 3 strikes mas bot não tem permissão para remover.`, 
-                        type: 'ERRO DE PERMISSÃO' 
-                    });
-                }
+                // Aplicar punição (avisos ou expulsão)
+                await applyPunishment(sock, chatId, senderId);
                 
-                console.log('✅ Moderação concluída\n');
-                
-                // Se foi comando, já foi processado - apenas aplicar moderação
-                if (isCommand) {
-                    continue;
-                }
-                
+                // Bloquear processamento (não executar comandos)
                 continue;
             }
             

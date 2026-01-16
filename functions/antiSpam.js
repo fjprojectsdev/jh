@@ -1,3 +1,4 @@
+// Anti-spam minimalista - 2 regras simples
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -5,12 +6,93 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BANNED_FILE = path.join(__dirname, '..', 'banned_words.json');
 
-// Cache de mensagens por usuário
-const userMessageCache = new Map(); // chatId+userId -> { times: [], repeatMap: {} }
-const SPAM_WINDOW = 10000; // 10 segundos
-const MAX_FLOOD = 8; // Máximo de mensagens em 10s
-const MAX_REPEAT = 4; // Máximo de mensagens iguais em 10s
+// Cache simples: userId+chatId -> { textMap: { normalizedText: [timestamps] } }
+const userCache = new Map();
+const WINDOW = 10000; // 10 segundos
+const MAX_REPEAT = 3; // 3 mensagens iguais
 
+// Extrair texto de qualquer tipo de mensagem
+export function getText(msg) {
+    if (!msg?.message) return '';
+    
+    const content = msg.message;
+    
+    // Texto direto
+    if (content.conversation) return content.conversation;
+    if (content.extendedTextMessage?.text) return content.extendedTextMessage.text;
+    
+    // Caption de mídia
+    if (content.imageMessage?.caption) return content.imageMessage.caption;
+    if (content.videoMessage?.caption) return content.videoMessage.caption;
+    
+    return '';
+}
+
+// Normalizar texto
+function normalize(text) {
+    if (!text || typeof text !== 'string') return '';
+    return text.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+// Detectar link
+function hasLink(text) {
+    const patterns = [
+        /https?:\/\/\S+/i,
+        /www\.\S+/i,
+        /\b[a-z0-9-]+\.(com|com\.br|br|net|org|app|io|gg|me)\b/i
+    ];
+    return patterns.some(p => p.test(text));
+}
+
+// Limpar timestamps antigos
+function cleanOld(timestamps, now) {
+    return timestamps.filter(t => now - t < WINDOW);
+}
+
+// Verificar violação
+export function checkViolation(messageText, chatId, userId, isAdmin) {
+    const now = Date.now();
+    const normalized = normalize(messageText);
+    
+    // REGRA 2: Anti-link (apenas não-admins)
+    if (!isAdmin && hasLink(messageText)) {
+        console.log(`🚫 LINK bloqueado: ${userId} em ${chatId}`);
+        return { violated: true, rule: 'LINK' };
+    }
+    
+    // REGRA 1: Anti-repeat (apenas se tiver texto)
+    if (!normalized) return { violated: false };
+    
+    const key = `${chatId}:${userId}`;
+    if (!userCache.has(key)) {
+        userCache.set(key, { textMap: {} });
+    }
+    
+    const cache = userCache.get(key);
+    if (!cache.textMap[normalized]) {
+        cache.textMap[normalized] = [];
+    }
+    
+    // Limpar antigos
+    cache.textMap[normalized] = cleanOld(cache.textMap[normalized], now);
+    
+    // Contar repetições (incluindo a atual)
+    const count = cache.textMap[normalized].length + 1;
+    
+    if (count >= MAX_REPEAT) {
+        console.log(`🔁 REPEAT bloqueado: ${userId} (${count}x) em ${chatId}`);
+        // Limpar cache desse texto para resetar contador
+        delete cache.textMap[normalized];
+        return { violated: true, rule: 'REPEAT' };
+    }
+    
+    // Adicionar timestamp
+    cache.textMap[normalized].push(now);
+    
+    return { violated: false };
+}
+
+// Funções de palavras banidas (manter compatibilidade)
 function loadBannedWords() {
     try {
         return JSON.parse(fs.readFileSync(BANNED_FILE, 'utf8'));
@@ -21,172 +103,6 @@ function loadBannedWords() {
 
 function saveBannedWords(words) {
     fs.writeFileSync(BANNED_FILE, JSON.stringify(words, null, 2));
-}
-
-// Normalizar texto para comparação
-function normalizeText(text) {
-    if (!text || typeof text !== 'string') return '';
-    return text.trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-// Limpar timestamps antigos
-function cleanOldTimestamps(timestamps, now) {
-    return timestamps.filter(t => now - t < SPAM_WINDOW);
-}
-
-// Obter cache do usuário
-function getUserCache(chatId, userId) {
-    const key = `${chatId}:${userId}`;
-    if (!userMessageCache.has(key)) {
-        userMessageCache.set(key, { times: [], repeatMap: {} });
-    }
-    return userMessageCache.get(key);
-}
-
-// Limpar cache periodicamente
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, cache] of userMessageCache.entries()) {
-        cache.times = cleanOldTimestamps(cache.times, now);
-        for (const text in cache.repeatMap) {
-            cache.repeatMap[text] = cleanOldTimestamps(cache.repeatMap[text], now);
-            if (cache.repeatMap[text].length === 0) {
-                delete cache.repeatMap[text];
-            }
-        }
-        if (cache.times.length === 0 && Object.keys(cache.repeatMap).length === 0) {
-            userMessageCache.delete(key);
-        }
-    }
-}, 30000); // Limpar a cada 30s
-
-export function checkViolation(messageText, chatId, senderId, isAdmin = false) {
-    const now = Date.now();
-    const normalizedText = normalizeText(messageText);
-    const cache = getUserCache(chatId, senderId);
-    
-    // Limpar timestamps antigos
-    cache.times = cleanOldTimestamps(cache.times, now);
-    
-    const auditLog = {
-        chatId,
-        userId: senderId,
-        isAdmin,
-        text: messageText.substring(0, 100),
-        timestamp: new Date().toISOString(),
-        ruleTriggered: null,
-        counts: {},
-        actionTaken: 'IGNORE'
-    };
-    
-    // 1. VERIFICAR LINKS (apenas para não-admins)
-    if (!isAdmin) {
-        const linkPatterns = [
-            /https?:\/\/[^\s]+/gi,
-            /www\.[^\s]+/gi,
-            /[a-z0-9-]+\.(com|net|org|br|io|app|me|link|site|online|store|shop|xyz|top|click|info|co)[^\s]*/gi,
-            /wa\.me\/[^\s]+/gi,
-            /chat\.whatsapp\.com\/[^\s]+/gi,
-            /t\.me\/[^\s]+/gi,
-            /instagram\.com\/[^\s]*/gi,
-            /facebook\.com\/[^\s]*/gi,
-            /twitter\.com\/[^\s]*/gi,
-            /tiktok\.com\/[^\s]*/gi
-        ];
-        
-        for (const pattern of linkPatterns) {
-            if (pattern.test(messageText)) {
-                auditLog.ruleTriggered = 'LINK';
-                auditLog.actionTaken = 'DELETE+STRIKE';
-                console.log('🚨 AUDIT:', JSON.stringify(auditLog));
-                return { violated: true, type: 'link não autorizado', rule: 'LINK' };
-            }
-        }
-    } else {
-        // Admin enviou link - permitir mas logar
-        const hasLink = /https?:\/\/|www\.|\.(com|net|org|br|io)/i.test(messageText);
-        if (hasLink) {
-            console.log(`✅ ADMIN link allowed: ${senderId} in ${chatId}`);
-        }
-    }
-    
-    // 2. VERIFICAR FLOOD (volume de mensagens)
-    if (!isAdmin) {
-        const floodCount = cache.times.length + 1; // +1 para a mensagem atual
-        auditLog.counts.flood = floodCount;
-        
-        if (floodCount >= MAX_FLOOD) {
-            auditLog.ruleTriggered = 'FLOOD';
-            auditLog.actionTaken = 'DELETE+STRIKE';
-            console.log('🚨 AUDIT:', JSON.stringify(auditLog));
-            return { violated: true, type: 'flood de mensagens', rule: 'FLOOD' };
-        }
-    }
-    
-    // 3. VERIFICAR REPEAT (mensagens iguais)
-    if (!isAdmin && normalizedText.length > 0) {
-        if (!cache.repeatMap[normalizedText]) {
-            cache.repeatMap[normalizedText] = [];
-        }
-        cache.repeatMap[normalizedText] = cleanOldTimestamps(cache.repeatMap[normalizedText], now);
-        
-        const repeatCount = cache.repeatMap[normalizedText].length + 1; // +1 para a mensagem atual
-        auditLog.counts.repeat = repeatCount;
-        
-        if (repeatCount >= MAX_REPEAT) {
-            auditLog.ruleTriggered = 'REPEAT';
-            auditLog.actionTaken = 'DELETE+STRIKE';
-            console.log('🚨 AUDIT:', JSON.stringify(auditLog));
-            return { violated: true, type: 'spam de repetição', rule: 'REPEAT' };
-        }
-        
-        // Adicionar timestamp para repeat
-        cache.repeatMap[normalizedText].push(now);
-    }
-    
-    // 4. VERIFICAR TERMOS PROIBIDOS (se houver)
-    const bannedWords = loadBannedWords();
-    const lowerText = messageText.toLowerCase();
-    for (const term of bannedWords) {
-        if (lowerText.includes(term.toLowerCase())) {
-            auditLog.ruleTriggered = 'BANNED_WORD';
-            auditLog.actionTaken = 'DELETE+STRIKE';
-            console.log('🚨 AUDIT:', JSON.stringify(auditLog));
-            return { violated: true, type: `termo proibido: "${term}"`, rule: 'BANNED_WORD' };
-        }
-    }
-    
-    // Adicionar timestamp para flood
-    cache.times.push(now);
-    
-    // Nenhuma violação
-    console.log('✅ AUDIT:', JSON.stringify(auditLog));
-    return { violated: false };
-}
-
-export async function notifyAdmins(sock, groupId, violationData) {
-    try {
-        const groupMetadata = await sock.groupMetadata(groupId);
-        const admins = groupMetadata.participants.filter(p => p.admin).map(p => p.id);
-        
-        const userNumber = violationData.userId.split('@')[0];
-        const dateTime = new Date().toLocaleString('pt-BR');
-        
-        const adminMessage = `Alerta de Moderação
-
-Usuário: ${userNumber}
-Data/Hora: ${dateTime}
-Tipo: ${violationData.type || 'Violação detectada'}
-
-Mensagem bloqueada:
-${violationData.message}`;
-        
-        for (const adminId of admins) {
-            await sock.sendMessage(adminId, { text: adminMessage });
-        }
-    } catch (error) {
-        console.error('Erro ao notificar admins:', error);
-    }
 }
 
 export function addBannedWord(word) {
@@ -218,4 +134,28 @@ export function removeBannedWord(word) {
 
 export function listBannedWords() {
     return loadBannedWords();
+}
+
+export async function notifyAdmins(sock, groupId, userId, rule, strikeCount) {
+    try {
+        const groupMetadata = await sock.groupMetadata(groupId);
+        const admins = groupMetadata.participants.filter(p => p.admin).map(p => p.id);
+        
+        const userNumber = userId.split('@')[0];
+        const ruleText = rule === 'REPEAT' ? 'Repetição de mensagens' : 'Envio de link não autorizado';
+        
+        const adminMessage = `🚨 Alerta de Moderação
+
+Usuário: ${userNumber}
+Regra: ${ruleText}
+Strikes: ${strikeCount}/3
+
+${strikeCount === 3 ? '⚠️ Usuário será removido automaticamente.' : ''}`;
+        
+        for (const adminId of admins) {
+            await sock.sendMessage(adminId, { text: adminMessage });
+        }
+    } catch (error) {
+        console.error('Erro ao notificar admins:', error);
+    }
 }
