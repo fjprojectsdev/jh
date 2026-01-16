@@ -363,8 +363,10 @@ async function startBot() {
 
             console.log('✅ Grupo autorizado:', groupSubject);
 
-            // 4.1. COMANDOS (prioridade máxima)
-            if (messageText.startsWith('/')) {
+            // 4.1. COMANDOS (prioridade máxima - mas moderação SEMPRE roda)
+            const isCommand = messageText.startsWith('/');
+            
+            if (isCommand) {
                 console.log('⚡ COMANDO detectado:', messageText.split(' ')[0]);
                 
                 // Comando DEV (funciona em grupo e privado)
@@ -373,11 +375,12 @@ async function startBot() {
                     continue;
                 }
                 
+                // Processar comando
                 await handleGroupMessages(sock, message);
-                continue;
+                // NÃO continue aqui - deixar moderação rodar
             }
 
-            // 4.2. MODERAÇÃO
+            // 4.2. MODERAÇÃO (SEMPRE roda, mesmo para comandos)
             // Verificar se é admin do bot ou do grupo
             let isUserAdmin = false;
             try {
@@ -397,7 +400,7 @@ async function startBot() {
             }
             
             // Verificar violação (admins são isentos internamente)
-            const violation = checkViolation(messageText, senderId, isUserAdmin);
+            const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
             let aiViolation = null;
 
             if (isAIEnabled() && messageText.length > 10 && !violation.violated) {
@@ -420,6 +423,7 @@ async function startBot() {
                 console.log('🚨 VIOLAÇÃO DETECTADA:', finalViolation.type);
                 console.log('📝 Mensagem:', messageText);
                 console.log('👤 Usuário:', senderId);
+                console.log('📊 Regra:', finalViolation.rule || 'UNKNOWN');
                 
                 try {
                     console.log('🗑️ Tentando deletar mensagem...');
@@ -427,6 +431,12 @@ async function startBot() {
                     console.log('✅ Mensagem deletada');
                 } catch (e) {
                     console.error('❌ Erro ao deletar:', e.message);
+                    // Se não conseguir deletar, notificar admins
+                    await notifyAdmins(sock, chatId, { 
+                        userId: senderId, 
+                        message: messageText, 
+                        type: `${finalViolation.type} (BOT SEM PERMISSÃO PARA DELETAR)` 
+                    });
                 }
                 
                 console.log('📧 Notificando admins...');
@@ -436,9 +446,30 @@ async function startBot() {
                 await addStrike(senderId, { type: finalViolation.type, message: messageText });
                 
                 console.log('🚫 Aplicando punição...');
-                await applyPunishment(sock, chatId, senderId);
+                try {
+                    await applyPunishment(sock, chatId, senderId);
+                } catch (e) {
+                    console.error('❌ Erro ao aplicar punição:', e.message);
+                    // Se não conseguir banir, notificar admins
+                    await notifyAdmins(sock, chatId, { 
+                        userId: senderId, 
+                        message: `ATENÇÃO: Usuário atingiu 3 strikes mas bot não tem permissão para remover.`, 
+                        type: 'ERRO DE PERMISSÃO' 
+                    });
+                }
                 
                 console.log('✅ Moderação concluída\n');
+                
+                // Se foi comando, já foi processado - apenas aplicar moderação
+                if (isCommand) {
+                    continue;
+                }
+                
+                continue;
+            }
+            
+            // Se foi comando e não violou, já foi processado
+            if (isCommand) {
                 continue;
             }
         }
