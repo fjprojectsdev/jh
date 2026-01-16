@@ -9,8 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendWelcomeMessage } from './functions/welcomeMessage.js';
-import { checkViolation, getText, notifyAdmins } from './functions/antiSpam.js';
-import { addStrike, applyPunishment, getStrikes } from './functions/strikeSystem.js';
+import { checkViolation, getText, notifyAdmins, addStrike, getStrikes, applyPunishment } from './functions/antiSpam.js';
 import { getGroupStatus } from './functions/groupStats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -378,44 +377,59 @@ async function startBot() {
                 // NÃO continue aqui - deixar moderação rodar
             }
 
-            // 4.2. MODERAÇÃO MINIMALISTA (2 regras simples)
+            // 4.2. MODERAÇÃO MINIMALISTA (2 regras: REPEAT + LINK)
             // Verificar se é admin do bot ou do grupo
             let isUserAdmin = false;
             try {
-                // Verificar se é admin do bot
                 const isBotAdmin = await isAuthorized(senderId);
-                
-                // Verificar se é admin do grupo
                 const groupMetadata = await sock.groupMetadata(chatId);
                 const participant = groupMetadata.participants.find(p => p.id === senderId);
                 const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
-                
                 isUserAdmin = isBotAdmin || isGroupAdmin;
             } catch (e) {
                 console.error('Erro ao verificar admin:', e.message);
             }
             
-            // Aplicar anti-spam (2 regras: repeat + link)
+            // Aplicar anti-spam
             const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
 
             if (violation.violated) {
+                console.log(`🚨 VIOLAÇÃO: ${violation.rule} - User: ${senderId}`);
+                
                 // Deletar mensagem
+                let deleteError = null;
                 try {
                     await sock.sendMessage(chatId, { delete: message.key });
+                    console.log('✅ Mensagem deletada');
                 } catch (e) {
+                    deleteError = `Não consegui apagar a mensagem (sem permissão).`;
                     console.error('❌ Erro ao deletar:', e.message);
                 }
                 
-                // Adicionar strike e obter contagem atualizada
-                const strikeCount = await addStrike(senderId, { type: violation.rule, message: messageText });
+                // Adicionar strike
+                const strikeCount = addStrike(chatId, senderId, violation.rule, messageText);
+                console.log(`⚠️ Strike aplicado: ${strikeCount}/3`);
+                
+                // Aviso no grupo
+                const warning = violation.rule === 'REPEAT' 
+                    ? `⚠️ Evite repetir mensagens. (Strike ${strikeCount}/3)`
+                    : `🚫 Links não são permitidos. (Strike ${strikeCount}/3)`;
+                
+                try {
+                    await sock.sendMessage(chatId, { text: warning });
+                } catch (e) {
+                    console.error('❌ Erro ao enviar aviso:', e.message);
+                }
                 
                 // Notificar admins
-                await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount);
+                await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount, messageText, deleteError);
                 
-                // Aplicar punição (avisos ou expulsão)
-                await applyPunishment(sock, chatId, senderId);
+                // Aplicar punição se 3/3
+                if (strikeCount >= 3) {
+                    await applyPunishment(sock, chatId, senderId, strikeCount);
+                }
                 
-                // Bloquear processamento (não executar comandos)
+                // Bloquear processamento de comandos
                 continue;
             }
 
