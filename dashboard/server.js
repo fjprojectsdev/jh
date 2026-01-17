@@ -156,7 +156,7 @@ app.post('/api/banned-words', async (req, res) => {
         list.push(word);
         await writeJson(FILES.BANNED, list);
         await addLog(`Palavra banida adicionada: ${word}`);
-        io.emit('word_added', { word, timestamp: new Date().toISOString() });
+        io.emit('update');
     }
     res.json({ success: true });
 });
@@ -168,7 +168,7 @@ app.delete('/api/banned-words/:word', async (req, res) => {
     
     await writeJson(FILES.BANNED, newList);
     await addLog(`Palavra banida removida: ${word}`);
-    io.emit('word_removed', { word, timestamp: new Date().toISOString() });
+    io.emit('update');
     res.json({ success: true });
 });
 
@@ -188,7 +188,7 @@ app.post('/api/allowed-groups', async (req, res) => {
         list.push(name);
         await writeJson(FILES.GROUPS, list);
         await addLog(`Grupo permitido adicionado: ${name}`);
-        io.emit('group_added', { name, timestamp: new Date().toISOString() });
+        io.emit('update');
     }
     res.json({ success: true });
 });
@@ -200,6 +200,7 @@ app.delete('/api/allowed-groups/:name', async (req, res) => {
     
     await writeJson(FILES.GROUPS, newList);
     await addLog(`Grupo permitido removido: ${name}`);
+    io.emit('update');
     res.json({ success: true });
 });
 
@@ -216,8 +217,8 @@ app.get('/api/leads', async (req, res) => {
     try {
         // Tentar Supabase primeiro
         const { createClient } = require('@supabase/supabase-js');
-        const supabaseUrl = 'https://lxqyacryiizzcyrkcfya.supabase.co';
-        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4cXlhY3J5aWl6emN5cmtjZnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MjE1ODQsImV4cCI6MjA3OTM5NzU4NH0.hiZwcpP-3O8miqAkZ9ht9QGtngJw8Hc0Gg6xAaMQRAE';
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_KEY;
         const supabase = createClient(supabaseUrl, supabaseKey);
         
         const { data } = await supabase.from('leads').select('*').order('updated_at', { ascending: false }).limit(50);
@@ -265,6 +266,68 @@ io.on('connection', (socket) => {
 global.emitDashboardUpdate = async (event, data) => {
     io.emit(event, data);
 };
+
+// Rota para violações
+app.get('/api/violations', async (req, res) => {
+    try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_KEY;
+        const supabase = createClient(supabaseUrl, supabaseKey);
+
+        const { data, error } = await supabase
+            .from('violations')
+            .select('type')
+            .limit(1000);
+
+        if (error) throw error;
+
+        // Processa os dados para contar as violações por tipo
+        const violationCounts = data.reduce((acc, { type }) => {
+            acc[type] = (acc[type] || 0) + 1;
+            return acc;
+        }, {});
+
+        const chartData = Object.keys(violationCounts).map(type => ({
+            type,
+            count: violationCounts[type]
+        }));
+
+        res.json(chartData);
+    } catch (e) {
+        console.error("Erro ao buscar violações:", e);
+        res.status(500).json([]); // Retorna array vazio em caso de erro
+    }
+});
+
+
+// Rota para atividade recente
+app.get('/api/recent-activity', async (req, res) => {
+    try {
+        const { createClient } = require('@supabase/supabase-js');
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_KEY;
+        const supabase = createClient(supabaseUrl, supabaseKey);
+
+        const { data, error } = await supabase
+            .from('logs')
+            .select('action, timestamp')
+            .order('timestamp', { ascending: false })
+            .limit(5);
+
+        if (error) throw error;
+
+        res.json(data || []);
+    } catch (e) {
+        console.error("Erro ao buscar atividade recente:", e);
+        res.status(500).json([]);
+    }
+});
+
+// Catch-all para servir o app de página única
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // Inicialização
 initDataFiles().then(() => {
