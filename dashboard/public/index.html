@@ -1,118 +1,148 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>iMavyBot Dashboard</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-    <!-- Login -->
-    <div id="loginBox" class="login-container">
-        <div class="login-box">
-            <div class="logo">🤖</div>
-            <h1>iMavyBot Dashboard</h1>
-            <p>Painel de Controle e Moderação</p>
-            <input type="password" id="password" placeholder="Digite a senha" onkeypress="if(event.key==='Enter') login()">
-            <button onclick="login()">Entrar</button>
-            <div class="error-msg" id="errorMsg"></div>
+    <div class="app-shell">
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-icon">🤖</span>
+                <div>
+                    <h1>iMavyBot</h1>
+                    <p>Dashboard Unificado</p>
+                </div>
+            </div>
+            <nav class="menu">
+                <button class="menu-item active" data-section="overview">Visão Geral</button>
+                <button class="menu-item" data-section="banned">Palavras Banidas</button>
+                <button class="menu-item" data-section="groups">Grupos Permitidos</button>
+                <button class="menu-item" data-section="admins">Administradores</button>
+                <button class="menu-item" data-section="logs">Logs</button>
+                <button class="menu-item" data-section="leads">Leads</button>
+            </nav>
+            <div class="sidebar-footer">
+                <button class="btn secondary" id="refreshBtn">Atualizar dados</button>
+                <button class="btn ghost" id="logoutBtn">Sair</button>
+            </div>
+        </aside>
+
+        <main class="content">
+            <header class="topbar">
+                <div>
+                    <h2 id="pageTitle">Visão Geral</h2>
+                    <p id="pageSubtitle">Métricas e atalhos rápidos do bot.</p>
+                </div>
+                <div class="status-pill" id="statusPill">Offline</div>
+            </header>
+
+            <section id="overview" class="section active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <span>Palavras Banidas</span>
+                        <strong id="statBanned">0</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>Grupos Permitidos</span>
+                        <strong id="statGroups">0</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>Administradores</span>
+                        <strong id="statAdmins">0</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>Lembretes</span>
+                        <strong id="statReminders">0</strong>
+                    </div>
+                    <div class="stat-card">
+                        <span>Leads</span>
+                        <strong id="statLeads">0</strong>
+                    </div>
+                </div>
+                <div class="quick-actions">
+                    <div class="panel">
+                        <h3>Adicionar palavra</h3>
+                        <div class="inline-form">
+                            <input type="text" id="quickWord" placeholder="Ex: spam" />
+                            <button class="btn primary" id="quickWordBtn">Salvar</button>
+                        </div>
+                    </div>
+                    <div class="panel">
+                        <h3>Adicionar grupo</h3>
+                        <div class="inline-form">
+                            <input type="text" id="quickGroup" placeholder="Nome do grupo" />
+                            <button class="btn primary" id="quickGroupBtn">Salvar</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="banned" class="section">
+                <div class="section-header">
+                    <h3>Palavras Banidas</h3>
+                    <p>Controle rápido do filtro de spam.</p>
+                </div>
+                <div class="inline-form">
+                    <input type="text" id="newWord" placeholder="Nova palavra banida" />
+                    <button class="btn primary" id="addWordBtn">Adicionar</button>
+                </div>
+                <div class="list" id="wordsList"></div>
+            </section>
+
+            <section id="groups" class="section">
+                <div class="section-header">
+                    <h3>Grupos Permitidos</h3>
+                    <p>Somente grupos listados aqui recebem comandos.</p>
+                </div>
+                <div class="inline-form">
+                    <input type="text" id="newGroup" placeholder="Nome do grupo" />
+                    <button class="btn primary" id="addGroupBtn">Adicionar</button>
+                </div>
+                <div class="list" id="groupsList"></div>
+            </section>
+
+            <section id="admins" class="section">
+                <div class="section-header">
+                    <h3>Administradores</h3>
+                    <p>Usuários autorizados no bot.</p>
+                </div>
+                <div class="list" id="adminsList"></div>
+            </section>
+
+            <section id="logs" class="section">
+                <div class="section-header">
+                    <h3>Logs Recentes</h3>
+                    <p>Últimas ações registradas pelo sistema.</p>
+                </div>
+                <div class="list" id="logsList"></div>
+            </section>
+
+            <section id="leads" class="section">
+                <div class="section-header">
+                    <h3>Leads Recentes</h3>
+                    <p>Últimos contatos capturados.</p>
+                </div>
+                <div class="list" id="leadsList"></div>
+            </section>
+        </main>
+    </div>
+
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-card">
+            <div class="brand-icon large">🤖</div>
+            <h2>Bem-vindo de volta</h2>
+            <p>Entre com a senha do administrador.</p>
+            <input type="password" id="password" placeholder="Senha" />
+            <button class="btn primary" id="loginBtn">Entrar</button>
+            <p class="error" id="loginError"></p>
         </div>
     </div>
 
-    <!-- Dashboard -->
-    <div id="dashboard" class="hidden">
-        <nav class="navbar">
-            <div class="nav-brand">
-                <span class="logo-icon">🤖</span>
-                <span class="brand-name">iMavyBot</span>
-            </div>
-            <button class="logout-btn" onclick="logout()">Sair</button>
-        </nav>
+    <div class="toast" id="toast"></div>
 
-        <div class="container">
-            <!-- Stats Cards -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-icon">🚫</div>
-                    <div class="stat-info">
-                        <h3>Palavras Banidas</h3>
-                        <div class="stat-number" id="bannedWords">0</div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon">👥</div>
-                    <div class="stat-info">
-                        <h3>Grupos Permitidos</h3>
-                        <div class="stat-number" id="allowedGroups">0</div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon">👮</div>
-                    <div class="stat-info">
-                        <h3>Administradores</h3>
-                        <div class="stat-number" id="admins">0</div>
-                    </div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-icon">⏰</div>
-                    <div class="stat-info">
-                        <h3>Lembretes Ativos</h3>
-                        <div class="stat-number" id="lembretes">0</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Palavras Banidas -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>🚫 Palavras Banidas</h2>
-                </div>
-                <div class="input-group">
-                    <input type="text" id="newWord" placeholder="Digite a palavra para banir">
-                    <button class="btn btn-primary" onclick="addWord()">Adicionar</button>
-                </div>
-                <div class="list-container" id="wordsList">
-                    <div class="loading">Carregando...</div>
-                </div>
-            </div>
-
-            <!-- Grupos Permitidos -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>👥 Grupos Permitidos</h2>
-                </div>
-                <div class="input-group">
-                    <input type="text" id="newGroup" placeholder="Digite o nome do grupo">
-                    <button class="btn btn-primary" onclick="addGroup()">Adicionar</button>
-                </div>
-                <div class="list-container" id="groupsList">
-                    <div class="loading">Carregando...</div>
-                </div>
-            </div>
-
-            <!-- Administradores -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>👮 Administradores</h2>
-                </div>
-                <div class="list-container" id="adminsList">
-                    <div class="loading">Carregando...</div>
-                </div>
-            </div>
-
-            <!-- Logs -->
-            <div class="section">
-                <div class="section-header">
-                    <h2>📝 Logs Recentes</h2>
-                </div>
-                <div class="logs-container" id="logsList">
-                    <div class="loading">Carregando...</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="/socket.io/socket.io.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

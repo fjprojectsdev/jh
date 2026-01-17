@@ -1,6 +1,6 @@
 {
   "name": "imavy-dashboard",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
@@ -8,11 +8,10 @@
     "dev": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "jsonwebtoken": "^9.0.2",
-    "socket.io": "^4.6.1",
-    "dotenv": "^16.0.3"
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2"
   },
   "engines": {
     "node": ">=18.0.0"

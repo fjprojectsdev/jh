@@ -1,31 +1,29 @@
 /**
- * iMavyBot Dashboard Backend
- * Tecnologias: Express, JWT, Cors, File System
+ * iMavyBot Dashboard Server (single service)
  */
 
 const express = require('express');
-const fs = require('fs').promises;
 const path = require('path');
+const fs = require('fs').promises;
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const http = require('http');
-const { Server } = require('socket.io');
 require('dotenv').config();
 
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
 const PORT = process.env.PORT || 3000;
-console.log(`🔌 Porta configurada: ${PORT}`);
-const SECRET_KEY = process.env.JWT_SECRET || 'chave_super_secreta_padrao';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'FJMR2025';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const JWT_SECRET = process.env.JWT_SECRET;
 
-// Middleware
+if (!ADMIN_PASSWORD || !JWT_SECRET) {
+    console.error('❌ Variáveis obrigatórias ausentes: ADMIN_PASSWORD e JWT_SECRET');
+    console.error('👉 Configure no Railway/ambiente antes de iniciar o dashboard.');
+    process.exit(1);
+}
+
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Caminhos dos arquivos de dados
 const DATA_DIR = path.join(__dirname, '..');
 const FILES = {
     BANNED: path.join(DATA_DIR, 'banned_words.json'),
@@ -36,209 +34,159 @@ const FILES = {
     LEADS: path.join(DATA_DIR, 'leads.json')
 };
 
-// --- Helpers ---
+async function ensureFile(filePath, defaultContent) {
+    try {
+        await fs.access(filePath);
+    } catch {
+        await fs.writeFile(filePath, defaultContent);
+    }
+}
 
-// Garante que o diretório e arquivos existem
 async function initDataFiles() {
-    try {
-        const defaults = {
-            [FILES.BANNED]: "[]",
-            [FILES.GROUPS]: "[]",
-            [FILES.ADMINS]: JSON.stringify({ admins: [] }),
-            [FILES.REMINDERS]: "{}"
-        };
+    await ensureFile(FILES.BANNED, '[]');
+    await ensureFile(FILES.GROUPS, '[]');
+    await ensureFile(FILES.ADMINS, JSON.stringify({ admins: [] }, null, 2));
+    await ensureFile(FILES.REMINDERS, '{}');
+    await ensureFile(FILES.LEADS, '[]');
+    await ensureFile(FILES.LOGS, '');
+}
 
-        for (const [file, content] of Object.entries(defaults)) {
-            try {
-                await fs.access(file);
-            } catch {
-                await fs.writeFile(file, content);
-                console.log(`Criado arquivo padrão: ${path.basename(file)}`);
-            }
-        }
-    } catch (err) {
-        console.error("Erro ao inicializar arquivos:", err);
+async function readJson(filePath, fallback) {
+    try {
+        const raw = await fs.readFile(filePath, 'utf8');
+        return JSON.parse(raw);
+    } catch {
+        return fallback;
     }
 }
 
-// Lê arquivo JSON
-async function readJson(filePath) {
-    try {
-        const data = await fs.readFile(filePath, 'utf8');
-        return JSON.parse(data);
-    } catch (err) {
-        return [];
-    }
-}
-
-// Escreve arquivo JSON
 async function writeJson(filePath, data) {
     await fs.writeFile(filePath, JSON.stringify(data, null, 2));
 }
 
-// Adiciona Log
 async function addLog(action) {
     const timestamp = new Date().toISOString();
     const logEntry = `[${timestamp}] ${action}\n`;
-    try {
-        await fs.appendFile(FILES.LOGS, logEntry);
-    } catch (err) {
-        console.error("Erro ao gravar log:", err);
-    }
+    await fs.appendFile(FILES.LOGS, logEntry);
 }
 
-// Middleware de Autenticação
 function authenticateToken(req, res, next) {
-    const authHeader = req.headers['authorization'];
+    const authHeader = req.headers.authorization;
     const token = authHeader && authHeader.split(' ')[1];
-
     if (!token) return res.sendStatus(401);
 
-    jwt.verify(token, SECRET_KEY, (err, user) => {
+    jwt.verify(token, JWT_SECRET, (err, user) => {
         if (err) return res.sendStatus(403);
         req.user = user;
         next();
     });
 }
 
-// --- Rotas ---
-
-// Login
 app.post('/api/login', async (req, res) => {
     const { password } = req.body;
-    if (password === ADMIN_PASSWORD) {
-        const token = jwt.sign({ role: 'admin' }, SECRET_KEY, { expiresIn: '24h' });
-        await addLog('Login de Administrador realizado com sucesso');
-        res.json({ token, message: "Login realizado" });
-    } else {
+    if (password !== ADMIN_PASSWORD) {
         await addLog('Tentativa de login falhou');
-        res.status(401).json({ message: "Senha incorreta" });
+        return res.status(401).json({ message: 'Senha incorreta' });
     }
+
+    const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+    await addLog('Login de Administrador realizado com sucesso');
+    res.json({ token, message: 'Login realizado' });
 });
 
-// Middleware aplicado para rotas abaixo
 app.use('/api', authenticateToken);
 
-// Estatísticas Gerais
 app.get('/api/stats', async (req, res) => {
     try {
-        const banned = await readJson(FILES.BANNED);
-        const groups = await readJson(FILES.GROUPS);
-        const adminsData = await readJson(FILES.ADMINS);
-        const reminders = await readJson(FILES.REMINDERS);
-        const leads = await readJson(FILES.LEADS);
-        
+        const banned = await readJson(FILES.BANNED, []);
+        const groups = await readJson(FILES.GROUPS, []);
+        const adminsData = await readJson(FILES.ADMINS, { admins: [] });
+        const reminders = await readJson(FILES.REMINDERS, {});
+        const leads = await readJson(FILES.LEADS, []);
+
         res.json({
-            bannedWords: banned.length || 0,
-            allowedGroups: groups.length || 0,
-            admins: adminsData.admins ? adminsData.admins.length : 0,
-            lembretes: Object.keys(reminders).length || 0,
-            leads: leads.length || 0
+            bannedWords: banned.length,
+            allowedGroups: groups.length,
+            admins: adminsData.admins?.length || 0,
+            lembretes: Object.keys(reminders).length,
+            leads: leads.length
         });
     } catch (err) {
-        res.status(500).json({ error: "Erro ao ler dados" });
+        res.status(500).json({ error: 'Erro ao ler dados' });
     }
 });
 
-// --- Palavras Banidas ---
-
 app.get('/api/banned-words', async (req, res) => {
-    const data = await readJson(FILES.BANNED);
+    const data = await readJson(FILES.BANNED, []);
     res.json(data);
 });
 
 app.post('/api/banned-words', async (req, res) => {
-    const { word } = req.body;
-    if (!word) return res.status(400).send();
-    
-    let list = await readJson(FILES.BANNED);
+    const word = String(req.body.word || '').trim();
+    if (!word) return res.status(400).json({ message: 'Palavra inválida' });
+
+    const list = await readJson(FILES.BANNED, []);
     if (!list.includes(word)) {
         list.push(word);
         await writeJson(FILES.BANNED, list);
         await addLog(`Palavra banida adicionada: ${word}`);
-        io.emit('word_added', { word, timestamp: new Date().toISOString() });
     }
+
     res.json({ success: true });
 });
 
 app.delete('/api/banned-words/:word', async (req, res) => {
-    const word = req.params.word;
-    let list = await readJson(FILES.BANNED);
-    const newList = list.filter(w => w !== word);
-    
+    const word = decodeURIComponent(req.params.word);
+    const list = await readJson(FILES.BANNED, []);
+    const newList = list.filter((entry) => entry !== word);
     await writeJson(FILES.BANNED, newList);
     await addLog(`Palavra banida removida: ${word}`);
-    io.emit('word_removed', { word, timestamp: new Date().toISOString() });
     res.json({ success: true });
 });
 
-// --- Grupos Permitidos ---
-
 app.get('/api/allowed-groups', async (req, res) => {
-    const data = await readJson(FILES.GROUPS);
+    const data = await readJson(FILES.GROUPS, []);
     res.json(data);
 });
 
 app.post('/api/allowed-groups', async (req, res) => {
-    const { name } = req.body;
-    if (!name) return res.status(400).send();
+    const name = String(req.body.name || '').trim();
+    if (!name) return res.status(400).json({ message: 'Nome inválido' });
 
-    let list = await readJson(FILES.GROUPS);
+    const list = await readJson(FILES.GROUPS, []);
     if (!list.includes(name)) {
         list.push(name);
         await writeJson(FILES.GROUPS, list);
         await addLog(`Grupo permitido adicionado: ${name}`);
-        io.emit('group_added', { name, timestamp: new Date().toISOString() });
     }
+
     res.json({ success: true });
 });
 
 app.delete('/api/allowed-groups/:name', async (req, res) => {
-    const name = req.params.name;
-    let list = await readJson(FILES.GROUPS);
-    const newList = list.filter(g => g !== name);
-    
+    const name = decodeURIComponent(req.params.name);
+    const list = await readJson(FILES.GROUPS, []);
+    const newList = list.filter((entry) => entry !== name);
     await writeJson(FILES.GROUPS, newList);
     await addLog(`Grupo permitido removido: ${name}`);
     res.json({ success: true });
 });
 
-// --- Admins ---
-
 app.get('/api/admins', async (req, res) => {
-    const data = await readJson(FILES.ADMINS);
+    const data = await readJson(FILES.ADMINS, { admins: [] });
     res.json(data.admins || []);
 });
 
-// --- Leads ---
-
 app.get('/api/leads', async (req, res) => {
-    try {
-        // Tentar Supabase primeiro
-        const { createClient } = require('@supabase/supabase-js');
-        const supabaseUrl = 'https://lxqyacryiizzcyrkcfya.supabase.co';
-        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4cXlhY3J5aWl6emN5cmtjZnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MjE1ODQsImV4cCI6MjA3OTM5NzU4NH0.hiZwcpP-3O8miqAkZ9ht9QGtngJw8Hc0Gg6xAaMQRAE';
-        const supabase = createClient(supabaseUrl, supabaseKey);
-        
-        const { data } = await supabase.from('leads').select('*').order('updated_at', { ascending: false }).limit(50);
-        res.json(data || []);
-    } catch (e) {
-        // Fallback para JSON
-        const leads = await readJson(FILES.LEADS);
-        res.json(leads.reverse().slice(0, 50));
-    }
+    const leads = await readJson(FILES.LEADS, []);
+    res.json(leads.slice().reverse().slice(0, 50));
 });
-
-// --- Logs ---
 
 app.get('/api/logs', async (req, res) => {
     try {
         const raw = await fs.readFile(FILES.LOGS, 'utf8');
-        // Parse simples do formato de log texto para JSON
-        const lines = raw.split('\n').filter(l => l.trim() !== '').reverse().slice(0, 50);
-        
-        const parsedLogs = lines.map(line => {
-            // Extrai [Timestamp] Action
+        const lines = raw.split('\n').filter(Boolean).reverse().slice(0, 100);
+        const parsed = lines.map((line) => {
             const match = line.match(/^\[(.*?)\] (.*)$/);
             if (match) {
                 return { timestamp: match[1], action: match[2] };
@@ -246,31 +194,18 @@ app.get('/api/logs', async (req, res) => {
             return { timestamp: '', action: line };
         });
 
-        res.json(parsedLogs);
-    } catch (err) {
+        res.json(parsed);
+    } catch {
         res.json([]);
     }
 });
 
-// WebSocket - Eventos em tempo real
-io.on('connection', (socket) => {
-    console.log('✅ Cliente conectado ao WebSocket');
-    
-    socket.on('disconnect', () => {
-        console.log('❌ Cliente desconectado');
-    });
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Função para emitir atualizações
-global.emitDashboardUpdate = async (event, data) => {
-    io.emit(event, data);
-};
-
-// Inicialização
 initDataFiles().then(() => {
-    server.listen(PORT, '0.0.0.0', () => {
+    app.listen(PORT, '0.0.0.0', () => {
         console.log(`🖥️ Dashboard rodando na porta ${PORT}`);
-        console.log(`🔌 WebSocket ativo para atualizações em tempo real`);
-        console.log(`🔑 Senha padrão: ${ADMIN_PASSWORD}`);
     });
 });

@@ -1,6 +1,6 @@
 # iMavyBot Dashboard
 
-Dashboard web moderno para gerenciamento e monitoramento do iMavyBot.
+Dashboard web unificado (frontend + API) para gerenciamento do iMavyBot.
 
 ## 🚀 Funcionalidades
 
@@ -8,10 +8,9 @@ Dashboard web moderno para gerenciamento e monitoramento do iMavyBot.
 - ✅ Gerenciamento de palavras banidas
 - ✅ Controle de grupos permitidos
 - ✅ Visualização de administradores
-- ✅ Logs em tempo real
-- ✅ Estatísticas do bot
-- ✅ Interface responsiva e moderna
-- ✅ Auto-refresh a cada 30 segundos
+- ✅ Logs recentes
+- ✅ Estatísticas gerais
+- ✅ Interface responsiva
 
 ## 📦 Instalação
 
@@ -22,13 +21,15 @@ npm install
 
 ## ⚙️ Configuração
 
-Configure as variáveis de ambiente no arquivo `.env` na raiz do projeto:
+Configure as variáveis de ambiente no arquivo `.env` na raiz do projeto ou no painel do Railway:
 
 ```env
 PORT=3000
 JWT_SECRET=sua_chave_secreta_aqui
-ADMIN_PASSWORD=FJMR2025
+ADMIN_PASSWORD=defina_uma_senha_forte
 ```
+
+> ⚠️ `JWT_SECRET` e `ADMIN_PASSWORD` são obrigatórios. O servidor não inicia sem essas variáveis.
 
 ## 🎯 Como Usar
 
@@ -42,17 +43,7 @@ npm start
 http://localhost:3000
 ```
 
-3. Faça login com a senha configurada (padrão: FJMR2025)
-
-## 🎨 Interface
-
-O dashboard possui:
-
-- **Cards de Estatísticas**: Visualização rápida de métricas importantes
-- **Gerenciamento de Palavras**: Adicione/remova palavras banidas
-- **Controle de Grupos**: Gerencie grupos permitidos
-- **Lista de Admins**: Visualize administradores ativos
-- **Logs**: Acompanhe ações em tempo real
+3. Faça login com a senha configurada em `ADMIN_PASSWORD`.
 
 ## 🔒 Segurança
 
@@ -65,14 +56,10 @@ O dashboard possui:
 
 - **Backend**: Express.js, JWT, File System
 - **Frontend**: HTML5, CSS3, JavaScript (Vanilla)
-- **Estilo**: CSS moderno com gradientes e animações
 
 ## 📱 Responsivo
 
-Interface totalmente responsiva, funciona perfeitamente em:
-- Desktop
-- Tablet
-- Mobile
+Interface totalmente responsiva, funciona em desktop e mobile.
 
 ## 🔄 API Endpoints
 
@@ -97,6 +84,9 @@ Interface totalmente responsiva, funciona perfeitamente em:
 
 ### Logs
 - `GET /api/logs` - Logs recentes
+
+### Leads
+- `GET /api/leads` - Leads recentes
 
 ## 📄 Licença
 

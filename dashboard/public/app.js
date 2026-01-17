@@ -1,198 +1,337 @@
-let token = localStorage.getItem('token');
-let socket = null;
+const state = {
+    token: localStorage.getItem('imavy_token') || null
+};
 
-if (token) {
-    document.getElementById('loginBox').classList.add('hidden');
-    document.getElementById('dashboard').classList.remove('hidden');
-    loadDashboard();
-    connectWebSocket();
+const elements = {
+    loginOverlay: document.getElementById('loginOverlay'),
+    loginBtn: document.getElementById('loginBtn'),
+    password: document.getElementById('password'),
+    loginError: document.getElementById('loginError'),
+    logoutBtn: document.getElementById('logoutBtn'),
+    refreshBtn: document.getElementById('refreshBtn'),
+    statusPill: document.getElementById('statusPill'),
+    toast: document.getElementById('toast'),
+    statBanned: document.getElementById('statBanned'),
+    statGroups: document.getElementById('statGroups'),
+    statAdmins: document.getElementById('statAdmins'),
+    statReminders: document.getElementById('statReminders'),
+    statLeads: document.getElementById('statLeads'),
+    wordsList: document.getElementById('wordsList'),
+    groupsList: document.getElementById('groupsList'),
+    adminsList: document.getElementById('adminsList'),
+    logsList: document.getElementById('logsList'),
+    leadsList: document.getElementById('leadsList'),
+    newWord: document.getElementById('newWord'),
+    newGroup: document.getElementById('newGroup'),
+    quickWord: document.getElementById('quickWord'),
+    quickGroup: document.getElementById('quickGroup'),
+    pageTitle: document.getElementById('pageTitle'),
+    pageSubtitle: document.getElementById('pageSubtitle')
+};
+
+const sectionMeta = {
+    overview: {
+        title: 'Visão Geral',
+        subtitle: 'Métricas e atalhos rápidos do bot.'
+    },
+    banned: {
+        title: 'Palavras Banidas',
+        subtitle: 'Atualize o filtro de termos proibidos.'
+    },
+    groups: {
+        title: 'Grupos Permitidos',
+        subtitle: 'Gerencie os grupos habilitados.'
+    },
+    admins: {
+        title: 'Administradores',
+        subtitle: 'Lista de usuários autorizados.'
+    },
+    logs: {
+        title: 'Logs',
+        subtitle: 'Registros das ações recentes.'
+    },
+    leads: {
+        title: 'Leads',
+        subtitle: 'Últimos contatos capturados pelo bot.'
+    }
+};
+
+function showToast(message) {
+    elements.toast.textContent = message;
+    elements.toast.classList.add('show');
+    setTimeout(() => elements.toast.classList.remove('show'), 2400);
 }
 
-function connectWebSocket() {
-    socket = io();
-    
-    socket.on('connect', () => {
-        console.log('✅ WebSocket conectado');
-        showNotification('🔌 Conectado em tempo real', 'success');
+async function api(path, options = {}) {
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+    if (state.token) {
+        headers.Authorization = `Bearer ${state.token}`;
+    }
+
+    const response = await fetch(path, {
+        ...options,
+        headers
     });
-    
-    socket.on('spam_detected', (data) => {
-        showNotification(`🚨 Spam detectado: ${data.type}`, 'warning');
-        loadDashboard();
-    });
-    
-    socket.on('strike_added', () => {
-        showNotification('⚠️ Strike adicionado', 'warning');
-        loadDashboard();
-    });
-    
-    socket.on('word_added', (data) => {
-        showNotification(`✅ Palavra banida: ${data.word}`, 'success');
-        loadDashboard();
-    });
-    
-    socket.on('bot_status', (data) => {
-        if (data.status === 'online') {
-            showNotification('🤖 Bot online', 'success');
-        }
-    });
+
+    if (response.status === 401 || response.status === 403) {
+        handleLogout();
+        throw new Error('Sessão expirada.');
+    }
+
+    return response.json();
 }
 
-function showNotification(message, type) {
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 15px 25px;
-        background: ${type === 'success' ? '#10b981' : type === 'warning' ? '#f59e0b' : '#ef4444'};
-        color: white;
-        border-radius: 8px;
-        box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-        z-index: 9999;
-        animation: slideIn 0.3s ease;
-    `;
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-        notification.style.animation = 'slideOut 0.3s ease';
-        setTimeout(() => notification.remove(), 300);
-    }, 3000);
+function setStatus(online) {
+    if (online) {
+        elements.statusPill.textContent = 'Online';
+        elements.statusPill.classList.add('online');
+    } else {
+        elements.statusPill.textContent = 'Offline';
+        elements.statusPill.classList.remove('online');
+    }
 }
 
-async function login() {
-    const password = document.getElementById('password').value;
-    const res = await fetch('/api/login', {
+async function handleLogin() {
+    const password = elements.password.value.trim();
+    if (!password) {
+        elements.loginError.textContent = 'Informe a senha.';
+        return;
+    }
+
+    elements.loginError.textContent = '';
+    const response = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
     });
-    
-    if (res.ok) {
-        const data = await res.json();
-        token = data.token;
-        localStorage.setItem('token', token);
-        document.getElementById('loginBox').classList.add('hidden');
-        document.getElementById('dashboard').classList.remove('hidden');
-        loadDashboard();
-        connectWebSocket();
-    } else {
-        document.getElementById('errorMsg').textContent = 'Senha incorreta!';
+
+    if (!response.ok) {
+        elements.loginError.textContent = 'Senha incorreta.';
+        return;
     }
+
+    const data = await response.json();
+    state.token = data.token;
+    localStorage.setItem('imavy_token', data.token);
+    elements.password.value = '';
+    elements.loginOverlay.style.display = 'none';
+    await loadDashboard();
+    showToast('Login realizado.');
 }
 
-function logout() {
-    localStorage.removeItem('token');
-    if (socket) socket.disconnect();
-    location.reload();
+function handleLogout() {
+    state.token = null;
+    localStorage.removeItem('imavy_token');
+    elements.loginOverlay.style.display = 'flex';
+    setStatus(false);
+}
+
+async function loadStats() {
+    const stats = await api('/api/stats');
+    elements.statBanned.textContent = stats.bannedWords || 0;
+    elements.statGroups.textContent = stats.allowedGroups || 0;
+    elements.statAdmins.textContent = stats.admins || 0;
+    elements.statReminders.textContent = stats.lembretes || 0;
+    elements.statLeads.textContent = stats.leads || 0;
+    setStatus(true);
+}
+
+function renderList(container, items, emptyMessage) {
+    if (!items.length) {
+        container.innerHTML = `<div class="list-item"><div>${emptyMessage}</div></div>`;
+        return;
+    }
+
+    container.innerHTML = items.join('');
+}
+
+async function loadBannedWords() {
+    const words = await api('/api/banned-words');
+    const items = words.map((word) => `
+        <div class="list-item">
+            <div>
+                <strong>${word}</strong>
+                <p>Filtro ativo</p>
+            </div>
+            <button class="action-btn" data-word="${encodeURIComponent(word)}">Remover</button>
+        </div>
+    `);
+
+    renderList(elements.wordsList, items, 'Nenhuma palavra cadastrada.');
+}
+
+async function loadGroups() {
+    const groups = await api('/api/allowed-groups');
+    const items = groups.map((group) => `
+        <div class="list-item">
+            <div>
+                <strong>${group}</strong>
+                <p>Grupo autorizado</p>
+            </div>
+            <button class="action-btn" data-group="${encodeURIComponent(group)}">Remover</button>
+        </div>
+    `);
+
+    renderList(elements.groupsList, items, 'Nenhum grupo cadastrado.');
+}
+
+async function loadAdmins() {
+    const admins = await api('/api/admins');
+    const items = admins.map((admin) => `
+        <div class="list-item">
+            <div>
+                <strong>${admin}</strong>
+                <p>Administrador ativo</p>
+            </div>
+            <span class="tag">Admin</span>
+        </div>
+    `);
+
+    renderList(elements.adminsList, items, 'Nenhum admin encontrado.');
+}
+
+async function loadLogs() {
+    const logs = await api('/api/logs');
+    const items = logs.map((log) => `
+        <div class="list-item">
+            <div>
+                <strong>${log.action}</strong>
+                <p>${log.timestamp || 'Sem timestamp'}</p>
+            </div>
+            <span class="tag">Log</span>
+        </div>
+    `);
+
+    renderList(elements.logsList, items, 'Sem logs recentes.');
+}
+
+async function loadLeads() {
+    const leads = await api('/api/leads');
+    const items = leads.map((lead) => `
+        <div class="list-item">
+            <div>
+                <strong>${lead.name || lead.phone || 'Lead'}</strong>
+                <p>${lead.updated_at || lead.created_at || 'Registro recente'}</p>
+            </div>
+            <span class="tag">Lead</span>
+        </div>
+    `);
+
+    renderList(elements.leadsList, items, 'Sem leads cadastrados.');
 }
 
 async function loadDashboard() {
-    const headers = { 'Authorization': `Bearer ${token}` };
-    
-    try {
-        const [stats, words, groups, admins, logs] = await Promise.all([
-            fetch('/api/stats', { headers }).then(r => r.json()),
-            fetch('/api/banned-words', { headers }).then(r => r.json()),
-            fetch('/api/allowed-groups', { headers }).then(r => r.json()),
-            fetch('/api/admins', { headers }).then(r => r.json()),
-            fetch('/api/logs', { headers }).then(r => r.json())
-        ]);
-
-        document.getElementById('bannedWords').textContent = stats.bannedWords;
-        document.getElementById('allowedGroups').textContent = stats.allowedGroups;
-        document.getElementById('admins').textContent = stats.admins;
-        document.getElementById('lembretes').textContent = stats.lembretes;
-
-        document.getElementById('wordsList').innerHTML = words.length ? words.map(w => `
-            <div class="list-item">
-                <span>${w}</span>
-                <button class="btn btn-danger btn-sm" onclick="removeWord('${w}')">Remover</button>
-            </div>
-        `).join('') : '<p class="empty-state">Nenhuma palavra banida</p>';
-
-        document.getElementById('groupsList').innerHTML = groups.length ? groups.map(g => `
-            <div class="list-item">
-                <span>${g}</span>
-                <button class="btn btn-danger btn-sm" onclick="removeGroup('${encodeURIComponent(g)}')">Remover</button>
-            </div>
-        `).join('') : '<p class="empty-state">Nenhum grupo permitido</p>';
-
-        document.getElementById('adminsList').innerHTML = admins.length ? admins.map(a => `
-            <div class="list-item">
-                <span>${a}</span>
-                <span class="badge badge-success">Ativo</span>
-            </div>
-        `).join('') : '<p class="empty-state">Nenhum administrador</p>';
-
-        document.getElementById('logsList').innerHTML = logs.length ? logs.slice(0, 10).map(l => `
-            <div class="log-item">
-                <span class="log-time">${new Date(l.timestamp).toLocaleString('pt-BR')}</span>
-                <span class="log-action">${l.action}</span>
-            </div>
-        `).join('') : '<p class="empty-state">Nenhum log disponível</p>';
-    } catch (error) {
-        console.error('Erro ao carregar dashboard:', error);
-    }
+    await Promise.all([
+        loadStats(),
+        loadBannedWords(),
+        loadGroups(),
+        loadAdmins(),
+        loadLogs(),
+        loadLeads()
+    ]);
 }
 
-async function addWord() {
-    const word = document.getElementById('newWord').value.trim();
-    if (!word) return;
-    
-    await fetch('/api/banned-words', {
+async function addWord(input) {
+    const value = input.value.trim();
+    if (!value) return;
+    await api('/api/banned-words', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ word })
+        body: JSON.stringify({ word: value })
     });
-    
-    document.getElementById('newWord').value = '';
-    loadDashboard();
+    input.value = '';
+    await loadBannedWords();
+    await loadStats();
+    showToast('Palavra adicionada.');
 }
 
-async function removeWord(word) {
-    await fetch(`/api/banned-words/${word}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
-    });
-    loadDashboard();
-}
-
-async function addGroup() {
-    const name = document.getElementById('newGroup').value.trim();
-    if (!name) return;
-    
-    await fetch('/api/allowed-groups', {
+async function addGroup(input) {
+    const value = input.value.trim();
+    if (!value) return;
+    await api('/api/allowed-groups', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name: value })
     });
-    
-    document.getElementById('newGroup').value = '';
-    loadDashboard();
+    input.value = '';
+    await loadGroups();
+    await loadStats();
+    showToast('Grupo adicionado.');
 }
 
-async function removeGroup(name) {
-    await fetch(`/api/allowed-groups/${name}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${token}` }
+function setupMenu() {
+    const menuItems = document.querySelectorAll('.menu-item');
+    const sections = document.querySelectorAll('.section');
+
+    menuItems.forEach((item) => {
+        item.addEventListener('click', () => {
+            menuItems.forEach((btn) => btn.classList.remove('active'));
+            item.classList.add('active');
+
+            const target = item.dataset.section;
+            sections.forEach((section) => {
+                section.classList.toggle('active', section.id === target);
+            });
+
+            const meta = sectionMeta[target];
+            elements.pageTitle.textContent = meta.title;
+            elements.pageSubtitle.textContent = meta.subtitle;
+        });
     });
-    loadDashboard();
 }
 
-setInterval(loadDashboard, 30000);
+function setupActions() {
+    elements.loginBtn.addEventListener('click', handleLogin);
+    elements.password.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') handleLogin();
+    });
+    elements.logoutBtn.addEventListener('click', () => {
+        handleLogout();
+        showToast('Sessão encerrada.');
+    });
+    elements.refreshBtn.addEventListener('click', async () => {
+        await loadDashboard();
+        showToast('Dados atualizados.');
+    });
 
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes slideIn {
-        from { transform: translateX(400px); opacity: 0; }
-        to { transform: translateX(0); opacity: 1; }
+    document.getElementById('addWordBtn').addEventListener('click', () => addWord(elements.newWord));
+    document.getElementById('addGroupBtn').addEventListener('click', () => addGroup(elements.newGroup));
+    document.getElementById('quickWordBtn').addEventListener('click', () => addWord(elements.quickWord));
+    document.getElementById('quickGroupBtn').addEventListener('click', () => addGroup(elements.quickGroup));
+
+    elements.wordsList.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (target.matches('button[data-word]')) {
+            const word = target.getAttribute('data-word');
+            await api(`/api/banned-words/${word}`, { method: 'DELETE' });
+            await loadBannedWords();
+            await loadStats();
+            showToast('Palavra removida.');
+        }
+    });
+
+    elements.groupsList.addEventListener('click', async (event) => {
+        const target = event.target;
+        if (target.matches('button[data-group]')) {
+            const group = target.getAttribute('data-group');
+            await api(`/api/allowed-groups/${group}`, { method: 'DELETE' });
+            await loadGroups();
+            await loadStats();
+            showToast('Grupo removido.');
+        }
+    });
+}
+
+function init() {
+    setupMenu();
+    setupActions();
+
+    if (state.token) {
+        elements.loginOverlay.style.display = 'none';
+        loadDashboard().catch(() => handleLogout());
+    } else {
+        elements.loginOverlay.style.display = 'flex';
     }
-    @keyframes slideOut {
-        from { transform: translateX(0); opacity: 1; }
-        to { transform: translateX(400px); opacity: 0; }
-    }
-    .hidden { display: none !important; }
-`;
-document.head.appendChild(style);
+}
+
+init();
