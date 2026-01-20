@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROMO_FILE = path.join(__dirname, '..', 'promo_config.json');
 
 const DEFAULT_MESSAGES = [
-        `🤖 *iMavyBot - Automação Profissional para WhatsApp*
+    `🤖 *iMavyBot - Automação Profissional para WhatsApp*
 
 ✅ Anti-spam com IA
 ✅ Sistema de strikes automático
@@ -20,7 +20,7 @@ const DEFAULT_MESSAGES = [
 
 _Mensagem automática - iMavyBot_`,
 
-        `🚀 *Cansado de moderar grupo manualmente?*
+    `🚀 *Cansado de moderar grupo manualmente?*
 
 O *iMavyBot* faz tudo por você:
 • Bane spammers automaticamente
@@ -33,7 +33,7 @@ O *iMavyBot* faz tudo por você:
 
 _iMavyBot - Seu grupo no piloto automático_`,
 
-        `⚡ *iMavyBot - O Bot Mais Completo do WhatsApp*
+    `⚡ *iMavyBot - O Bot Mais Completo do WhatsApp*
 
 🎯 Recursos:
 ✓ IA para detectar spam e toxicidade
@@ -107,7 +107,7 @@ export function startAutoPromo(sock) {
     const config = getPromoConfig();
     console.log(`📢 Auto-promoção ativada: a cada ${config.intervalHours}h em ${config.groups.length} grupos`);
 
-    setInterval(() => {
+    setInterval(async () => {
         const currentConfig = getPromoConfig();
         if (!currentConfig.enabled) return;
 
@@ -117,17 +117,15 @@ export function startAutoPromo(sock) {
             try {
                 const now = Date.now();
                 const lastPromo = group.lastPromo || 0;
-                
+
                 if (now - lastPromo < intervalMs) continue;
 
                 const randomMessage = getRandomPromoMessage();
-                
-                sock.sendMessage(group.id, { text: randomMessage });
-                
-                group.lastPromo = now;
-                saveConfig(currentConfig);
-                
-                console.log(`📢 Anúncio enviado para: ${group.name}`);
+
+                if (randomMessage && randomMessage.trim().length > 0) {
+                    await sock.sendMessage(group.id, { text: randomMessage });
+                    console.log(`📢 Anúncio enviado para: ${group.name}`);
+                }
             } catch (e) {
                 console.error(`Erro ao enviar promo para ${group.name}:`, e.message);
             }

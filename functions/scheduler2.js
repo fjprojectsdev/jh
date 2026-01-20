@@ -31,30 +31,32 @@ export function scheduleMessage(groupId, time, message) {
     const now = new Date();
     const scheduled = new Date();
     scheduled.setHours(hours, minutes, 0, 0);
-    
+
     if (scheduled <= now) {
         scheduled.setDate(scheduled.getDate() + 1);
     }
-    
+
     const id = Date.now().toString();
     scheduledMessages.push({ id, groupId, time, message, timestamp: scheduled.getTime() });
     saveScheduled();
-    
+
     return { id, scheduledFor: scheduled.toLocaleString('pt-BR') };
 }
 
 export function startScheduler(sock) {
     loadScheduled();
-    
+
     setInterval(() => {
         const now = Date.now();
         const toSend = scheduledMessages.filter(msg => msg.timestamp <= now);
-        
+
         for (const msg of toSend) {
-            sock.sendMessage(msg.groupId, { text: msg.message }).catch(console.error);
+            if (msg.message && msg.message.trim().length > 0) {
+                sock.sendMessage(msg.groupId, { text: msg.message }).catch(console.error);
+            }
             scheduledMessages = scheduledMessages.filter(m => m.id !== msg.id);
         }
-        
+
         if (toSend.length > 0) saveScheduled();
     }, 30000); // Verifica a cada 30s
 }

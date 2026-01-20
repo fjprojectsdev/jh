@@ -35,7 +35,8 @@ function saveLembretes() {
     }
 }
 
-function loadLembretes(sock) {
+// Exported initialization function
+export function initLembretes(sock) {
     try {
         if (fs.existsSync(LEMBRETES_FILE)) {
             const data = JSON.parse(fs.readFileSync(LEMBRETES_FILE, 'utf8'));
@@ -48,44 +49,75 @@ function loadLembretes(sock) {
     }
 }
 
-function restartLembrete(sock, groupId, config) {
-    const { comando, intervalo, encerramento, startTime } = config;
+// Função auxiliar para iniciar timer com persistência
+function startReminderTimer(sock, groupId, config) {
+    const { comando, intervalo, nextTrigger } = config;
     const intervaloMs = intervalo * 60 * 60 * 1000;
+    const now = Date.now();
+
+    // Se o próximo trigger já passou, agenda para "agora" (catch-up) ou define novo
+    let timeToNext = nextTrigger - now;
+    if (timeToNext < 0) {
+        // Se passou, recalcula para o próximo ciclo futuro imediato para evitar flood
+        const cyclesMissed = Math.floor(Math.abs(timeToNext) / intervaloMs) + 1;
+        timeToNext += (cyclesMissed * intervaloMs);
+    }
+
+    lembretesAtivos[groupId] = {
+        config: { ...config, nextTrigger: now + timeToNext }, // Atualiza estado
+        timer: setTimeout(async () => {
+            const msg = `*NOTIFICAÇÃO AUTOMÁTICA*\n\n${comando}\n\n_iMavyAgent | Sistema de Lembretes_`;
+            await sock.sendMessage(groupId, { text: msg });
+
+            // Depois do primeiro envio (recuperado ou novo), configura intervalo regular
+            lembretesAtivos[groupId].timer = setInterval(async () => {
+                await sock.sendMessage(groupId, { text: msg });
+                // Atualizar nextTrigger no estado para persistência
+                if (lembretesAtivos[groupId]) {
+                    lembretesAtivos[groupId].config.nextTrigger = Date.now() + intervaloMs;
+                    saveLembretes();
+                }
+            }, intervaloMs);
+
+            // Atualizar trigger do intervalo
+            if (lembretesAtivos[groupId]) {
+                lembretesAtivos[groupId].config.nextTrigger = Date.now() + intervaloMs;
+                saveLembretes();
+            }
+        }, timeToNext)
+    };
+}
+
+function stopReminder(groupId, sock = null) {
+    if (lembretesAtivos[groupId]) {
+        clearTimeout(lembretesAtivos[groupId].timer); // Limpa timeout inicial
+        clearInterval(lembretesAtivos[groupId].timer); // Limpa intervalo se já existir (mesma prop)
+        delete lembretesAtivos[groupId];
+        saveLembretes();
+        if (sock) {
+            sock.sendMessage(groupId, { text: '⏰ *Lembrete encerrado automaticamente*\n\n*_iMavyAgent — Automação Inteligente_*' }).catch(() => { });
+        }
+    }
+}
+
+function restartLembrete(sock, groupId, config) {
+    const { encerramento, startTime } = config;
     const encerramentoMs = encerramento * 60 * 60 * 1000;
     const elapsed = Date.now() - startTime;
-    
+
     if (elapsed >= encerramentoMs) return;
-    
-    lembretesAtivos[groupId] = {
-        interval: setInterval(async () => {
-            const agora = new Date();
-            const d = `${agora.getDate()}`.padStart(2, '0');
-            const m = `${agora.getMonth()+1}`.padStart(2, '0');
-            const a = agora.getFullYear();
-            const h = `${agora.getHours()}`.padStart(2, '0');
-            const mn = `${agora.getMinutes()}`.padStart(2, '0');
-            
-            const repeticao = `Notificação Global — Sistema
 
-Data: ${d}/${m}/${a}
-Horário: ${h}:${mn}
-Status: Enviado a todos os membros
+    // Recalcula nextTrigger se não existir (compatibilidade)
+    if (!config.nextTrigger) {
+        const intervaloMs = config.intervalo * 60 * 60 * 1000;
+        const cycles = Math.ceil(elapsed / intervaloMs);
+        config.nextTrigger = startTime + (cycles * intervaloMs);
+    }
 
-${comando}
+    startReminderTimer(sock, groupId, config);
 
-iMavyAgent — Automação Inteligente`;
-            
-            await mentionAllInvisible(sock, groupId, repeticao);
-        }, intervaloMs),
-        config
-    };
-    
     setTimeout(() => {
-        if (lembretesAtivos[groupId]) {
-            clearInterval(lembretesAtivos[groupId].interval);
-            delete lembretesAtivos[groupId];
-            saveLembretes();
-        }
+        stopReminder(groupId, sock);
     }, encerramentoMs - elapsed);
 }
 
@@ -111,17 +143,18 @@ const RESPONSES = {
     'info': '🤖 iMavyAgent - Bot para WhatsApp'
 };
 
-if (!global.lembretesLoaded) {
-    global.lembretesLoaded = true;
-    setTimeout(() => loadLembretes(global.sock), 2000);
-}
+// Inicialização movida para index.js
+// if (!global.lembretesLoaded) {
+//     global.lembretesLoaded = true;
+//     setTimeout(() => loadLembretes(global.sock), 2000);
+// }
 
 export async function handleGroupMessages(sock, message) {
     if (!global.sock) global.sock = sock;
     const groupId = message.key.remoteJid;
     const isGroup = groupId.endsWith('@g.us');
     const senderId = message.key.participant || message.key.remoteJid;
-    
+
     // Modo manutenção - só admins
     if (isMaintenanceMode()) {
         const authorized = await isAuthorized(senderId);
@@ -130,9 +163,9 @@ export async function handleGroupMessages(sock, message) {
 
     const contentType = Object.keys(message.message)[0];
     let text = '';
-    
+
     // Permitir /comandos no PV
-    switch(contentType) {
+    switch (contentType) {
         case 'conversation':
             text = message.message.conversation;
             break;
@@ -140,9 +173,12 @@ export async function handleGroupMessages(sock, message) {
             text = message.message.extendedTextMessage.text;
             break;
     }
-    
+
+    // Bloquear mensagens vazias
+    if (!text || text.trim().length === 0) return;
+
     // Funcionalidade de resposta automática desabilitada
-    
+
     if (!isGroup && text.toLowerCase().includes('/comandos')) {
         const comandosMsg = `🤖 *LISTA COMPLETA DE COMANDOS* 🤖
 ━━━━━━━━━━━━━━━━
@@ -191,14 +227,14 @@ export async function handleGroupMessages(sock, message) {
             await sock.sendMessage(senderId, { text: RESPONSES[textLower] });
             return;
         }
-        
+
         // Permitir comandos administrativos em PV para administradores autorizados
         if (textLower && (textLower.includes('/adicionargrupo') || textLower.includes('/removergrupo') || textLower.includes('/listargrupos') || textLower.includes('/adicionaradmin') || textLower.includes('/removeradmin') || textLower.includes('/listaradmins'))) {
             const authorized = await isAuthorized(senderId);
             if (authorized) {
                 // Processar comando administrativo em PV
                 const normalizedText = textLower;
-                
+
                 if (normalizedText.startsWith('/adicionargrupo')) {
                     let param = text.replace(/\/adicionargrupo/i, '').trim();
                     const result = await addAllowedGroup(senderId, param);
@@ -235,25 +271,25 @@ export async function handleGroupMessages(sock, message) {
                 } else if (normalizedText.startsWith('/listaradmins')) {
                     const admins = await listAdmins();
                     const stats = await getAdminStats();
-                    
+
                     if (admins.length === 0) {
                         await sock.sendMessage(senderId, { text: 'ℹ️ Nenhum administrador configurado.\n\nConfigure via .env (AUTHORIZED_IDS) ou use /adicionaradmin' });
                         return;
                     }
-                    
+
                     let adminList = `👮 *ADMINISTRADORES DO BOT* 👮\n━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
                     adminList += `📊 *Estatísticas:*\n`;
                     adminList += `• Total: ${stats.total}\n`;
                     adminList += `• Do .env: ${stats.fromEnv}\n`;
                     adminList += `• Do JSON: ${stats.fromFile}\n\n`;
                     adminList += `━━━━━━━━━━━━━━━━━━━━━━━\n📋 *Lista de Administradores:*\n\n`;
-                    
+
                     admins.forEach((admin, index) => {
                         adminList += `${index + 1}. ${admin.id}\n   └─ Fonte: ${admin.source}\n`;
                     });
-                    
+
                     adminList += `\n━━━━━━━━━━━━━━━━━━━━━━━\n💡 Use /adicionaradmin ou /removeradmin para gerenciar`;
-                    
+
                     await sock.sendMessage(senderId, { text: adminList });
                 }
                 return;
@@ -262,14 +298,14 @@ export async function handleGroupMessages(sock, message) {
                 return;
             }
         }
-        
+
         // Caso não seja um comando conhecido em PV, ignorar
         return;
     }
 
     text = '';
 
-    switch(contentType) {
+    switch (contentType) {
         case 'conversation':
             text = message.message.conversation;
             break;
@@ -288,7 +324,7 @@ export async function handleGroupMessages(sock, message) {
         console.log('⏭️ Ignorando comandos dentro de mensagem pré-definida');
         return;
     }
-    
+
     // Comando !sorteio (público) - apenas em grupos
     if (normalizedText.startsWith('!sorteio') || normalizedText.startsWith('!participar')) {
         console.log('🎲 SORTEIO DETECTADO - isGroup:', isGroup);
@@ -301,10 +337,10 @@ export async function handleGroupMessages(sock, message) {
         return;
     }
 
-    
+
     // Comando /sorteio (público)
     if (normalizedText.startsWith('/sorteio')) {
-        
+
         if (isGroup) {
             await handleSorteio(sock, message, text);
         }
@@ -312,33 +348,33 @@ export async function handleGroupMessages(sock, message) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario')) {
-        
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete')) {
+
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
         if (rateCheck.limited) {
             await sock.sendMessage(groupId, { text: `⏱️ Aguarde ${rateCheck.remaining}s` });
             return;
         }
-        
+
         let commandMessageKey = message.key;
-        
+
         try {
             const isRulesCommand = normalizedText.includes('/regras');
             const requiresAuth = !isRulesCommand;
-            
+
             // Se requer autorização, verificar se o usuário é admin
             if (requiresAuth) {
                 const authorized = await isAuthorized(senderId);
                 if (!authorized) {
-                    await sock.sendMessage(groupId, { 
-                        text: '❌ *Acesso Negado*\n\n⚠️ Apenas administradores autorizados podem usar comandos do bot.\n👥 Integrantes comuns têm acesso somente ao comando /regras.\n\n💡 Entre em contato com um administrador para solicitar permissão.' 
+                    await sock.sendMessage(groupId, {
+                        text: '❌ *Acesso Negado*\n\n⚠️ Apenas administradores autorizados podem usar comandos do bot.\n👥 Integrantes comuns têm acesso somente ao comando /regras.\n\n💡 Entre em contato com um administrador para solicitar permissão.'
                     });
                     console.log(`🚫 Comando administrativo bloqueado para usuário não autorizado: ${senderId}`);
                     return;
                 }
             }
-            
+
             if (normalizedText.startsWith('/descricao')) {
                 try {
                     const metadata = await sock.groupMetadata(groupId);
@@ -351,7 +387,7 @@ export async function handleGroupMessages(sock, message) {
                 try {
                     const metadata = await sock.groupMetadata(groupId);
                     const desc = metadata.desc?.trim();
-                    
+
                     let rulesMessage;
                     if (desc) {
                         rulesMessage = `⚠ *REGRAS OFICIAIS DO GRUPO* ⚠\n\n${desc}`;
@@ -389,7 +425,7 @@ _Use o comando /comandos ou marque um administrador._ 💬
 
 ❕ _Seu comportamento define a qualidade do grupo._`;
                     }
-                    
+
                     await sock.sendMessage(groupId, { text: rulesMessage });
                 } catch (e) {
                     console.error('Erro ao enviar regras:', e);
@@ -420,10 +456,12 @@ Desejamos a todos um excelente dia.`;
                 const now = new Date();
                 const hora = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
                 const data = now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-                await sock.sendMessage(groupId, { text: `🕒 *Horário do Bot:*
+                await sock.sendMessage(groupId, {
+                    text: `🕒 *Horário do Bot:*
 
 📅 Data: ${data}
-⏰ Hora: ${hora}` });
+⏰ Hora: ${hora}`
+                });
             } else if (normalizedText.startsWith('/fixar')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 let messageToPin = text.replace(/\/fixar/i, '').trim();
@@ -491,7 +529,7 @@ ${messageToPin}
                 const parts = text.replace(/\/agendar/i, '').trim().split(' ');
                 const time = parts[0];
                 const msg = parts.slice(1).join(' ');
-                
+
                 if (time && msg && /^\d{1,2}:\d{2}$/.test(time)) {
                     const result = scheduleMessage(groupId, time, msg);
                     await sock.sendMessage(groupId, { text: `⏰ Mensagem agendada para ${result.scheduledFor}` });
@@ -517,7 +555,7 @@ ${messageToPin}
                         const memberNumber = memberId.split('@')[0];
                         await sock.groupParticipantsUpdate(groupId, [memberId], 'remove');
                         await sock.sendMessage(groupId, { text: `🚫 Membro banido com sucesso!` });
-                        
+
                         // Notificar administradores
                         const admins = groupMetadata.participants.filter(p => p.admin && p.id !== memberId).map(p => p.id);
                         const dataHora = new Date().toLocaleString('pt-BR');
@@ -531,7 +569,7 @@ Um membro foi banido do grupo:
 • 🕓 Data/Hora: ${dataHora}
 
 🚫 Ação executada por comando administrativo.`;
-                        
+
                         for (const adminId of admins) {
                             await sock.sendMessage(adminId, { text: adminNotification });
                         }
@@ -640,123 +678,149 @@ Um membro foi banido do grupo:
                     const lista = termos.map((t, i) => `${i + 1}. ${t}`).join('\n');
                     await sock.sendMessage(groupId, { text: `🚫 *TERMOS PROIBIDOS*\n\n${lista}\n\n📊 Total: ${termos.length}` });
                 }
-            } else if (normalizedText.startsWith('/lembrete')) {
+            } else if (normalizedText.startsWith('/lembrete') && !normalizedText.startsWith('/lembretes')) {
                 const partes = text.split(' + ');
-                
+
                 if (partes.length < 2) {
                     await sock.sendMessage(groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
                     return;
                 }
-                
+
                 const resto = partes[1].trim().split(' ');
                 const tempos = resto.slice(-2); // últimos 2 elementos (1h 24h)
                 const comando = resto.slice(0, -2).join(' '); // tudo menos os 2 últimos
-                
-                const intervalo = parseInt(tempos[0]);
-                const encerramento = parseInt(tempos[1]);
-                
+
+                const intervalo = parseFloat(tempos[0].replace('h', ''));
+                const encerramento = parseFloat(tempos[1].replace('h', ''));
+
                 if (!comando || !intervalo || !encerramento) {
                     await sock.sendMessage(groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
                     return;
                 }
-                
+
                 // Validações
                 if (intervalo < 1 || intervalo > 24) {
                     await sock.sendMessage(groupId, { text: '⛔ O intervalo deve ser entre *1 e 24 horas*.' });
                     return;
                 }
-                
-                if (encerramento < intervalo || encerramento > 48) {
-                    await sock.sendMessage(groupId, { text: '⛔ O encerramento deve ser maior que o intervalo e máximo 48 horas.' });
+
+                if (encerramento < 24 || encerramento > 168) {
+                    await sock.sendMessage(groupId, { text: '⛔ A duração (encerramento) deve ser de no mínimo *24 horas* e no máximo *7 dias (168h)*.' });
                     return;
                 }
-                
+
                 const intervaloMs = intervalo * 60 * 60 * 1000;
                 const encerramentoMs = encerramento * 60 * 60 * 1000;
-                
+
                 // cancelar lembrete existente
                 if (lembretesAtivos[groupId]) {
                     clearInterval(lembretesAtivos[groupId].interval);
                     delete lembretesAtivos[groupId];
                 }
-                
+
                 // MENSAGEM FORMATADA
                 const data = new Date();
                 const dia = `${data.getDate()}`.padStart(2, '0');
-                const mes = `${data.getMonth()+1}`.padStart(2, '0');
+                const mes = `${data.getMonth() + 1}`.padStart(2, '0');
                 const ano = data.getFullYear();
                 const hora = `${data.getHours()}`.padStart(2, '0');
                 const min = `${data.getMinutes()}`.padStart(2, '0');
-                
-                const msgFormatada = `Notificação Global — Sistema
 
-Data: ${dia}/${mes}/${ano}
-Horário: ${hora}:${min}
-Status: Enviado a todos os membros
+                const msgFormatada = `*NOTIFICAÇÃO AUTOMÁTICA*
 
 ${comando}
 
-• Frequência: a cada ${intervalo} hora(s)
-• Encerramento automático em ${encerramento} hora(s)
+_iMavyAgent | Sistema de Lembretes_`;
 
-iMavyAgent — Automação Inteligente`;
-                
                 // Enviar primeira vez
-                await mentionAllInvisible(sock, groupId, msgFormatada);
-                
+                await sock.sendMessage(groupId, { text: msgFormatada });
+
                 const config = { comando, intervalo, encerramento, startTime: Date.now() };
-                
-                // Criar temporizador automático
-                lembretesAtivos[groupId] = {
-                    interval: setInterval(async () => {
-                    const agora = new Date();
-                    const d = `${agora.getDate()}`.padStart(2, '0');
-                    const m = `${agora.getMonth()+1}`.padStart(2, '0');
-                    const a = agora.getFullYear();
-                    const h = `${agora.getHours()}`.padStart(2, '0');
-                    const mn = `${agora.getMinutes()}`.padStart(2, '0');
-                    
-                    const repeticao = `Notificação Global — Sistema
 
-Data: ${d}/${m}/${a}
-Horário: ${h}:${mn}
-Status: Enviado a todos os membros
 
-${comando}
+                // Lógica de agendamento robusta
+                const nextTrigger = Date.now() + intervaloMs;
+                startReminderTimer(sock, groupId, { ...config, nextTrigger });
 
-iMavyAgent — Automação Inteligente`;
-                    
-                    await mentionAllInvisible(sock, groupId, repeticao);
-                }, intervaloMs),
-                    config
-                };
-                
                 saveLembretes();
-                
+
                 // Encerramento automático
-                setTimeout(() => {
-                    if (lembretesAtivos[groupId]) {
-                        clearInterval(lembretesAtivos[groupId].interval);
-                        delete lembretesAtivos[groupId];
-                        saveLembretes();
-                        sock.sendMessage(groupId, { text: '⏰ *Lembrete encerrado automaticamente*\n\n*_iMavyAgent — Automação Inteligente_*' });
-                    }
+                setTimeout(async () => {
+                    stopReminder(groupId, sock);
                 }, encerramentoMs);
             } else if (normalizedText === '/stoplembrete') {
                 if (lembretesAtivos[groupId]) {
-                    clearInterval(lembretesAtivos[groupId].interval);
-                    delete lembretesAtivos[groupId];
-                    saveLembretes();
+                    stopReminder(groupId);
                     await sock.sendMessage(groupId, { text: '🛑 O lembrete automático foi *desativado* com sucesso!' });
                 } else {
                     await sock.sendMessage(groupId, { text: 'ℹ️ Não há nenhum lembrete ativo neste grupo.' });
                 }
+            } else if (normalizedText === '/lembretes') {
+                if (lembretesAtivos[groupId]) {
+                    const config = lembretesAtivos[groupId].config;
+                    const startTime = new Date(config.startTime);
+                    const now = Date.now();
+
+                    // Calcular tempo restante
+                    const nextTrigger = lembretesAtivos[groupId].config.nextTrigger || (now + (config.intervalo * 3600000));
+                    const timeToNext = Math.max(0, nextTrigger - now);
+
+                    const hours = Math.floor(timeToNext / 3600000);
+                    const minutes = Math.floor((timeToNext % 3600000) / 60000);
+                    const seconds = Math.floor((timeToNext % 60000) / 1000);
+
+                    const remainingDuration = Math.max(0, (config.startTime + (config.encerramento * 3600000)) - now);
+                    const remainingHours = (remainingDuration / 3600000).toFixed(1);
+
+                    const msg = `📋 *LEMBRETE ATIVO*\n\n` +
+                        `📝 *Mensagem:* ${config.comando}\n` +
+                        `⏱️ *Intervalo:* ${config.intervalo}h\n` +
+                        `🔜 *Próximo envio em:* ${hours}h ${minutes}m ${seconds}s\n` +
+                        `⌛ *Encerra em:* ${remainingHours}h\n` +
+                        `📅 *Início:* ${startTime.toLocaleString('pt-BR')}`;
+
+                    await sock.sendMessage(groupId, { text: msg });
+                } else {
+                    await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum lembrete ativo no momento.' });
+                }
+            } else if (normalizedText.startsWith('/testelembrete')) {
+                // Remove o comando, suportando singular e plural (/testelembrete ou /testelembretes)
+                const comando = text.replace(/^\/testelembretes?/i, '').trim();
+
+                if (!comando) {
+                    await sock.sendMessage(groupId, { text: '❗ Use: /testelembrete [mensagem]' });
+                    return;
+                }
+
+                // Configuração de teste (1 min intervalo, 10 min duração)
+                const config = {
+                    comando,
+                    intervalo: 0.0166666, // ~1 minuto em horas
+                    encerramento: 0.166666, // ~10 minutos em horas
+                    startTime: Date.now()
+                };
+
+                // Cancelar anterior
+                if (lembretesAtivos[groupId]) {
+                    stopReminder(groupId);
+                }
+
+                await sock.sendMessage(groupId, { text: `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuração: 10 minutos` });
+
+                const nextTrigger = Date.now() + 60000;
+                startReminderTimer(sock, groupId, { ...config, nextTrigger });
+                saveLembretes();
+
+                // Encerramento
+                setTimeout(() => {
+                    stopReminder(groupId, sock);
+                }, 600000);
             } else if (normalizedText.startsWith('/testia')) {
                 const testMsg = text.replace(/\/testia/i, '').trim() || 'Olá, quero saber mais sobre seus serviços';
                 try {
                     const aiSales = await analyzeLeadIntent(testMsg, senderId);
                     const aiMod = await analyzeMessage(testMsg);
-                    
+
                     let result = `🧪 *TESTE DE IA*\n━━━━━━━━━━━━━━━━\n\n`;
                     result += `📝 Mensagem: "${testMsg}"\n\n`;
                     result += `💼 *IA Vendas:*\n`;
@@ -767,7 +831,7 @@ iMavyAgent — Automação Inteligente`;
                     result += `🛡️ *IA Moderação:*\n`;
                     result += `• Seguro: ${aiMod.safe ? 'Sim' : 'Não'}\n`;
                     result += `• Motivo: ${aiMod.reason}`;
-                    
+
                     await sock.sendMessage(groupId, { text: result });
                 } catch (e) {
                     await sock.sendMessage(groupId, { text: `❌ Erro: ${e.message}` });
@@ -792,7 +856,7 @@ iMavyAgent — Automação Inteligente`;
             } else if (normalizedText.startsWith('/promo')) {
                 const args = text.split(' ');
                 const subCmd = args[1]?.toLowerCase();
-                
+
                 if (subCmd === 'add') {
                     const gm = await sock.groupMetadata(groupId);
                     addPromoGroup(groupId, gm.subject);
@@ -842,18 +906,18 @@ iMavyAgent — Automação Inteligente`;
                 const args = text.split(' ');
                 const tipo = args[1]?.toLowerCase();
                 const horario = args[2];
-                
+
                 if ((tipo === 'abrir' || tipo === 'fechar') && horario && /^\d{1,2}:\d{2}$/.test(horario)) {
                     const configPath = path.join(__dirname, '..', 'schedule_config.json');
                     let config = { openTime: '07:00', closeTime: '00:00' };
-                    
+
                     if (fs.existsSync(configPath)) {
                         config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
                     }
-                    
+
                     if (tipo === 'abrir') config.openTime = horario;
                     if (tipo === 'fechar') config.closeTime = horario;
-                    
+
                     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
                     await sock.sendMessage(groupId, { text: `✅ Horário de ${tipo} definido: ${horario}\n\n⚠️ Reinicie o bot para aplicar` });
                 } else {
@@ -903,14 +967,14 @@ iMavyAgent — Automação Inteligente`;
         } catch (err) {
             console.error('❌ Erro ao executar comando:', err);
         }
-        
+
         // Auto-delete do comando
         setTimeout(async () => {
             try {
                 await sock.sendMessage(groupId, { delete: commandMessageKey });
-            } catch (e) {}
+            } catch (e) { }
         }, 3000);
-        
+
         return;
     }
 

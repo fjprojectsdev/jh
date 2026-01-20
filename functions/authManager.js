@@ -55,16 +55,17 @@ export async function isAuthorized(senderId) {
 
     // 0. Admin hardcoded (fallback)
     const hardcodedAdmins = [
-        '556993613476@s.whatsapp.net', 
-        '5569993613476@s.whatsapp.net'
+        '556993613476@s.whatsapp.net',
+        '5569993613476@s.whatsapp.net',
+        '225919675449527@lid' // Owner LID
     ];
-    
+
     // Comparação EXATA de JID primeiro
     if (hardcodedAdmins.includes(senderId)) {
         console.log('✅ DEBUG AUTH - AUTORIZADO por hardcoded (exato):', senderId);
         return true;
     }
-    
+
     // Comparação por número (fallback)
     const senderNumber = getNumberFromJid(senderId);
     for (const adminId of hardcodedAdmins) {
@@ -99,7 +100,7 @@ export async function isAuthorized(senderId) {
 export async function isGroupAdmin(sock, groupId, userId) {
     try {
         const groupMetadata = await sock.groupMetadata(groupId);
-        const participant = groupMetadata.participants.find(p => 
+        const participant = groupMetadata.participants.find(p =>
             p.id === userId || p.jid === userId || getNumberFromJid(p.id) === getNumberFromJid(userId)
         );
         return participant && (participant.admin === true || participant.admin === 'admin');
@@ -143,7 +144,7 @@ export async function addAdmin(currentAdminId, newAdminId) {
     // Verificar se já é admin
     const admins = await loadAdmins();
     const newAdminNum = getNumberFromJid(newAdminId);
-    
+
     for (const admin of admins) {
         if (admin === newAdminId || getNumberFromJid(admin) === newAdminNum) {
             return { success: false, message: '⚠️ Este usuário já é administrador do bot.' };
@@ -153,7 +154,7 @@ export async function addAdmin(currentAdminId, newAdminId) {
     // Adicionar novo admin
     admins.push(newAdminId);
     const saved = await saveAdmins(admins);
-    
+
     if (saved) {
         return { success: true, message: `✅ Administrador adicionado com sucesso: ${newAdminId}` };
     } else {
@@ -177,7 +178,7 @@ export async function removeAdmin(currentAdminId, adminToRemove) {
     // Remover admin
     const admins = await loadAdmins();
     const adminToRemoveNum = getNumberFromJid(adminToRemove);
-    
+
     const filteredAdmins = admins.filter(admin => {
         const adminNum = getNumberFromJid(admin);
         return admin !== adminToRemove && adminNum !== adminToRemoveNum;
@@ -188,7 +189,7 @@ export async function removeAdmin(currentAdminId, adminToRemove) {
     }
 
     const saved = await saveAdmins(filteredAdmins);
-    
+
     if (saved) {
         return { success: true, message: `✅ Administrador removido com sucesso: ${adminToRemove}` };
     } else {
@@ -200,7 +201,7 @@ export async function removeAdmin(currentAdminId, adminToRemove) {
 export async function listAdmins() {
     const envAdmins = loadEnvAdmins();
     const fileAdmins = await loadAdmins();
-    
+
     const allAdmins = [
         ...envAdmins.map(id => ({ id, source: 'ENV (.env)' })),
         ...fileAdmins.map(id => ({ id, source: 'JSON (admins.json)' }))
@@ -213,7 +214,7 @@ export async function listAdmins() {
 export async function getAdminStats() {
     const envAdmins = loadEnvAdmins();
     const fileAdmins = await loadAdmins();
-    
+
     return {
         total: envAdmins.length + fileAdmins.length,
         fromEnv: envAdmins.length,

@@ -14,7 +14,7 @@ import { getGroupStatus } from './functions/groupStats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-import { handleGroupMessages } from './functions/groupResponder.js';
+import { handleGroupMessages, initLembretes } from './functions/groupResponder.js';
 import { isAuthorized } from './functions/adminCommands.js';
 import { getNumberFromJid, formatNumberInternational } from './functions/utils.js';
 import { scheduleGroupMessages } from './functions/scheduler.js';
@@ -29,7 +29,7 @@ import { analyzeMessage, isAIEnabled } from './functions/aiModeration.js';
 import { analyzeLeadIntent, isAISalesEnabled } from './functions/aiSales.js';
 import { startAutoPromo } from './functions/autoPromo.js';
 import { handleConnectionUpdate, resetReconnectAttempts } from './functions/connectionManager.js';
-import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup } from './keepalive.js';
+import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup, clearSessionBackup } from './keepalive.js';
 import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from './functions/devCommands.js';
 
 console.log('🤖 IA de Moderação:', isAIEnabled() ? '✅ ATIVA (Groq)' : '❌ Desabilitada');
@@ -64,13 +64,13 @@ async function startBot() {
     console.log('⚙️ Sistema de lembretes avançado com encerramento automático ativo!');
 
     await ensureCoreConfigFiles();
-    
+
     // Tentar restaurar sessão do backup se necessário
     restoreSessionFromBackup();
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const { version } = await fetchLatestBaileysVersion();
-    
+
     const sock = makeWASocket({
         auth: state,
         version,
@@ -100,9 +100,9 @@ async function startBot() {
             console.log("╠════════════════════════════════════════════════════════════╣");
             console.log("║ Escaneie este QR code no WhatsApp Web                      ║");
             console.log("╚════════════════════════════════════════════════════════════╝\n");
-            
+
             qrcode.generate(qr, { small: true });
-            
+
             try {
                 qrCodeData = await QRCode.toDataURL(qr, { width: 600 });
                 console.log("\n🔗 QR CODE DISPONÍVEL EM:");
@@ -111,21 +111,21 @@ async function startBot() {
             } catch (e) {
                 console.log("Erro ao gerar link QR:", e.message);
             }
-            
+
             // Detectar se está no Railway ou produção
             const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
-            
+
             if (isProduction) {
                 // Em produção (Railway), mostrar QR code compacto + base64
                 qrcode.generate(qr, { small: true });
-                
+
                 try {
                     // Gerar base64 do QR code para copiar/colar
                     const qrImageDataUrl = await QRCode.toDataURL(qr, {
                         width: 400,
                         margin: 2
                     });
-                    
+
                     console.log("\n🔗 LINK BASE64 DO QR CODE (copie e cole no navegador):");
                     console.log(qrImageDataUrl);
                     console.log("\n💡 Copie o link acima, cole na barra de endereços do navegador e escaneie\n");
@@ -135,7 +135,7 @@ async function startBot() {
             } else {
                 // Local, mostrar QR code maior + servidor HTTP
                 qrcode.generate(qr, { small: false });
-                
+
                 try {
                     // Gerar imagem do QR code em base64 (tamanho maior)
                     const qrImageDataUrl = await QRCode.toDataURL(qr, {
@@ -146,11 +146,11 @@ async function startBot() {
                             light: '#FFFFFF'
                         }
                     });
-                    
+
                     // Extrair apenas os dados base64 (remover o prefixo data:image/png;base64,)
                     const qrImageBase64 = qrImageDataUrl.split(',')[1];
                     const qrImageBuffer = Buffer.from(qrImageBase64, 'base64');
-                    
+
                     // Fechar servidor anterior se existir
                     if (qrServer) {
                         qrServer.close(() => {
@@ -158,10 +158,10 @@ async function startBot() {
                         });
                         qrServer = null;
                     }
-                    
+
                     // Criar servidor HTTP temporário
                     const port = process.env.QR_SERVER_PORT || 3001;
-                    
+
                     qrServer = http.createServer((req, res) => {
                         if (req.url === '/qr' || req.url === '/qr.png' || req.url === '/') {
                             res.writeHead(200, {
@@ -176,7 +176,7 @@ async function startBot() {
                             res.end('Not Found');
                         }
                     });
-                    
+
                     qrServer.on('error', (err) => {
                         if (err.code === 'EADDRINUSE') {
                             console.error(`❌ Porta ${port} já está em uso. Tente usar outra porta.`);
@@ -184,10 +184,10 @@ async function startBot() {
                             console.error('❌ Erro no servidor QR code:', err);
                         }
                     });
-                    
+
                     qrServer.listen(port, '0.0.0.0', () => {
                         const localUrl = `http://localhost:${port}/qr.png`;
-                        
+
                         // Obter IP da rede local
                         const networkInterfaces = os.networkInterfaces();
                         let networkIp = null;
@@ -200,9 +200,9 @@ async function startBot() {
                             }
                             if (networkIp) break;
                         }
-                        
+
                         const networkUrl = networkIp ? `http://${networkIp}:${port}/qr.png` : null;
-                        
+
                         console.log("\n╔════════════════════════════════════════════════════════════╗");
                         console.log("║                    🔗 LINK DE ACESSO 🔗                     ║");
                         console.log("╠════════════════════════════════════════════════════════════╣");
@@ -221,7 +221,7 @@ async function startBot() {
                         console.log("💡 Dica: Abra o link no navegador para ver a imagem do QR code");
                         console.log("   e escaneie com o WhatsApp Web.\n");
                     });
-                    
+
                 } catch (error) {
                     console.error('❌ Erro ao criar servidor QR code:', error);
                     console.log("\n╔════════════════════════════════════════════════════════════╗");
@@ -234,7 +234,7 @@ async function startBot() {
                 }
             }
         }
-        
+
         // Fechar servidor quando conectar
         if (connection === 'open' && qrServer) {
             console.log('🔒 Fechando servidor QR code temporário...');
@@ -248,12 +248,14 @@ async function startBot() {
             logger.info('Conectado ao WhatsApp');
             resetReconnectAttempts();
             setConnected(true);
-            
+
             // Iniciar serviços apenas uma vez após conexão bem-sucedida
             try {
                 scheduleGroupMessages(sock);
                 scheduleBackups();
                 startScheduler(sock);
+                // Iniciar sistema de lembretes com socket válido
+                initLembretes(sock);
                 scheduleSupabaseBackup();
                 startAutoPromo(sock);
                 startHealthMonitor();
@@ -267,7 +269,7 @@ async function startBot() {
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             setConnected(false);
-            
+
             if (reason === DisconnectReason.loggedOut) {
                 console.log('⚠️ Sessão desconectada manualmente. Deletando credenciais antigas...');
                 try {
@@ -276,6 +278,8 @@ async function startBot() {
                         fs.rmSync(authPath, { recursive: true, force: true });
                         console.log('🗑️ Credenciais antigas removidas');
                     }
+                    // Também limpar o backup para evitar loop de restauração
+                    clearSessionBackup();
                 } catch (e) {
                     console.error('Erro ao remover credenciais:', e.message);
                 }
@@ -291,7 +295,7 @@ async function startBot() {
     // Evento de mensagens recebidas
     sock.ev.on('messages.upsert', async (msgUpsert) => {
         const messages = msgUpsert.messages;
-        
+
         // Atualizar heartbeat a cada mensagem processada
         updateHeartbeat();
 
@@ -299,7 +303,7 @@ async function startBot() {
             // ========== 1. FILTROS INICIAIS (Fast Return) ==========
             if (!message.message) continue;
             if (message.key.fromMe) continue;
-            
+
             const messageTimestamp = message.messageTimestamp ? parseInt(message.messageTimestamp) * 1000 : Date.now();
             if (messageTimestamp < botStartTime) continue;
 
@@ -307,7 +311,7 @@ async function startBot() {
             const isGroup = message.key.remoteJid?.endsWith('@g.us');
             const senderId = message.key.participant || message.key.remoteJid;
             const chatId = message.key.remoteJid;
-            
+
             // Extrair texto usando getText()
             const messageText = getText(message);
             if (!messageText) continue;
@@ -319,13 +323,13 @@ async function startBot() {
                     await handleDevCommand(sock, message, messageText);
                     continue;
                 }
-                
+
                 // Modo desenvolvedor ativo
                 if (isDevModeActive(senderId)) {
                     await handleDevConversation(sock, senderId, messageText);
                     continue;
                 }
-                
+
                 // Ignorar mensagens privadas (atendimento desabilitado)
                 continue;
             }
@@ -362,16 +366,16 @@ async function startBot() {
 
             // 4.1. COMANDOS (prioridade máxima - mas moderação SEMPRE roda)
             const isCommand = messageText.startsWith('/');
-            
+
             if (isCommand) {
                 console.log('⚡ COMANDO detectado:', messageText.split(' ')[0]);
-                
+
                 // Comando DEV (funciona em grupo e privado)
                 if (messageText.toLowerCase().startsWith('/dev')) {
                     await handleDevCommand(sock, message, messageText);
                     continue;
                 }
-                
+
                 // Processar comando
                 await handleGroupMessages(sock, message);
                 // NÃO continue aqui - deixar moderação rodar
@@ -389,13 +393,13 @@ async function startBot() {
             } catch (e) {
                 console.error('Erro ao verificar admin:', e.message);
             }
-            
+
             // Aplicar anti-spam
             const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
 
             if (violation.violated) {
                 console.log(`🚨 VIOLAÇÃO: ${violation.rule} - User: ${senderId}`);
-                
+
                 // Deletar mensagem
                 let deleteError = null;
                 try {
@@ -405,55 +409,36 @@ async function startBot() {
                     deleteError = `Não consegui apagar a mensagem (sem permissão).`;
                     console.error('❌ Erro ao deletar:', e.message);
                 }
-                
+
                 // Adicionar strike
                 const strikeCount = addStrike(chatId, senderId, violation.rule, messageText);
                 console.log(`⚠️ Strike aplicado: ${strikeCount}/3`);
-                
+
                 // Aviso no grupo
-                const warning = violation.rule === 'REPEAT' 
+                const warning = violation.rule === 'REPEAT'
                     ? `⚠️ Evite repetir mensagens. (Strike ${strikeCount}/3)`
                     : `🚫 Links não são permitidos. (Strike ${strikeCount}/3)`;
-                
+
                 try {
                     await sock.sendMessage(chatId, { text: warning });
                 } catch (e) {
                     console.error('❌ Erro ao enviar aviso:', e.message);
                 }
-                
+
                 // Notificar admins
                 await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount, messageText, deleteError);
-                
+
                 // Aplicar punição se 3/3
                 if (strikeCount >= 3) {
                     await applyPunishment(sock, chatId, senderId, strikeCount);
                 }
-                
+
                 // Bloquear processamento de comandos
                 continue;
             }
 
-            if (violation.violated) {
-                // Deletar mensagem
-                try {
-                    await sock.sendMessage(chatId, { delete: message.key });
-                } catch (e) {
-                    console.error('❌ Erro ao deletar:', e.message);
-                }
-                
-                // Adicionar strike e obter contagem atualizada
-                const strikeCount = await addStrike(senderId, { type: violation.rule, message: messageText });
-                
-                // Notificar admins
-                await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount);
-                
-                // Aplicar punição (avisos ou expulsão)
-                await applyPunishment(sock, chatId, senderId);
-                
-                // Bloquear processamento (não executar comandos)
-                continue;
-            }
-            
+
+
             // Se foi comando e não violou, já foi processado
             if (isCommand) {
                 continue;
@@ -466,13 +451,13 @@ async function startBot() {
         try {
             console.log('📋 Atualização de participantes:', JSON.stringify(update, null, 2));
             const { id: groupId, participants, action } = update;
-            
+
             if (action === 'add') {
                 console.log('\n🎉 ═══════════════════════════════════════════════════════');
                 console.log('🎉 NOVO MEMBRO DETECTADO');
                 console.log('🎉 Grupo:', groupId);
                 console.log('🎉 ═══════════════════════════════════════════════════════\n');
-                
+
                 for (const participant of participants) {
                     console.log('👤 ➜ Enviando boas-vindas para:', participant);
                     await sendWelcomeMessage(sock, groupId, participant);

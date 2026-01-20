@@ -30,12 +30,12 @@ export function checkHealth() {
     const now = Date.now();
     const timeSinceLastHeartbeat = now - lastHeartbeat;
     const maxIdleTime = 5 * 60 * 1000; // 5 minutos
-    
+
     if (timeSinceLastHeartbeat > maxIdleTime) {
         console.log('⚠️ Bot parece estar travado. Último heartbeat:', new Date(lastHeartbeat).toISOString());
         return false;
     }
-    
+
     return true;
 }
 
@@ -45,7 +45,7 @@ export function startHealthMonitor() {
     setInterval(() => {
         updateHeartbeat();
     }, 30000);
-    
+
     // Verificar saúde a cada minuto
     setInterval(() => {
         const healthy = checkHealth();
@@ -53,7 +53,7 @@ export function startHealthMonitor() {
             console.log('❌ Bot não está respondendo. Considere reiniciar.');
         }
     }, 60000);
-    
+
     console.log('💓 Monitor de saúde iniciado');
 }
 
@@ -63,13 +63,13 @@ export function startSessionBackup() {
         try {
             const authPath = path.join(__dirname, 'auth_info');
             const backupPath = path.join(__dirname, 'auth_backup');
-            
+
             if (fs.existsSync(authPath)) {
                 // Criar backup da sessão
                 if (fs.existsSync(backupPath)) {
                     fs.rmSync(backupPath, { recursive: true, force: true });
                 }
-                
+
                 // Copiar recursivamente
                 fs.cpSync(authPath, backupPath, { recursive: true });
                 console.log('💾 Backup da sessão criado:', new Date().toISOString());
@@ -78,7 +78,7 @@ export function startSessionBackup() {
             console.error('Erro ao fazer backup da sessão:', e.message);
         }
     }, 30 * 60 * 1000); // A cada 30 minutos
-    
+
     console.log('💾 Backup automático de sessão iniciado');
 }
 
@@ -87,7 +87,7 @@ export function restoreSessionFromBackup() {
     try {
         const authPath = path.join(__dirname, 'auth_info');
         const backupPath = path.join(__dirname, 'auth_backup');
-        
+
         if (!fs.existsSync(authPath) && fs.existsSync(backupPath)) {
             console.log('🔄 Restaurando sessão do backup...');
             fs.cpSync(backupPath, authPath, { recursive: true });
@@ -98,4 +98,17 @@ export function restoreSessionFromBackup() {
         console.error('Erro ao restaurar sessão:', e.message);
     }
     return false;
+}
+
+// Limpar backup da sessão (usado ao desconectar manualmente)
+export function clearSessionBackup() {
+    try {
+        const backupPath = path.join(__dirname, 'auth_backup');
+        if (fs.existsSync(backupPath)) {
+            fs.rmSync(backupPath, { recursive: true, force: true });
+            console.log('🗑️ Backup da sessão removido preventivamente');
+        }
+    } catch (e) {
+        console.error('Erro ao limpar backup da sessão:', e.message);
+    }
 }
