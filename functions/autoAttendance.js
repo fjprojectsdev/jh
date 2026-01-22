@@ -25,6 +25,8 @@ Bot personalizado com nome, logo, mensagens e comportamento da sua empresa. Até
 ━━━━━━━━━━━━━━━━
 💬 Quer que eu te ajude a contratar o melhor plano para o seu caso?`;
 
+import { sendSafeMessage } from './messageHandler.js';
+
 export function detectClientInterest(text) {
     const lowerText = text.toLowerCase();
     return KEYWORDS.some(keyword => lowerText.includes(keyword));
@@ -32,7 +34,7 @@ export function detectClientInterest(text) {
 
 export async function sendAttendanceMessage(sock, chatId) {
     try {
-        await sock.sendMessage(chatId, { text: ATTENDANCE_MESSAGE });
+        await sendSafeMessage(sock, chatId, { text: ATTENDANCE_MESSAGE });
         console.log(`✅ Mensagem de atendimento enviada para: ${chatId}`);
         return true;
     } catch (error) {
@@ -50,18 +52,18 @@ export function shouldSendAttendance(userId) {
         return false;
     }
     attendedUsers.add(userId);
-    
+
     // Limpar após 24h
     setTimeout(() => {
         attendedUsers.delete(userId);
     }, 24 * 60 * 60 * 1000);
-    
+
     return true;
 }
 
 export async function sendVerificationMessage(sock, chatId) {
     try {
-        await sock.sendMessage(chatId, { 
+        await sendSafeMessage(sock, chatId, {
             text: `👋 Olá! Posso lhe ajudar?
 
 💡 Responda *SIM* se deseja conhecer nossos serviços de automação para WhatsApp.`
@@ -92,24 +94,24 @@ export async function notifyAttendants(sock, clientId, clientNumber, getAdmins) 
 💬 O cliente digitou */valores* e está aguardando contato!
 
 ⏰ ${new Date().toLocaleString('pt-BR')}`;
-    
+
     const admins = await getAdmins();
-    
+
     // Excluir admin cliente que não precisa receber notificações
     const excludedAdmins = ['225919675449527@lid'];
-    
+
     for (const admin of admins) {
         try {
             const adminJid = admin.id || admin.user_id;
             const formattedJid = adminJid.includes('@') ? adminJid : `${adminJid}@s.whatsapp.net`;
-            
+
             // Pular admin excluído
             if (excludedAdmins.includes(adminJid) || excludedAdmins.includes(formattedJid)) {
                 console.log(`⏭️ Pulando notificação para admin cliente: ${formattedJid}`);
                 continue;
             }
-            
-            await sock.sendMessage(formattedJid, { text: msg });
+
+            await sendSafeMessage(sock, formattedJid, { text: msg });
             console.log(`✅ Notificação enviada para admin: ${formattedJid}`);
         } catch (e) {
             console.error('Erro ao notificar admin:', e);

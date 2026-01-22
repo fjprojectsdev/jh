@@ -8,8 +8,10 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { sendWelcomeMessage } from './functions/welcomeMessage.js';
+import { sendSafeMessage } from './functions/messageHandler.js';
+import { attachOutgoingGuard } from './functions/outgoingGuard.js';
 import { checkViolation, getText, notifyAdmins, addStrike, getStrikes, applyPunishment } from './functions/antiSpam.js';
+import { handleWelcomeEvent } from './functions/welcomeMessage.js';
 import { getGroupStatus } from './functions/groupStats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -88,6 +90,9 @@ async function startBot() {
             return { conversation: '' };
         }
     });
+
+    // Anexar guarda de saída (Monkey Patch)
+    attachOutgoingGuard(sock);
 
     sock.ev.on('creds.update', saveCreds);
 
@@ -335,7 +340,12 @@ async function startBot() {
             }
 
             // ========== 4. FLUXO DE GRUPO ==========
-            // Validar grupo autorizado
+            // Mover leitura de arquivo para fora do loop de mensagens ou usar cache?
+            // Vamos logar tudo para debug agora.
+
+            console.log(`🔍 DEBUG: Processando msg de ${senderId} no grupo ${chatId}`);
+
+            // Carregar allowed_groups (Ideal: mover par memória global recarregável)
             let ALLOWED_GROUP_NAMES = new Set();
             try {
                 const allowedPath = path.join(__dirname, 'allowed_groups.json');
@@ -353,12 +363,15 @@ async function startBot() {
             try {
                 const groupMetadata = await sock.groupMetadata(chatId);
                 groupSubject = groupMetadata.subject || '';
+                console.log(`🔍 DEBUG: Nome do grupo obtido: "${groupSubject}"`);
             } catch (e) {
                 console.warn('⚠️ Falha ao obter metadata do grupo:', e.message);
             }
 
             if (!groupSubject || !ALLOWED_GROUP_NAMES.has(groupSubject)) {
-                console.log('⏭️ Grupo NÃO autorizado:', groupSubject || chatId);
+                console.log(`⏭️ Ignorado: Grupo "${groupSubject}" não está na lista permitida.`);
+                // DEBUG: Listar permitidos se falhar
+                // console.log('Permitidos:', Array.from(ALLOWED_GROUP_NAMES));
                 continue;
             }
 
@@ -366,6 +379,7 @@ async function startBot() {
 
             // 4.1. COMANDOS (prioridade máxima - mas moderação SEMPRE roda)
             const isCommand = messageText.startsWith('/');
+            console.log(`🔍 DEBUG: isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
 
             if (isCommand) {
                 console.log('⚡ COMANDO detectado:', messageText.split(' ')[0]);
@@ -403,7 +417,7 @@ async function startBot() {
                 // Deletar mensagem
                 let deleteError = null;
                 try {
-                    await sock.sendMessage(chatId, { delete: message.key });
+                    await sendSafeMessage(sock, chatId, { delete: message.key });
                     console.log('✅ Mensagem deletada');
                 } catch (e) {
                     deleteError = `Não consegui apagar a mensagem (sem permissão).`;
@@ -420,7 +434,7 @@ async function startBot() {
                     : `🚫 Links não são permitidos. (Strike ${strikeCount}/3)`;
 
                 try {
-                    await sock.sendMessage(chatId, { text: warning });
+                    await sendSafeMessage(sock, chatId, { text: warning });
                 } catch (e) {
                     console.error('❌ Erro ao enviar aviso:', e.message);
                 }
@@ -447,23 +461,23 @@ async function startBot() {
     });
 
     // Evento para detectar novos membros no grupo
+    // Período de tolerância de inicialização (10s) para evitar processar histórico
+    const BOOT_GRACE_PERIOD = Date.now() + 10000;
+
     sock.ev.on('group-participants.update', async (update) => {
         try {
+            // Ignorar eventos antigas ou durante inicialização
+            if (Date.now() < BOOT_GRACE_PERIOD) {
+                console.log('⏳ Ignorando evento de participantes durante inicialização...');
+                return;
+            }
+
             console.log('📋 Atualização de participantes:', JSON.stringify(update, null, 2));
             const { id: groupId, participants, action } = update;
 
+            // Delegar para o handler inteligente com batch
             if (action === 'add') {
-                console.log('\n🎉 ═══════════════════════════════════════════════════════');
-                console.log('🎉 NOVO MEMBRO DETECTADO');
-                console.log('🎉 Grupo:', groupId);
-                console.log('🎉 ═══════════════════════════════════════════════════════\n');
-
-                for (const participant of participants) {
-                    console.log('👤 ➜ Enviando boas-vindas para:', participant);
-                    await sendWelcomeMessage(sock, groupId, participant);
-                    console.log('✅ ➜ Boas-vindas enviada\n');
-                    await new Promise(resolve => setTimeout(resolve, 1000)); // Delay de 1s
-                }
+                handleWelcomeEvent(sock, groupId, participants);
             }
         } catch (error) {
             console.error('❌ Erro no evento de participantes:', error);

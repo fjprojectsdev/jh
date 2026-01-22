@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { sendSafeMessage } from './messageHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRIKES_FILE = path.join(__dirname, '..', 'strikes.json');
@@ -180,7 +181,7 @@ export async function applyPunishment(sock, chatId, userId, strikeCount) {
         // Tentar banir
         try {
             await sock.groupParticipantsUpdate(chatId, [userId], 'remove');
-            await sock.sendMessage(chatId, {
+            await sendSafeMessage(sock, chatId, {
                 text: `🚫 @${userNumber} foi removido após atingir 3/3 strikes.`,
                 mentions: [userId]
             });

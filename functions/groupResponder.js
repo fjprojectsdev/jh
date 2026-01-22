@@ -13,6 +13,7 @@ import { formatStats } from './stats.js';
 import { enableMaintenance, disableMaintenance, isMaintenanceMode } from './maintenance.js';
 import { scheduleMessage } from './scheduler2.js';
 import { handleSorteio } from './custom/sorteio.js';
+import { sendSafeMessage } from './messageHandler.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -67,11 +68,11 @@ function startReminderTimer(sock, groupId, config) {
         config: { ...config, nextTrigger: now + timeToNext }, // Atualiza estado
         timer: setTimeout(async () => {
             const msg = `*NOTIFICAÇÃO AUTOMÁTICA*\n\n${comando}\n\n_iMavyAgent | Sistema de Lembretes_`;
-            await sock.sendMessage(groupId, { text: msg });
+            await sendSafeMessage(sock, groupId, { text: msg });
 
             // Depois do primeiro envio (recuperado ou novo), configura intervalo regular
             lembretesAtivos[groupId].timer = setInterval(async () => {
-                await sock.sendMessage(groupId, { text: msg });
+                await sendSafeMessage(sock, groupId, { text: msg });
                 // Atualizar nextTrigger no estado para persistência
                 if (lembretesAtivos[groupId]) {
                     lembretesAtivos[groupId].config.nextTrigger = Date.now() + intervaloMs;
@@ -95,7 +96,7 @@ function stopReminder(groupId, sock = null) {
         delete lembretesAtivos[groupId];
         saveLembretes();
         if (sock) {
-            sock.sendMessage(groupId, { text: '⏰ *Lembrete encerrado automaticamente*\n\n*_iMavyAgent — Automação Inteligente_*' }).catch(() => { });
+            sendSafeMessage(sock, groupId, { text: '⏰ *Lembrete encerrado automaticamente*\n\n*_iMavyAgent — Automação Inteligente_*' }).catch(() => { });
         }
     }
 }
@@ -121,19 +122,7 @@ function restartLembrete(sock, groupId, config) {
     }, encerramentoMs - elapsed);
 }
 
-async function mentionAllInvisible(sock, from, messageText) {
-    try {
-        const metadata = await sock.groupMetadata(from);
-        const members = metadata.participants.map(m => m.id);
 
-        await sock.sendMessage(from, {
-            text: messageText,
-            mentions: members
-        });
-    } catch (err) {
-        console.error('Erro ao mencionar todos:', err);
-    }
-}
 
 // Respostas pré-definidas
 const RESPONSES = {
@@ -216,7 +205,7 @@ export async function handleGroupMessages(sock, message) {
 ━━━━━━━━━━━━━━━━
 🤖 *iMavyAgent* - Protegendo seu grupo 24/7`;
 
-        await sock.sendMessage(senderId, { text: comandosMsg });
+        await sendSafeMessage(sock, senderId, { text: comandosMsg });
         return;
     }
 
@@ -224,7 +213,7 @@ export async function handleGroupMessages(sock, message) {
     if (!isGroup) {
         const textLower = (text || '').trim().toLowerCase();
         if (textLower && RESPONSES[textLower]) {
-            await sock.sendMessage(senderId, { text: RESPONSES[textLower] });
+            await sendSafeMessage(sock, senderId, { text: RESPONSES[textLower] });
             return;
         }
 
@@ -238,42 +227,42 @@ export async function handleGroupMessages(sock, message) {
                 if (normalizedText.startsWith('/adicionargrupo')) {
                     let param = text.replace(/\/adicionargrupo/i, '').trim();
                     const result = await addAllowedGroup(senderId, param);
-                    await sock.sendMessage(senderId, { text: result.message });
+                    await sendSafeMessage(sock, senderId, { text: result.message });
                 } else if (normalizedText.startsWith('/removergrupo')) {
                     let param = text.replace(/\/removergrupo/i, '').trim();
                     const result = await removeAllowedGroup(senderId, param);
-                    await sock.sendMessage(senderId, { text: result.message });
+                    await sendSafeMessage(sock, senderId, { text: result.message });
                 } else if (normalizedText.startsWith('/listargrupos')) {
                     const allowed = await listAllowedGroups();
                     if (!allowed || allowed.length === 0) {
-                        await sock.sendMessage(senderId, { text: 'ℹ️ A lista de grupos permitidos está vazia.' });
+                        await sendSafeMessage(sock, senderId, { text: 'ℹ️ A lista de grupos permitidos está vazia.' });
                     } else {
                         const formatted = allowed.map((g, i) => `${i + 1}. ${g}`).join('\n');
                         const reply = `📋 Grupos permitidos:\n\n${formatted}`;
-                        await sock.sendMessage(senderId, { text: reply });
+                        await sendSafeMessage(sock, senderId, { text: reply });
                     }
                 } else if (normalizedText.startsWith('/adicionaradmin')) {
                     let param = text.replace(/\/adicionaradmin/i, '').trim();
                     if (!param) {
-                        await sock.sendMessage(senderId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/adicionaradmin 5564993344024`' });
+                        await sendSafeMessage(sock, senderId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/adicionaradmin 5564993344024`' });
                         return;
                     }
                     const result = await addAdmin(senderId, param);
-                    await sock.sendMessage(senderId, { text: result.message });
+                    await sendSafeMessage(sock, senderId, { text: result.message });
                 } else if (normalizedText.startsWith('/removeradmin')) {
                     let param = text.replace(/\/removeradmin/i, '').trim();
                     if (!param) {
-                        await sock.sendMessage(senderId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/removeradmin 5564993344024`' });
+                        await sendSafeMessage(sock, senderId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/removeradmin 5564993344024`' });
                         return;
                     }
                     const result = await removeAdmin(senderId, param);
-                    await sock.sendMessage(senderId, { text: result.message });
+                    await sendSafeMessage(sock, senderId, { text: result.message });
                 } else if (normalizedText.startsWith('/listaradmins')) {
                     const admins = await listAdmins();
                     const stats = await getAdminStats();
 
                     if (admins.length === 0) {
-                        await sock.sendMessage(senderId, { text: 'ℹ️ Nenhum administrador configurado.\n\nConfigure via .env (AUTHORIZED_IDS) ou use /adicionaradmin' });
+                        await sendSafeMessage(sock, senderId, { text: 'ℹ️ Nenhum administrador configurado.\n\nConfigure via .env (AUTHORIZED_IDS) ou use /adicionaradmin' });
                         return;
                     }
 
@@ -290,11 +279,11 @@ export async function handleGroupMessages(sock, message) {
 
                     adminList += `\n━━━━━━━━━━━━━━━━━━━━━━━\n💡 Use /adicionaradmin ou /removeradmin para gerenciar`;
 
-                    await sock.sendMessage(senderId, { text: adminList });
+                    await sendSafeMessage(sock, senderId, { text: adminList });
                 }
                 return;
             } else {
-                await sock.sendMessage(senderId, { text: '❌ *Acesso Negado*\n\n⚠️ Apenas administradores autorizados podem usar comandos do bot.' });
+                await sendSafeMessage(sock, senderId, { text: '❌ *Acesso Negado*\n\n⚠️ Apenas administradores autorizados podem usar comandos do bot.' });
                 return;
             }
         }
@@ -353,7 +342,7 @@ export async function handleGroupMessages(sock, message) {
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
         if (rateCheck.limited) {
-            await sock.sendMessage(groupId, { text: `⏱️ Aguarde ${rateCheck.remaining}s` });
+            await sendSafeMessage(sock, groupId, { text: `⏱️ Aguarde ${rateCheck.remaining}s` });
             return;
         }
 
@@ -367,7 +356,7 @@ export async function handleGroupMessages(sock, message) {
             if (requiresAuth) {
                 const authorized = await isAuthorized(senderId);
                 if (!authorized) {
-                    await sock.sendMessage(groupId, {
+                    await sendSafeMessage(sock, groupId, {
                         text: '❌ *Acesso Negado*\n\n⚠️ Apenas administradores autorizados podem usar comandos do bot.\n👥 Integrantes comuns têm acesso somente ao comando /regras.\n\n💡 Entre em contato com um administrador para solicitar permissão.'
                     });
                     console.log(`🚫 Comando administrativo bloqueado para usuário não autorizado: ${senderId}`);
@@ -379,9 +368,9 @@ export async function handleGroupMessages(sock, message) {
                 try {
                     const metadata = await sock.groupMetadata(groupId);
                     const desc = metadata.desc || 'Sem descrição';
-                    await sock.sendMessage(groupId, { text: `📝 *DESCRIÇÃO DO GRUPO*\n\n${desc}` });
+                    await sendSafeMessage(sock, groupId, { text: `📝 *DESCRIÇÃO DO GRUPO*\n\n${desc}` });
                 } catch (e) {
-                    await sock.sendMessage(groupId, { text: '❌ Erro ao ler descrição.' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Erro ao ler descrição.' });
                 }
             } else if (normalizedText.startsWith('/regras')) {
                 try {
@@ -426,7 +415,7 @@ _Use o comando /comandos ou marque um administrador._ 💬
 ❕ _Seu comportamento define a qualidade do grupo._`;
                     }
 
-                    await sock.sendMessage(groupId, { text: rulesMessage });
+                    await sendSafeMessage(sock, groupId, { text: rulesMessage });
                 } catch (e) {
                     console.error('Erro ao enviar regras:', e);
                 }
@@ -437,26 +426,26 @@ _Use o comando /comandos ou marque um administrador._ 💬
 O envio de mensagens está desativado até 08:00.
 
 A funcionalidade será reativada automaticamente no horário programado.`;
-                await sock.sendMessage(groupId, { text: closeMessage });
+                await sendSafeMessage(sock, groupId, { text: closeMessage });
             } else if (normalizedText.startsWith('/abrir')) {
                 await sock.groupSettingUpdate(groupId, 'not_announcement');
                 const openMessage = `Grupo Aberto
 
 As mensagens foram reativadas.
 Desejamos a todos um excelente dia.`;
-                await sock.sendMessage(groupId, { text: openMessage });
+                await sendSafeMessage(sock, groupId, { text: openMessage });
             } else if (normalizedText.startsWith('/status')) {
                 const statusMessage = await getGroupStatus(sock, groupId);
-                await sock.sendMessage(groupId, { text: statusMessage });
+                await sendSafeMessage(sock, groupId, { text: statusMessage });
             } else if (normalizedText.startsWith('/stats')) {
                 const statsMessage = formatStats();
-                await sock.sendMessage(groupId, { text: statsMessage });
+                await sendSafeMessage(sock, groupId, { text: statsMessage });
                 logger.info('Comando /stats', { userId: senderId });
             } else if (normalizedText.startsWith('/hora')) {
                 const now = new Date();
                 const hora = now.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
                 const data = now.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
-                await sock.sendMessage(groupId, {
+                await sendSafeMessage(sock, groupId, {
                     text: `🕒 *Horário do Bot:*
 
 📅 Data: ${data}
@@ -475,55 +464,58 @@ ${messageToPin}
 ━━━━━━━━━━━━━━━━━━━
 | 📅 DATA: ${data}
 | 🕓HORA: ${hora}`;
-                    await sock.sendMessage(groupId, { text: pinnedMsg, mentions: mentionedJids });
+                    await sendSafeMessage(sock, groupId, { text: pinnedMsg, mentions: mentionedJids });
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/fixar sua mensagem aqui`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/fixar sua mensagem aqui`' });
                 }
             } else if (normalizedText.startsWith('/aviso')) {
                 const avisoMsg = text.replace(/\/aviso/i, '').trim();
                 if (avisoMsg) {
-                    await mentionAllInvisible(sock, groupId, avisoMsg);
+                    await sendSafeMessage(sock, groupId, { text: avisoMsg, mentions: members });
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/aviso sua mensagem`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/aviso sua mensagem`' });
                 }
             } else if (normalizedText.startsWith('/todos')) {
                 const msg = text.replace(/\/todos/i, '').trim();
+                const metadata = await sock.groupMetadata(groupId);
+                const members = metadata.participants.map(m => m.id);
+
                 if (msg) {
-                    await mentionAllInvisible(sock, groupId, msg);
+                    await sendSafeMessage(sock, groupId, { text: msg, mentions: members });
                 } else {
-                    await mentionAllInvisible(sock, groupId, 'Atenção membros do grupo.');
+                    await sendSafeMessage(sock, groupId, { text: 'Atenção membros do grupo.', mentions: members });
                 }
             } else if (normalizedText.startsWith('/link')) {
                 try {
                     const inviteCode = await sock.groupInviteCode(groupId);
                     const link = `https://chat.whatsapp.com/${inviteCode}`;
-                    await sock.sendMessage(groupId, { text: `🔗 *Link do Grupo:*\n\n${link}` });
+                    await sendSafeMessage(sock, groupId, { text: `🔗 *Link do Grupo:*\n\n${link}` });
                 } catch (e) {
-                    await sock.sendMessage(groupId, { text: '❌ Erro ao gerar link. Bot precisa ser admin.' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Erro ao gerar link. Bot precisa ser admin.' });
                 }
             } else if (normalizedText.startsWith('/promover')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 if (mentionedJids.length > 0) {
                     try {
                         await sock.groupParticipantsUpdate(groupId, mentionedJids, 'promote');
-                        await sock.sendMessage(groupId, { text: '✅ Membro promovido a admin!' });
+                        await sendSafeMessage(sock, groupId, { text: '✅ Membro promovido a admin!' });
                     } catch (e) {
-                        await sock.sendMessage(groupId, { text: '❌ Erro ao promover. Bot precisa ser admin.' });
+                        await sendSafeMessage(sock, groupId, { text: '❌ Erro ao promover. Bot precisa ser admin.' });
                     }
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/promover @usuario`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/promover @usuario`' });
                 }
             } else if (normalizedText.startsWith('/rebaixar')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 if (mentionedJids.length > 0) {
                     try {
                         await sock.groupParticipantsUpdate(groupId, mentionedJids, 'demote');
-                        await sock.sendMessage(groupId, { text: '✅ Admin rebaixado a membro!' });
+                        await sendSafeMessage(sock, groupId, { text: '✅ Admin rebaixado a membro!' });
                     } catch (e) {
-                        await sock.sendMessage(groupId, { text: '❌ Erro ao rebaixar. Bot precisa ser admin.' });
+                        await sendSafeMessage(sock, groupId, { text: '❌ Erro ao rebaixar. Bot precisa ser admin.' });
                     }
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/rebaixar @usuario`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/rebaixar @usuario`' });
                 }
             } else if (normalizedText.startsWith('/agendar')) {
                 const parts = text.replace(/\/agendar/i, '').trim().split(' ');
@@ -532,20 +524,20 @@ ${messageToPin}
 
                 if (time && msg && /^\d{1,2}:\d{2}$/.test(time)) {
                     const result = scheduleMessage(groupId, time, msg);
-                    await sock.sendMessage(groupId, { text: `⏰ Mensagem agendada para ${result.scheduledFor}` });
+                    await sendSafeMessage(sock, groupId, { text: `⏰ Mensagem agendada para ${result.scheduledFor}` });
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/agendar 14:30 Sua mensagem`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/agendar 14:30 Sua mensagem`' });
                 }
             } else if (normalizedText.startsWith('/manutencao')) {
                 const mode = text.replace(/\/manutencao/i, '').trim().toLowerCase();
                 if (mode === 'on') {
                     enableMaintenance();
-                    await sock.sendMessage(groupId, { text: '🔧 Modo manutenção ATIVADO. Apenas admins podem usar o bot.' });
+                    await sendSafeMessage(sock, groupId, { text: '🔧 Modo manutenção ATIVADO. Apenas admins podem usar o bot.' });
                 } else if (mode === 'off') {
                     disableMaintenance();
-                    await sock.sendMessage(groupId, { text: '✅ Modo manutenção DESATIVADO.' });
+                    await sendSafeMessage(sock, groupId, { text: '✅ Modo manutenção DESATIVADO.' });
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/manutencao on` ou `/manutencao off`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/manutencao on` ou `/manutencao off`' });
                 }
             } else if (normalizedText.startsWith('/banir')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
@@ -554,7 +546,7 @@ ${messageToPin}
                     for (const memberId of mentionedJids) {
                         const memberNumber = memberId.split('@')[0];
                         await sock.groupParticipantsUpdate(groupId, [memberId], 'remove');
-                        await sock.sendMessage(groupId, { text: `🚫 Membro banido com sucesso!` });
+                        await sendSafeMessage(sock, groupId, { text: `🚫 Membro banido com sucesso!` });
 
                         // Notificar administradores
                         const admins = groupMetadata.participants.filter(p => p.admin && p.id !== memberId).map(p => p.id);
@@ -571,11 +563,11 @@ Um membro foi banido do grupo:
 🚫 Ação executada por comando administrativo.`;
 
                         for (const adminId of admins) {
-                            await sock.sendMessage(adminId, { text: adminNotification });
+                            await sendSafeMessage(sock, adminId, { text: adminNotification });
                         }
                     }
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/banir @membro`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/banir @membro`' });
                 }
             } else if (normalizedText.startsWith('/testbot')) {
                 try {
@@ -583,9 +575,9 @@ Um membro foi banido do grupo:
                     const botJid = sock.user.id;
                     const botParticipant = groupMetadata.participants.find(p => p.id === botJid);
                     const isAdmin = botParticipant?.admin ? 'SIM' : 'NÃO';
-                    await sock.sendMessage(groupId, { text: `🤖 Bot ID: ${botJid}\n👮 É admin: ${isAdmin}` });
+                    await sendSafeMessage(sock, groupId, { text: `🤖 Bot ID: ${botJid}\n👮 É admin: ${isAdmin}` });
                 } catch (e) {
-                    await sock.sendMessage(groupId, { text: `Erro: ${e.message}` });
+                    await sendSafeMessage(sock, groupId, { text: `Erro: ${e.message}` });
                 }
             } else if (normalizedText.startsWith('/adicionargrupo')) {
                 let param = text.replace(/\/adicionargrupo/i, '').trim();
@@ -594,9 +586,9 @@ Um membro foi banido do grupo:
                     param = gm.subject || '';
                 }
                 const result = await addAllowedGroup(senderId, param);
-                await sock.sendMessage(senderId, { text: result.message });
+                await sendSafeMessage(sock, senderId, { text: result.message });
                 if (result.success) {
-                    await sock.sendMessage(groupId, { text: '✅ Grupo adicionado à lista!' });
+                    await sendSafeMessage(sock, groupId, { text: '✅ Grupo adicionado à lista!' });
                 }
             } else if (normalizedText.startsWith('/removergrupo')) {
                 let param = text.replace(/\/removergrupo/i, '').trim();
@@ -605,84 +597,84 @@ Um membro foi banido do grupo:
                     param = gm.subject || '';
                 }
                 const result = await removeAllowedGroup(senderId, param);
-                await sock.sendMessage(senderId, { text: result.message });
+                await sendSafeMessage(sock, senderId, { text: result.message });
                 if (result.success) {
-                    await sock.sendMessage(groupId, { text: '✅ Grupo removido da lista!' });
+                    await sendSafeMessage(sock, groupId, { text: '✅ Grupo removido da lista!' });
                 }
             } else if (normalizedText.startsWith('/listargrupos')) {
                 const allowed = await listAllowedGroups();
                 if (!allowed || allowed.length === 0) {
-                    await sock.sendMessage(senderId, { text: 'ℹ️ Lista de grupos vazia.' });
+                    await sendSafeMessage(sock, senderId, { text: 'ℹ️ Lista de grupos vazia.' });
                 } else {
                     const formatted = allowed.map((g, i) => `${i + 1}. ${g}`).join('\n');
-                    await sock.sendMessage(senderId, { text: `📋 Grupos permitidos:\n\n${formatted}` });
+                    await sendSafeMessage(sock, senderId, { text: `📋 Grupos permitidos:\n\n${formatted}` });
                 }
             } else if (normalizedText.startsWith('/adicionaradmin')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 let param = text.replace(/\/adicionaradmin/i, '').trim();
                 if (mentionedJids.length > 0) param = mentionedJids[0];
                 if (!param) {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/adicionaradmin @usuario`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/adicionaradmin @usuario`' });
                     return;
                 }
                 const result = await addAdmin(senderId, param);
-                await sock.sendMessage(senderId, { text: result.message });
+                await sendSafeMessage(sock, senderId, { text: result.message });
                 if (result.success) {
-                    await sock.sendMessage(groupId, { text: '✅ Admin adicionado!' });
+                    await sendSafeMessage(sock, groupId, { text: '✅ Admin adicionado!' });
                 }
             } else if (normalizedText.startsWith('/removeradmin')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
                 let param = text.replace(/\/removeradmin/i, '').trim();
                 if (mentionedJids.length > 0) param = mentionedJids[0];
                 if (!param) {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/removeradmin @usuario`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/removeradmin @usuario`' });
                     return;
                 }
                 const result = await removeAdmin(senderId, param);
-                await sock.sendMessage(senderId, { text: result.message });
+                await sendSafeMessage(sock, senderId, { text: result.message });
                 if (result.success) {
-                    await sock.sendMessage(groupId, { text: '✅ Admin removido!' });
+                    await sendSafeMessage(sock, groupId, { text: '✅ Admin removido!' });
                 }
             } else if (normalizedText.startsWith('/listaradmins')) {
                 const admins = await listAdmins();
                 if (admins.length === 0) {
-                    await sock.sendMessage(senderId, { text: 'ℹ️ Nenhum admin configurado.' });
+                    await sendSafeMessage(sock, senderId, { text: 'ℹ️ Nenhum admin configurado.' });
                 } else {
                     let adminList = `👮 *ADMINISTRADORES*\n━━━━━━━━━━━━━━━━\n\n`;
                     admins.forEach((admin, index) => {
                         adminList += `${index + 1}. ${admin.id}\n`;
                     });
-                    await sock.sendMessage(senderId, { text: adminList });
+                    await sendSafeMessage(sock, senderId, { text: adminList });
                 }
             } else if (normalizedText.startsWith('/adicionartermo')) {
                 const termo = text.replace(/\/adicionartermo/i, '').trim();
                 if (termo) {
                     const result = addBannedWord(termo);
-                    await sock.sendMessage(groupId, { text: result.message });
+                    await sendSafeMessage(sock, groupId, { text: result.message });
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/adicionartermo palavra ou frase`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/adicionartermo palavra ou frase`' });
                 }
             } else if (normalizedText.startsWith('/removertermo')) {
                 const termo = text.replace(/\/removertermo/i, '').trim();
                 if (termo) {
                     const result = removeBannedWord(termo);
-                    await sock.sendMessage(groupId, { text: result.message });
+                    await sendSafeMessage(sock, groupId, { text: result.message });
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: `/removertermo palavra ou frase`' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/removertermo palavra ou frase`' });
                 }
             } else if (normalizedText.startsWith('/listartermos')) {
                 const termos = listBannedWords();
                 if (termos.length === 0) {
-                    await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum termo proibido cadastrado.' });
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum termo proibido cadastrado.' });
                 } else {
                     const lista = termos.map((t, i) => `${i + 1}. ${t}`).join('\n');
-                    await sock.sendMessage(groupId, { text: `🚫 *TERMOS PROIBIDOS*\n\n${lista}\n\n📊 Total: ${termos.length}` });
+                    await sendSafeMessage(sock, groupId, { text: `🚫 *TERMOS PROIBIDOS*\n\n${lista}\n\n📊 Total: ${termos.length}` });
                 }
             } else if (normalizedText.startsWith('/lembrete') && !normalizedText.startsWith('/lembretes')) {
                 const partes = text.split(' + ');
 
                 if (partes.length < 2) {
-                    await sock.sendMessage(groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
+                    await sendSafeMessage(sock, groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
                     return;
                 }
 
@@ -694,18 +686,18 @@ Um membro foi banido do grupo:
                 const encerramento = parseFloat(tempos[1].replace('h', ''));
 
                 if (!comando || !intervalo || !encerramento) {
-                    await sock.sendMessage(groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
+                    await sendSafeMessage(sock, groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
                     return;
                 }
 
                 // Validações
                 if (intervalo < 1 || intervalo > 24) {
-                    await sock.sendMessage(groupId, { text: '⛔ O intervalo deve ser entre *1 e 24 horas*.' });
+                    await sendSafeMessage(sock, groupId, { text: '⛔ O intervalo deve ser entre *1 e 24 horas*.' });
                     return;
                 }
 
                 if (encerramento < 24 || encerramento > 168) {
-                    await sock.sendMessage(groupId, { text: '⛔ A duração (encerramento) deve ser de no mínimo *24 horas* e no máximo *7 dias (168h)*.' });
+                    await sendSafeMessage(sock, groupId, { text: '⛔ A duração (encerramento) deve ser de no mínimo *24 horas* e no máximo *7 dias (168h)*.' });
                     return;
                 }
 
@@ -733,7 +725,7 @@ ${comando}
 _iMavyAgent | Sistema de Lembretes_`;
 
                 // Enviar primeira vez
-                await sock.sendMessage(groupId, { text: msgFormatada });
+                await sendSafeMessage(sock, groupId, { text: msgFormatada });
 
                 const config = { comando, intervalo, encerramento, startTime: Date.now() };
 
@@ -751,9 +743,9 @@ _iMavyAgent | Sistema de Lembretes_`;
             } else if (normalizedText === '/stoplembrete') {
                 if (lembretesAtivos[groupId]) {
                     stopReminder(groupId);
-                    await sock.sendMessage(groupId, { text: '🛑 O lembrete automático foi *desativado* com sucesso!' });
+                    await sendSafeMessage(sock, groupId, { text: '🛑 O lembrete automático foi *desativado* com sucesso!' });
                 } else {
-                    await sock.sendMessage(groupId, { text: 'ℹ️ Não há nenhum lembrete ativo neste grupo.' });
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Não há nenhum lembrete ativo neste grupo.' });
                 }
             } else if (normalizedText === '/lembretes') {
                 if (lembretesAtivos[groupId]) {
@@ -779,16 +771,16 @@ _iMavyAgent | Sistema de Lembretes_`;
                         `⌛ *Encerra em:* ${remainingHours}h\n` +
                         `📅 *Início:* ${startTime.toLocaleString('pt-BR')}`;
 
-                    await sock.sendMessage(groupId, { text: msg });
+                    await sendSafeMessage(sock, groupId, { text: msg });
                 } else {
-                    await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum lembrete ativo no momento.' });
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum lembrete ativo no momento.' });
                 }
             } else if (normalizedText.startsWith('/testelembrete')) {
                 // Remove o comando, suportando singular e plural (/testelembrete ou /testelembretes)
                 const comando = text.replace(/^\/testelembretes?/i, '').trim();
 
                 if (!comando) {
-                    await sock.sendMessage(groupId, { text: '❗ Use: /testelembrete [mensagem]' });
+                    await sendSafeMessage(sock, groupId, { text: '❗ Use: /testelembrete [mensagem]' });
                     return;
                 }
 
@@ -805,7 +797,7 @@ _iMavyAgent | Sistema de Lembretes_`;
                     stopReminder(groupId);
                 }
 
-                await sock.sendMessage(groupId, { text: `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuração: 10 minutos` });
+                await sendSafeMessage(sock, groupId, { text: `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuração: 10 minutos` });
 
                 const nextTrigger = Date.now() + 60000;
                 startReminderTimer(sock, groupId, { ...config, nextTrigger });
@@ -832,14 +824,14 @@ _iMavyAgent | Sistema de Lembretes_`;
                     result += `• Seguro: ${aiMod.safe ? 'Sim' : 'Não'}\n`;
                     result += `• Motivo: ${aiMod.reason}`;
 
-                    await sock.sendMessage(groupId, { text: result });
+                    await sendSafeMessage(sock, groupId, { text: result });
                 } catch (e) {
-                    await sock.sendMessage(groupId, { text: `❌ Erro: ${e.message}` });
+                    await sendSafeMessage(sock, groupId, { text: `❌ Erro: ${e.message}` });
                 }
             } else if (normalizedText.startsWith('/leads')) {
                 const leads = getLeads();
                 if (!leads || !Array.isArray(leads) || leads.length === 0) {
-                    await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum lead registrado ainda.' });
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum lead registrado ainda.' });
                 } else {
                     let msg = `📊 *LEADS CAPTURADOS* (${leads.length})\n━━━━━━━━━━━━━━━━\n\n`;
                     const leadsArray = Array.isArray(leads) ? leads : Object.values(leads);
@@ -851,7 +843,7 @@ _iMavyAgent | Sistema de Lembretes_`;
                         msg += `   • Data: ${date}\n\n`;
                     });
                     if (leadsArray.length > 10) msg += `\n... e mais ${leadsArray.length - 10} leads`;
-                    await sock.sendMessage(groupId, { text: msg });
+                    await sendSafeMessage(sock, groupId, { text: msg });
                 }
             } else if (normalizedText.startsWith('/promo')) {
                 const args = text.split(' ');
@@ -860,36 +852,36 @@ _iMavyAgent | Sistema de Lembretes_`;
                 if (subCmd === 'add') {
                     const gm = await sock.groupMetadata(groupId);
                     addPromoGroup(groupId, gm.subject);
-                    await sock.sendMessage(groupId, { text: '✅ Grupo adicionado à lista de promoção!' });
+                    await sendSafeMessage(sock, groupId, { text: '✅ Grupo adicionado à lista de promoção!' });
                 } else if (subCmd === 'remove') {
                     removePromoGroup(groupId);
-                    await sock.sendMessage(groupId, { text: '❌ Grupo removido da lista de promoção!' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Grupo removido da lista de promoção!' });
                 } else if (subCmd === 'list') {
                     const groups = listPromoGroups();
                     if (groups.length === 0) {
-                        await sock.sendMessage(groupId, { text: 'ℹ️ Nenhum grupo na lista de promoção.' });
+                        await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum grupo na lista de promoção.' });
                     } else {
                         let msg = `📊 *GRUPOS DE PROMOÇÃO* (${groups.length})\n\n`;
                         groups.forEach((g, i) => {
                             const lastPromo = g.lastPromo ? new Date(g.lastPromo).toLocaleString('pt-BR') : 'Nunca';
                             msg += `${i + 1}. ${g.name}\n   Último: ${lastPromo}\n\n`;
                         });
-                        await sock.sendMessage(groupId, { text: msg });
+                        await sendSafeMessage(sock, groupId, { text: msg });
                     }
                 } else if (subCmd === 'interval') {
                     const hours = parseInt(args[2]);
                     if (hours && hours > 0) {
                         setPromoInterval(hours);
-                        await sock.sendMessage(groupId, { text: `⏰ Intervalo definido: ${hours}h` });
+                        await sendSafeMessage(sock, groupId, { text: `⏰ Intervalo definido: ${hours}h` });
                     } else {
-                        await sock.sendMessage(groupId, { text: '❌ Use: /promo interval 6' });
+                        await sendSafeMessage(sock, groupId, { text: '❌ Use: /promo interval 6' });
                     }
                 } else if (subCmd === 'on') {
                     togglePromo(true);
-                    await sock.sendMessage(groupId, { text: '✅ Auto-promoção ATIVADA!' });
+                    await sendSafeMessage(sock, groupId, { text: '✅ Auto-promoção ATIVADA!' });
                 } else if (subCmd === 'off') {
                     togglePromo(false);
-                    await sock.sendMessage(groupId, { text: '❌ Auto-promoção DESATIVADA!' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Auto-promoção DESATIVADA!' });
                 } else if (subCmd === 'config') {
                     const config = getPromoConfig();
                     let msg = `⚙️ *CONFIGURAÇÃO DE PROMO*\n\n`;
@@ -897,10 +889,10 @@ _iMavyAgent | Sistema de Lembretes_`;
                     msg += `• Intervalo: ${config.intervalHours}h\n`;
                     msg += `• Grupos: ${config.groups.length}\n`;
                     msg += `• Mensagens: ${config.messages.length}`;
-                    await sock.sendMessage(groupId, { text: msg });
+                    await sendSafeMessage(sock, groupId, { text: msg });
                 } else {
                     const help = `📊 *COMANDOS DE PROMOÇÃO*\n\n• /promo add - Adiciona grupo atual\n• /promo remove - Remove grupo atual\n• /promo list - Lista grupos\n• /promo interval [horas] - Define intervalo\n• /promo on - Ativa\n• /promo off - Desativa\n• /promo config - Ver configuração`;
-                    await sock.sendMessage(groupId, { text: help });
+                    await sendSafeMessage(sock, groupId, { text: help });
                 }
             } else if (normalizedText.startsWith('/sethorario')) {
                 const args = text.split(' ');
@@ -919,9 +911,9 @@ _iMavyAgent | Sistema de Lembretes_`;
                     if (tipo === 'fechar') config.closeTime = horario;
 
                     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-                    await sock.sendMessage(groupId, { text: `✅ Horário de ${tipo} definido: ${horario}\n\n⚠️ Reinicie o bot para aplicar` });
+                    await sendSafeMessage(sock, groupId, { text: `✅ Horário de ${tipo} definido: ${horario}\n\n⚠️ Reinicie o bot para aplicar` });
                 } else {
-                    await sock.sendMessage(groupId, { text: '❌ Use: /sethorario abrir 07:00\nou\n/sethorario fechar 23:00' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: /sethorario abrir 07:00\nou\n/sethorario fechar 23:00' });
                 }
             } else if (normalizedText.startsWith('/comandos')) {
                 const comandosMsg = `🤖 *LISTA COMPLETA DE COMANDOS* 🤖
@@ -959,9 +951,9 @@ _iMavyAgent | Sistema de Lembretes_`;
 * Lembretes com encerramento automático
 ━━━━━━━━━━━━━━━━
 🤖 *iMavyAgent* - Protegendo seu grupo 24/7`;
-                await sock.sendMessage(senderId, { text: comandosMsg });
+                await sendSafeMessage(sock, senderId, { text: comandosMsg });
                 if (isGroup) {
-                    await sock.sendMessage(groupId, { text: '📱 *Lista de comandos enviada no privado!*' });
+                    await sendSafeMessage(sock, groupId, { text: '📱 *Lista de comandos enviada no privado!*' });
                 }
             }
         } catch (err) {
@@ -971,7 +963,7 @@ _iMavyAgent | Sistema de Lembretes_`;
         // Auto-delete do comando
         setTimeout(async () => {
             try {
-                await sock.sendMessage(groupId, { delete: commandMessageKey });
+                await sendSafeMessage(sock, groupId, { delete: commandMessageKey });
             } catch (e) { }
         }, 3000);
 

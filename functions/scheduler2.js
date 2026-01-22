@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { sendSafeMessage } from './messageHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCHEDULED_FILE = path.join(__dirname, '..', 'scheduled.json');
@@ -52,7 +53,7 @@ export function startScheduler(sock) {
 
         for (const msg of toSend) {
             if (msg.message && msg.message.trim().length > 0) {
-                sock.sendMessage(msg.groupId, { text: msg.message }).catch(console.error);
+                sendSafeMessage(sock, msg.groupId, { text: msg.message }).catch(console.error);
             }
             scheduledMessages = scheduledMessages.filter(m => m.id !== msg.id);
         }

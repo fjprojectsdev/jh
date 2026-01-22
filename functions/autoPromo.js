@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { sendSafeMessage } from './messageHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROMO_FILE = path.join(__dirname, '..', 'promo_config.json');
@@ -123,7 +124,7 @@ export function startAutoPromo(sock) {
                 const randomMessage = getRandomPromoMessage();
 
                 if (randomMessage && randomMessage.trim().length > 0) {
-                    await sock.sendMessage(group.id, { text: randomMessage });
+                    await sendSafeMessage(sock, group.id, { text: randomMessage });
                     console.log(`📢 Anúncio enviado para: ${group.name}`);
                 }
             } catch (e) {
