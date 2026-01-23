@@ -59,9 +59,9 @@ function startReminderTimer(sock, groupId, config) {
     // Se o próximo trigger já passou, agenda para "agora" (catch-up) ou define novo
     let timeToNext = nextTrigger - now;
     if (timeToNext < 0) {
-        // Se passou, recalcula para o próximo ciclo futuro imediato para evitar flood
-        const cyclesMissed = Math.floor(Math.abs(timeToNext) / intervaloMs) + 1;
-        timeToNext += (cyclesMissed * intervaloMs);
+        // Se passou do horário, envia IMEDIATAMENTE e então retoma o ciclo
+        console.log(`⚠️ Lembrete do grupo ${groupId} atrasado em ${Math.abs(timeToNext)}ms. Enviando agora...`);
+        timeToNext = 0;
     }
 
     lembretesAtivos[groupId] = {
