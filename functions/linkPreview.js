@@ -29,18 +29,9 @@ export async function buildReminderPayload(text) {
         return { text };
     }
 
-    // Carregar thumbnail padrão
-    const thumbPath = path.join(__dirname, '..', 'assets', 'whatsapp-invite-thumb.jpg');
+    // Sem thumbnail padrão local
     let thumbnailBuffer = null;
-    try {
-        if (fs.existsSync(thumbPath)) {
-            thumbnailBuffer = fs.readFileSync(thumbPath);
-        } else {
-            console.warn('[LinkPreview] Asset whatsapp-invite-thumb.jpg não encontrado.');
-        }
-    } catch (e) {
-        console.error('[LinkPreview] Erro lendo asset:', e);
-    }
+
 
     // 1. Extrair título personalizado do texto: titulo="Meu Titulo"
     let customTitle = null;
