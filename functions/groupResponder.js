@@ -14,7 +14,6 @@ import { enableMaintenance, disableMaintenance, isMaintenanceMode } from './main
 import { scheduleMessage } from './scheduler2.js';
 import { handleSorteio } from './custom/sorteio.js';
 import { sendSafeMessage, sendPlainText } from './messageHandler.js';
-import { buildReminderPayload } from './linkPreview.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -70,16 +69,11 @@ function startReminderTimer(sock, groupId, config) {
         timer: setTimeout(async () => {
             const msgText = `*NOTIFICAÇÃO AUTOMÁTICA*\n\n${comando}\n\n_iMavyAgent | Sistema de Lembretes_`;
 
-            // Gerar Payload Padronizado
-            const payload = await buildReminderPayload(msgText);
-
-            await sendSafeMessage(sock, groupId, payload);
+            await sendPlainText(sock, groupId, msgText);
 
             // Depois do primeiro envio (recuperado ou novo), configura intervalo regular
             lembretesAtivos[groupId].timer = setInterval(async () => {
-                // Recalcula payload a cada envio
-                const loopPayload = await buildReminderPayload(msgText);
-                await sendSafeMessage(sock, groupId, loopPayload);
+                await sendPlainText(sock, groupId, msgText);
 
                 // Atualizar nextTrigger no estado para persistência
                 if (lembretesAtivos[groupId]) {
@@ -732,11 +726,8 @@ ${comando}
 
 _iMavyAgent | Sistema de Lembretes_`;
 
-                // Gerar Payload Padronizado
-                const payload = await buildReminderPayload(msgFormatada);
-
                 // Enviar primeira vez
-                await sendSafeMessage(sock, groupId, payload);
+                await sendPlainText(sock, groupId, msgFormatada);
 
                 const config = { comando, intervalo, encerramento, startTime: Date.now() };
 
@@ -810,10 +801,7 @@ _iMavyAgent | Sistema de Lembretes_`;
 
                 const msgText = `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuração: 10 minutos\n\n${comando}`;
 
-                // Gerar Payload Padronizado para o teste
-                const payload = await buildReminderPayload(msgText);
-
-                await sendSafeMessage(sock, groupId, payload);
+                await sendPlainText(sock, groupId, msgText);
 
                 const nextTrigger = Date.now() + 60000;
                 startReminderTimer(sock, groupId, { ...config, nextTrigger });
