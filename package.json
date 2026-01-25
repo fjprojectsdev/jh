@@ -21,6 +21,7 @@
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "groq-sdk": "^0.3.3",
+    "jimp": "^1.6.0",
     "link-preview-js": "^3.2.0",
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",

@@ -51,7 +51,7 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
             else if (content.caption) textToCheck = content.caption;
             // Se for imagem/video sem caption, ou delete, ou sticker, textToCheck fica vazio mas pode ser válido.
             // Precisamos distinguir "texto vazio inválido" de "mídia válida sem texto".
-            
+
             const isMedia = content.image || content.video || content.document || content.sticker || content.audio;
             const isAction = content.delete || content.edit;
 
@@ -66,11 +66,11 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
                 // Se NÃO for mídia/ação, assumimos que é mensagem de texto
                 // Se não tem 'text', é inválido (ex: objeto vazio)
                 if (!content.text) {
-                     // Verifica se tem outras chaves válidas que não conhecemos? 
-                     // Por segurança, se não tem text e não é mídia conhecida, bloqueia se for vazio.
-                     // Mas o Baileys suporta outros tipos. 
-                     // Foco: Bloquear MENSAGENS DE TEXTO vazias.
-                     if (!textToCheck) {
+                    // Verifica se tem outras chaves válidas que não conhecemos? 
+                    // Por segurança, se não tem text e não é mídia conhecida, bloqueia se for vazio.
+                    // Mas o Baileys suporta outros tipos. 
+                    // Foco: Bloquear MENSAGENS DE TEXTO vazias.
+                    if (!textToCheck) {
                         // Pode ser um botão, template, etc. Vamos logar aviso mas permitir se tiver keys
                         if (Object.keys(content).length > 0) {
                             // ok, deixa passar estruturas complexas se não conseguimos validar texto
@@ -78,7 +78,7 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
                             logger.warn('sendSafeMessage: Bloqueado envio de objeto vazio', { chatId });
                             return null;
                         }
-                     }
+                    }
                 }
             }
         } else {
@@ -93,7 +93,7 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
                 logger.warn('sendSafeMessage: Bloqueado envio de texto vazio/invisível', { chatId, original: textToCheck });
                 return null;
             }
-            
+
             // Atualiza o conteúdo sanitizado se for string pura ou objeto text
             if (typeof content === 'string') {
                 finalContent = { text: cleanText };
@@ -101,12 +101,12 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
                 finalContent.text = cleanText;
             }
         } else {
-             // Se textToCheck é vazio, mas não era mídia/ação e chegou aqui:
-             // Se tiver content.text estritamente igual a "" ou null, bloqueia
-             if (content && typeof content === 'object' && 'text' in content && !content.text) {
-                 logger.warn('sendSafeMessage: Bloqueado content.text vazio', { chatId });
-                 return null;
-             }
+            // Se textToCheck é vazio, mas não era mídia/ação e chegou aqui:
+            // Se tiver content.text estritamente igual a "" ou null, bloqueia
+            if (content && typeof content === 'object' && 'text' in content && !content.text) {
+                logger.warn('sendSafeMessage: Bloqueado content.text vazio', { chatId });
+                return null;
+            }
         }
 
         // Envio real
@@ -116,4 +116,15 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
         logger.error('sendSafeMessage: Erro ao enviar', { chatId, error: error.message });
         return null;
     }
+}
+
+/**
+ * Envia uma mensagem de texto puro, sem previews ou cards.
+ * @param {Object} sock Instância do socket
+ * @param {string} chatId JID do destino
+ * @param {string} text Texto da mensagem
+ * @returns {Promise<Object|null>}
+ */
+export async function sendPlainText(sock, chatId, text) {
+    return sendSafeMessage(sock, chatId, { text });
 }

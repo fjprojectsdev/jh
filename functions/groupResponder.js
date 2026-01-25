@@ -13,7 +13,7 @@ import { formatStats } from './stats.js';
 import { enableMaintenance, disableMaintenance, isMaintenanceMode } from './maintenance.js';
 import { scheduleMessage } from './scheduler2.js';
 import { handleSorteio } from './custom/sorteio.js';
-import { sendSafeMessage } from './messageHandler.js';
+import { sendSafeMessage, sendPlainText } from './messageHandler.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -67,12 +67,14 @@ function startReminderTimer(sock, groupId, config) {
     lembretesAtivos[groupId] = {
         config: { ...config, nextTrigger: now + timeToNext }, // Atualiza estado
         timer: setTimeout(async () => {
-            const msg = `*NOTIFICAÇÃO AUTOMÁTICA*\n\n${comando}\n\n_iMavyAgent | Sistema de Lembretes_`;
-            await sendSafeMessage(sock, groupId, { text: msg });
+            const msgText = `*NOTIFICAÇÃO AUTOMÁTICA*\n\n${comando}\n\n_iMavyAgent | Sistema de Lembretes_`;
+
+            await sendPlainText(sock, groupId, msgText);
 
             // Depois do primeiro envio (recuperado ou novo), configura intervalo regular
             lembretesAtivos[groupId].timer = setInterval(async () => {
-                await sendSafeMessage(sock, groupId, { text: msg });
+                await sendPlainText(sock, groupId, msgText);
+
                 // Atualizar nextTrigger no estado para persistência
                 if (lembretesAtivos[groupId]) {
                     lembretesAtivos[groupId].config.nextTrigger = Date.now() + intervaloMs;
@@ -725,7 +727,7 @@ ${comando}
 _iMavyAgent | Sistema de Lembretes_`;
 
                 // Enviar primeira vez
-                await sendSafeMessage(sock, groupId, { text: msgFormatada });
+                await sendPlainText(sock, groupId, msgFormatada);
 
                 const config = { comando, intervalo, encerramento, startTime: Date.now() };
 
@@ -797,7 +799,9 @@ _iMavyAgent | Sistema de Lembretes_`;
                     stopReminder(groupId);
                 }
 
-                await sendSafeMessage(sock, groupId, { text: `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuração: 10 minutos` });
+                const msgText = `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuração: 10 minutos\n\n${comando}`;
+
+                await sendPlainText(sock, groupId, msgText);
 
                 const nextTrigger = Date.now() + 60000;
                 startReminderTimer(sock, groupId, { ...config, nextTrigger });
