@@ -131,7 +131,14 @@ const RESPONSES = {
     'oi': '👋 Olá! Como posso ajudar?',
     'ajuda': '📋 Comandos disponíveis:\n- oi\n- ajuda\n- status\n- info\n- /fechar\n- /abrir\n- /fixar\n- /regras\n- /status\n- /comandos',
     'status': '✅ Bot online e funcionando!',
-    'info': '🤖 iMavyAgent - Bot para WhatsApp'
+    'info': '🤖 iMavyAgent - Bot para WhatsApp',
+    '/snappy': '0x3a9e15b28E099708D0812E0843a9Ed70c508FB4b',
+    '/nix': '0xBe96fcF736AD906b1821Ef74A0e4e346C74e6221',
+    '/coffee': '0x2cAA9De4E4BB8202547afFB19b5830DC16184451',
+    '/lux': '0xa3baAAD9C19805f52cFa2490700C297359b4fA52',
+    '/kenesis': '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad',
+    '/dcar': '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5',
+    '/fsx': '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a'
 };
 
 // Inicialização movida para index.js
@@ -197,6 +204,16 @@ export async function handleGroupMessages(sock, message) {
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot
 * 📱 /comandos - Lista de comandos
+━━━━━━━━━━━━━━━━
+📝 *CONTRATOS E PROJETOS:*
+
+* /Snappy
+* /Nix
+* /Coffee
+* /Lux
+* /Kenesis
+* /Dcar
+* /Fsx
 ━━━━━━━━━━━━━━━━
 🔒 *Sistema de Segurança Ativo*
 * Anti-spam automático com IA
@@ -335,6 +352,38 @@ export async function handleGroupMessages(sock, message) {
         if (isGroup) {
             await handleSorteio(sock, message, text);
         }
+        return;
+    }
+
+    // Comandos de contratos (Públicos - Contatos de projetos e criptomoedas)
+    const cleanCmd = normalizedText.trim();
+
+    if (cleanCmd === '/snappy') {
+        await sendSafeMessage(sock, groupId, { text: '0x3a9e15b28E099708D0812E0843a9Ed70c508FB4b' });
+        return;
+    }
+    if (cleanCmd === '/nix') {
+        await sendSafeMessage(sock, groupId, { text: '0xBe96fcF736AD906b1821Ef74A0e4e346C74e6221' });
+        return;
+    }
+    if (cleanCmd === '/coffee') {
+        await sendSafeMessage(sock, groupId, { text: '0x2cAA9De4E4BB8202547afFB19b5830DC16184451' });
+        return;
+    }
+    if (cleanCmd === '/lux') {
+        await sendSafeMessage(sock, groupId, { text: '0xa3baAAD9C19805f52cFa2490700C297359b4fA52' });
+        return;
+    }
+    if (cleanCmd === '/kenesis') {
+        await sendSafeMessage(sock, groupId, { text: '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad' });
+        return;
+    }
+    if (cleanCmd === '/dcar') {
+        await sendSafeMessage(sock, groupId, { text: '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5' });
+        return;
+    }
+    if (cleanCmd === '/fsx') {
+        await sendSafeMessage(sock, groupId, { text: '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a' });
         return;
     }
 
