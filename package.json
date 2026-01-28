@@ -3,34 +3,23 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node entrypoint.js",
-    "dev": "node watcher.js",
-    "health": "node health-check.js",
-    "test-iptv": "node test-iptv.js",
-    "test-iptv-melhorado": "node test-iptv-melhorado.js",
-    "test-automation": "node test-automation.js",
-    "debug": "node debug-selectors.js",
-    "debug-site": "node debug-site.js"
-  },
-  "dependencies": {
-    "@huggingface/inference": "^4.13.2",
-    "@supabase/supabase-js": "^2.45.0",
-    "@whiskeysockets/baileys": "^6.7.8",
-    "axios": "^1.13.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
     "groq-sdk": "^0.3.3",
-    "jimp": "^0.22.12",
+    "jimp": "^1.6.0",
     "link-preview-js": "^3.2.0",
     "node-cron": "^3.0.3",
     "node-fetch": "^3.3.2",
     "node-schedule": "^2.1.1",
     "openai": "^4.104.0",
-    "qrcode": "^1.5.4"
+    "puppeteer": "^24.15.0",
+    "qrcode": "^1.5.4",
+    "qrcode-terminal": "^0.12.0"
   },
   "description": "",
   "main": "index.js",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC"
