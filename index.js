@@ -1,4 +1,5 @@
 // index.js
+console.log('🔥 [DEBUG] Carregando index.js...');
 import 'dotenv/config';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, getContentType } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
@@ -62,16 +63,21 @@ async function startBot() {
     console.log("===============================================");
     console.log("🚀 Iniciando iMavyAgent - Respostas Pré-Definidas");
     console.log("===============================================");
-    console.log('🤖 IA Status: Groq (gratuito e rápido) para moderação automática!');
-    console.log('⚙️ Sistema de lembretes avançado com encerramento automático ativo!');
 
+    console.log('⏳ [DEBUG] ensureCoreConfigFiles...');
     await ensureCoreConfigFiles();
 
+    console.log('⏳ [DEBUG] restoreSessionFromBackup...');
     // Tentar restaurar sessão do backup se necessário
     restoreSessionFromBackup();
 
+    console.log('⏳ [DEBUG] useMultiFileAuthState...');
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+
+    console.log('⏳ [DEBUG] fetchLatestBaileysVersion...');
     const { version } = await fetchLatestBaileysVersion();
+
+    console.log('⏳ [DEBUG] Criando socket...');
 
     const sock = makeWASocket({
         auth: state,
