@@ -57,7 +57,6 @@ function buildCryptoText({ label, chain, pairAddress, snap }) {
 💰 Preço: ${formatPriceUsd(snap.priceUsd)}
 🕒 24h: ${changeTxt}
 💧 Liquidez: ${formatUsdCompact(snap.liquidityUsd)}
-🔁 Volume 24h: ${formatUsdCompact(snap.volumeH24)}
 🔗 ${link}`;
 }
 
@@ -572,13 +571,12 @@ export async function handleGroupMessages(sock, message) {
         const priceTxt = Number.isFinite(snap.priceUsd) ? `$${snap.priceUsd}` : 'N/D';
         const changeTxt = Number.isFinite(snap.changeH24) ? `${snap.changeH24}%` : 'N/D';
         const liqTxt = snap.liquidityUsd ? `$${Math.round(snap.liquidityUsd).toLocaleString('pt-BR')}` : 'N/D';
-        const volTxt = snap.volumeH24 ? `$${Math.round(snap.volumeH24).toLocaleString('pt-BR')}` : 'N/D';
+
 
         const caption = `📈 *${symbolPair}* (${resolved.chain.toUpperCase()})\n\n` +
             `💰 *Preço:* ${priceTxt}\n` +
             `📊 *Variação 24h:* ${changeTxt}\n` +
-            `💧 *Liquidez:* ${liqTxt}\n` +
-            `🔁 *Volume 24h:* ${volTxt}` +
+            `💧 *Liquidez:* ${liqTxt}` +
             (snap.url ? `\n\n🔗 ${snap.url}` : '');
 
         await sendSafeMessage(sock, groupId, {
