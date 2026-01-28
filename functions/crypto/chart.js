@@ -2,6 +2,8 @@
 // Gera um gráfico simples (sparkline) em PNG usando Jimp.
 // Pensado para WhatsApp: leve, rápido, sem dependência de browser.
 
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
