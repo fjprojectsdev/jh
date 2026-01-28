@@ -4,7 +4,7 @@
 
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { Jimp } = require('jimp');
+const Jimp = require('jimp');
 
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
