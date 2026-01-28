@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
+    "start": "node entrypoint.js",
     "dev": "node watcher.js",
     "health": "node health-check.js",
     "test-iptv": "node test-iptv.js",
