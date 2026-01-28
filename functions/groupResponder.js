@@ -405,102 +405,102 @@ export async function handleGroupMessages(sock, message) {
             .join('\n');
         await sendSafeMessage(sock, groupId, { text: `📋 *ATALHOS CRIPTO*\n\n${msg}` });
         return;
+    }
 
-        // 🔔 /watch (admin-only em grupos) - assinatura automática de preço/infos
-        // Uso:
-        //  - /watch <alias> [intervalo]
-        //    intervalo: 5m (padrão), 10m, 1h, 30s (mínimo recomendado 1m)
-        if (normalizedText.startsWith('/watch')) {
-            const args = text.replace(/\/watch/i, '').trim().split(/\s+/).filter(Boolean);
-            const aliasKey = (args.shift() || '').replace(/^\//, '').toLowerCase();
+    // 🔔 /watch (admin-only em grupos) - assinatura automática de preço/infos
+    // Uso:
+    //  - /watch <alias> [intervalo]
+    //    intervalo: 5m (padrão), 10m, 1h, 30s (mínimo recomendado 1m)
+    if (normalizedText.startsWith('/watch')) {
+        const args = text.replace(/\/watch/i, '').trim().split(/\s+/).filter(Boolean);
+        const aliasKey = (args.shift() || '').replace(/^\//, '').toLowerCase();
 
-            if (!aliasKey) {
-                await sendSafeMessage(sock, groupId, { text: '❌ Use: /watch <alias> [intervalo]\nEx: /watch pnix 5m' });
-                return;
-            }
-
-            // Em grupo: só admin pode (evita spam)
-            if (isGroup) {
-                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
-                if (!ok) return;
-            }
-
-            const alias = await getAlias(aliasKey);
-            if (!alias) {
-                await sendSafeMessage(sock, groupId, { text: `❌ Alias não encontrado: ${aliasKey}. Use /listpairs para ver os disponíveis.` });
-                return;
-            }
-
-            const intervalMsRaw = parseIntervalMs(args[0], 5);
-
-            // Guardrails: mínimo 60s, máximo 60min
-            const intervalMs = Math.max(60_000, Math.min(intervalMsRaw, 60 * 60_000));
-
-            // Limite por grupo (evita bagunça)
-            const active = listWatches(groupId);
-            const MAX_WATCHES = parseInt(process.env.MAX_WATCHES_PER_GROUP || '5');
-            if (active.length >= MAX_WATCHES) {
-                await sendSafeMessage(sock, groupId, { text: `❌ Limite de assinaturas ativas atingido neste grupo (${MAX_WATCHES}). Use /watchlist e /unwatch.` });
-                return;
-            }
-
-            const res = await startWatch({ sock, groupId, aliasKey, alias, intervalMs });
-            if (!res.ok) {
-                await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
-                return;
-            }
-
-            const mins = Math.round(intervalMs / 60_000);
-            await sendSafeMessage(sock, groupId, { text: `✅ Assinatura ativada: /${aliasKey} a cada ~${mins} min.\nPara parar: /unwatch ${aliasKey}` });
+        if (!aliasKey) {
+            await sendSafeMessage(sock, groupId, { text: '❌ Use: /watch <alias> [intervalo]\nEx: /watch pnix 5m' });
             return;
         }
 
-        // 🛑 /unwatch (admin-only em grupos) - desativa assinatura
-        // Uso:
-        //  - /unwatch <alias>
-        //  - /unwatch all
-        if (normalizedText.startsWith('/unwatch')) {
-            const args = text.replace(/\/unwatch/i, '').trim().split(/\s+/).filter(Boolean);
-            const target = (args.shift() || '').replace(/^\//, '').toLowerCase();
+        // Em grupo: só admin pode (evita spam)
+        if (isGroup) {
+            const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
+            if (!ok) return;
+        }
 
-            if (!target) {
-                await sendSafeMessage(sock, groupId, { text: '❌ Use: /unwatch <alias|all>\nEx: /unwatch pnix' });
-                return;
-            }
-
-            if (isGroup) {
-                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
-                if (!ok) return;
-            }
-
-            if (target === 'all') {
-                const res = stopAllWatches(groupId);
-                await sendSafeMessage(sock, groupId, { text: `✅ Assinaturas desativadas: ${res.count}` });
-                return;
-            }
-
-            const res = stopWatch(groupId, target);
-            if (!res.ok) {
-                await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
-                return;
-            }
-            await sendSafeMessage(sock, groupId, { text: `✅ Assinatura desativada: /${target}` });
+        const alias = await getAlias(aliasKey);
+        if (!alias) {
+            await sendSafeMessage(sock, groupId, { text: `❌ Alias não encontrado: ${aliasKey}. Use /listpairs para ver os disponíveis.` });
             return;
         }
 
-        // 📡 /watchlist (público) - lista assinaturas ativas no grupo
-        if (normalizedText.startsWith('/watchlist')) {
-            const active = listWatches(groupId);
-            if (!active.length) {
-                await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhuma assinatura ativa neste grupo.' });
-                return;
-            }
-            const msg = active
-                .map(w => `• /${w.aliasKey} — ${Math.round(w.intervalMs / 60_000)} min`)
-                .join('\n');
-            await sendSafeMessage(sock, groupId, { text: `📡 Assinaturas ativas:\n${msg}` });
+        const intervalMsRaw = parseIntervalMs(args[0], 5);
+
+        // Guardrails: mínimo 60s, máximo 60min
+        const intervalMs = Math.max(60_000, Math.min(intervalMsRaw, 60 * 60_000));
+
+        // Limite por grupo (evita bagunça)
+        const active = listWatches(groupId);
+        const MAX_WATCHES = parseInt(process.env.MAX_WATCHES_PER_GROUP || '5');
+        if (active.length >= MAX_WATCHES) {
+            await sendSafeMessage(sock, groupId, { text: `❌ Limite de assinaturas ativas atingido neste grupo (${MAX_WATCHES}). Use /watchlist e /unwatch.` });
             return;
         }
+
+        const res = await startWatch({ sock, groupId, aliasKey, alias, intervalMs });
+        if (!res.ok) {
+            await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
+            return;
+        }
+
+        const mins = Math.round(intervalMs / 60_000);
+        await sendSafeMessage(sock, groupId, { text: `✅ Assinatura ativada: /${aliasKey} a cada ~${mins} min.\nPara parar: /unwatch ${aliasKey}` });
+        return;
+    }
+
+    // 🛑 /unwatch (admin-only em grupos) - desativa assinatura
+    // Uso:
+    //  - /unwatch <alias>
+    //  - /unwatch all
+    if (normalizedText.startsWith('/unwatch')) {
+        const args = text.replace(/\/unwatch/i, '').trim().split(/\s+/).filter(Boolean);
+        const target = (args.shift() || '').replace(/^\//, '').toLowerCase();
+
+        if (!target) {
+            await sendSafeMessage(sock, groupId, { text: '❌ Use: /unwatch <alias|all>\nEx: /unwatch pnix' });
+            return;
+        }
+
+        if (isGroup) {
+            const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
+            if (!ok) return;
+        }
+
+        if (target === 'all') {
+            const res = stopAllWatches(groupId);
+            await sendSafeMessage(sock, groupId, { text: `✅ Assinaturas desativadas: ${res.count}` });
+            return;
+        }
+
+        const res = stopWatch(groupId, target);
+        if (!res.ok) {
+            await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
+            return;
+        }
+        await sendSafeMessage(sock, groupId, { text: `✅ Assinatura desativada: /${target}` });
+        return;
+    }
+
+    // 📡 /watchlist (público) - lista assinaturas ativas no grupo
+    if (normalizedText.startsWith('/watchlist')) {
+        const active = listWatches(groupId);
+        if (!active.length) {
+            await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhuma assinatura ativa neste grupo.' });
+            return;
+        }
+        const msg = active
+            .map(w => `• /${w.aliasKey} — ${Math.round(w.intervalMs / 60_000)} min`)
+            .join('\n');
+        await sendSafeMessage(sock, groupId, { text: `📡 Assinaturas ativas:\n${msg}` });
+        return;
     }
 
     // Comando !sorteio (público) - apenas em grupos
