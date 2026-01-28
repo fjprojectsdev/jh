@@ -2,15 +2,15 @@
 // Gera um gráfico simples (sparkline) em PNG usando Jimp.
 // Pensado para WhatsApp: leve, rápido, sem dependência de browser.
 
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const Jimp = require('jimp');
 
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
 export async function renderSparklinePng(points, options = {}) {
+  // Lazy load para evitar crash no boot se o módulo falhar
+  const Jimp = require('jimp');
+
   const {
     width = 700,
     height = 360,
