@@ -3,6 +3,21 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "node index.js",
+    "dev": "node watcher.js",
+    "health": "node health-check.js",
+    "test-iptv": "node test-iptv.js",
+    "test-iptv-melhorado": "node test-iptv-melhorado.js",
+    "test-automation": "node test-automation.js",
+    "debug": "node debug-selectors.js",
+    "debug-site": "node debug-site.js"
+  },
+  "dependencies": {
+    "@huggingface/inference": "^4.13.2",
+    "@supabase/supabase-js": "^2.45.0",
+    "@whiskeysockets/baileys": "^6.7.9",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
     "groq-sdk": "^0.3.3",
     "jimp": "^1.6.0",
     "link-preview-js": "^3.2.0",
@@ -14,13 +29,9 @@
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0"
   },
-  "description": "",
-  "main": "index.js",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC"
 }
