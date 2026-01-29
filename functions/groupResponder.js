@@ -414,7 +414,7 @@ export async function handleGroupMessages(sock, message) {
             .join('\n');
         await sendSafeMessage(sock, groupId, { text: `📋 *ATALHOS CRIPTO*\n\n${msg}` });
         return;
-<<<<<<< HEAD
+
 
         // 🔔 /watch (admin-only em grupos) - assinatura automática de preço/infos
         // Uso:
