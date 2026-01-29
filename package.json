@@ -3,23 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node index.js",
-    "dev": "node watcher.js",
-    "health": "node health-check.js",
-    "test-iptv": "node test-iptv.js",
-    "test-iptv-melhorado": "node test-iptv-melhorado.js",
-    "test-automation": "node test-automation.js",
-    "debug": "node debug-selectors.js",
-    "debug-site": "node debug-site.js"
-  },
-  "dependencies": {
-    "@huggingface/inference": "^4.13.2",
-    "@supabase/supabase-js": "^2.45.0",
-    "@whiskeysockets/baileys": "^6.7.8",
-    "axios": "^1.13.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.6.1",
-    "express": "^4.21.2",
     "groq-sdk": "^0.3.3",
     "jimp": "^1.6.0",
     "link-preview-js": "^3.2.0",

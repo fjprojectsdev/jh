@@ -37,7 +37,6 @@ const PROJECT_TOKENS = {
     '/dcar': { address: '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5', chain: 'bsc', label: 'DCAR' },
     '/fsx': { address: '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a', chain: 'bsc', label: 'FSX' }
 };
-
 function formatUsdCompact(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return 'N/A';
@@ -415,6 +414,7 @@ export async function handleGroupMessages(sock, message) {
             .join('\n');
         await sendSafeMessage(sock, groupId, { text: `📋 *ATALHOS CRIPTO*\n\n${msg}` });
         return;
+<<<<<<< HEAD
 
         // 🔔 /watch (admin-only em grupos) - assinatura automática de preço/infos
         // Uso:
@@ -566,10 +566,12 @@ export async function handleGroupMessages(sock, message) {
             return;
         }
 
+
         const symbolPair = snap.quoteSymbol ? `${snap.baseSymbol}/${snap.quoteSymbol}` : snap.baseSymbol;
         const priceTxt = Number.isFinite(snap.priceUsd) ? `$${snap.priceUsd}` : 'N/D';
         const changeTxt = Number.isFinite(snap.changeH24) ? `${snap.changeH24}%` : 'N/D';
         const liqTxt = snap.liquidityUsd ? `$${Math.round(snap.liquidityUsd).toLocaleString('pt-BR')}` : 'N/D';
+
 
         const caption = `📈 *${symbolPair}* (${resolved.chain.toUpperCase()})\n\n` +
             `💰 *Preço:* ${priceTxt}\n` +
@@ -580,6 +582,7 @@ export async function handleGroupMessages(sock, message) {
         await sendSafeMessage(sock, groupId, {
             text: caption
         });
+
 
         return;
     }
@@ -798,15 +801,26 @@ ${messageToPin}
                 }
             } else if (normalizedText.startsWith('/aviso')) {
                 const avisoMsg = text.replace(/\/aviso/i, '').trim();
-                if (avisoMsg) {
-                    // Montar lista de membros para mentions (evita variável indefinida)
-                    const metadata = await sock.groupMetadata(groupId);
-                    const members = metadata.participants.map(m => m.id);
-                    await sendSafeMessage(sock, groupId, { text: avisoMsg, mentions: members });
-                } else {
+                if (!avisoMsg) {
                     await sendSafeMessage(sock, groupId, { text: '❌ Use: `/aviso sua mensagem`' });
+                    return;
                 }
 
+                try {
+                    // Montar lista de membros para mentions
+                    const metadata = await sock.groupMetadata(groupId);
+                    if (!metadata || !metadata.participants) {
+                        throw new Error('Metadados do grupo inválidos ou vazios');
+                    }
+                    const members = metadata.participants.map(m => m.id);
+                    await sendSafeMessage(sock, groupId, { text: avisoMsg, mentions: members });
+                    console.log(`✅ Aviso enviado para ${members.length} membros no grupo ${groupId}`);
+                } catch (err) {
+                    console.error('❌ Erro ao enviar aviso:', err);
+                    await sendSafeMessage(sock, groupId, {
+                        text: '❌ Erro ao processar o comando de aviso. Verifique os logs ou tente novamente em alguns instantes.'
+                    });
+                }
             } else if (normalizedText.startsWith('/addpair')) {
                 // /addpair <alias> <chain> <pairAddress> <label opcional...>
                 // Ex: /addpair pnix bsc 0x... NIX/WBNB
