@@ -1,0 +1,7 @@
+{
+  "pnix": {
+    "chain": "bsc",
+    "pair": "0x7f01f344b1950a3c5ea3b9db7017f93ab0c8f88e",
+    "label": "NIX/WBNB"
+  }
+}

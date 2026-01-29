@@ -2,7 +2,7 @@
 import { getGroupStatus } from './groupStats.js';
 
 import { addAllowedGroup, listAllowedGroups, removeAllowedGroup } from './adminCommands.js';
-import { addAdmin, removeAdmin, listAdmins, getAdminStats, isAuthorized } from './authManager.js';
+import { addAdmin, removeAdmin, listAdmins, getAdminStats, isAuthorized, checkAuth } from './authManager.js';
 import { addBannedWord, removeBannedWord, listBannedWords } from './antiSpam.js';
 import { analyzeLeadIntent, getLeads } from './aiSales.js';
 import { analyzeMessage } from './aiModeration.js';
@@ -14,6 +14,11 @@ import { enableMaintenance, disableMaintenance, isMaintenanceMode } from './main
 import { scheduleMessage } from './scheduler2.js';
 import { handleSorteio } from './custom/sorteio.js';
 import { sendSafeMessage, sendPlainText } from './messageHandler.js';
+import { resolveDexTarget, fetchDexPairSnapshot } from './crypto/dexscreener.js';
+import { pushPoint, getSeries } from './crypto/timeseries.js';
+import { renderSparklinePng } from './crypto/chart.js';
+import { getAlias, listAliases as listCryptoAliases, addAlias as addCryptoAlias, removeAlias as removeCryptoAlias } from './crypto/aliasStore.js';
+import { startWatch, stopWatch, stopAllWatches, listWatches, parseIntervalMs } from './crypto/watchManager.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -21,6 +26,50 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEMBRETES_FILE = path.join(__dirname, '..', 'lembretes.json');
 const BOT_TRIGGER = 'bot';
+
+// Configuração dos tokens do projeto (Centralizada)
+const PROJECT_TOKENS = {
+    '/snappy': { address: '0x3a9e15b28E099708D0812E0843a9Ed70c508FB4b', chain: 'bsc', label: 'SNAPPY' },
+    '/nix': { address: '0xBe96fcF736AD906b1821Ef74A0e4e346C74e6221', chain: 'bsc', label: 'NIX' },
+    '/coffee': { address: '0x2cAA9De4E4BB8202547afFB19b5830DC16184451', chain: 'bsc', label: 'COFFEE' },
+    '/lux': { address: '0xa3baAAD9C19805f52cFa2490700C297359b4fA52', chain: 'bsc', label: 'LUX' },
+    '/kenesis': { address: '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad', chain: 'bsc', label: 'KENESIS' },
+    '/dcar': { address: '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5', chain: 'bsc', label: 'DCAR' },
+    '/fsx': { address: '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a', chain: 'bsc', label: 'FSX' }
+};
+
+function formatUsdCompact(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 'N/A';
+    const abs = Math.abs(n);
+    const sign = n < 0 ? '-' : '';
+    const fmt2 = (x) => x.toFixed(2).replace(/\.00$/, '');
+
+    if (abs >= 1e9) return `${sign}$${fmt2(abs / 1e9)}B`;
+    if (abs >= 1e6) return `${sign}$${fmt2(abs / 1e6)}M`;
+    if (abs >= 1e3) return `${sign}$${fmt2(abs / 1e3)}K`;
+    if (abs >= 1) return `${sign}$${abs.toFixed(4)}`;
+    return `${sign}$${abs.toFixed(8)}`;
+}
+
+function formatPriceUsd(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 'N/A';
+    if (Math.abs(n) >= 1) return `$${n.toFixed(4)}`;
+    return `$${n.toFixed(8)}`;
+}
+
+function buildCryptoText({ label, chain, pairAddress, snap }) {
+    const change = Number(snap.changeH24 ?? 0);
+    const changeTxt = Number.isFinite(change) ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : 'N/A';
+    const link = snap.url || `https://dexscreener.com/${chain}/${pairAddress}`;
+
+    return `📈 ${label} (${String(chain).toUpperCase()})
+💰 Preço: ${formatPriceUsd(snap.priceUsd)}
+🕒 24h: ${changeTxt}
+💧 Liquidez: ${formatUsdCompact(snap.liquidityUsd)}
+🔗 ${link}`;
+}
 
 let lembretesAtivos = {};
 
@@ -333,6 +382,137 @@ export async function handleGroupMessages(sock, message) {
         return;
     }
 
+    // 🔎 Atalhos cripto (Grupo): comandos curtos tipo /pnix, /pbtc
+    // Responde com link + preço + métricas (opção completa)
+    {
+        const firstToken = normalizedText.trim().split(/\s+/)[0];
+        if (firstToken && firstToken.startsWith('/p')) {
+            const key = firstToken.replace(/^\//, '');
+            const alias = await getAlias(key);
+            if (alias) {
+                const snap = await fetchDexPairSnapshot(alias.chain, alias.pair, { allowCache: true });
+                if (!snap?.ok) {
+                    await sendSafeMessage(sock, groupId, { text: `❌ Não consegui buscar dados pra ${alias.label || key}.` });
+                    return;
+                }
+                const reply = buildCryptoText({ label: alias.label || key.toUpperCase(), chain: alias.chain, pairAddress: alias.pair, snap });
+                await sendSafeMessage(sock, groupId, { text: reply });
+                return;
+            }
+        }
+    }
+
+    // 📋 /listpairs (público) - lista atalhos cadastrados
+    if (normalizedText.startsWith('/listpairs')) {
+        const all = await listCryptoAliases();
+        if (!all.length) {
+            await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum atalho cripto cadastrado.' });
+            return;
+        }
+        const msg = all
+            .sort((a, b) => a.alias.localeCompare(b.alias))
+            .map(x => `/${x.alias} → ${x.label || ''} (${String(x.chain).toUpperCase()})`)
+            .join('\n');
+        await sendSafeMessage(sock, groupId, { text: `📋 *ATALHOS CRIPTO*\n\n${msg}` });
+        return;
+
+        // 🔔 /watch (admin-only em grupos) - assinatura automática de preço/infos
+        // Uso:
+        //  - /watch <alias> [intervalo]
+        //    intervalo: 5m (padrão), 10m, 1h, 30s (mínimo recomendado 1m)
+        if (normalizedText.startsWith('/watch')) {
+            const args = text.replace(/\/watch/i, '').trim().split(/\s+/).filter(Boolean);
+            const aliasKey = (args.shift() || '').replace(/^\//, '').toLowerCase();
+
+            if (!aliasKey) {
+                await sendSafeMessage(sock, groupId, { text: '❌ Use: /watch <alias> [intervalo]\nEx: /watch pnix 5m' });
+                return;
+            }
+
+            // Em grupo: só admin pode (evita spam)
+            if (isGroup) {
+                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
+                if (!ok) return;
+            }
+
+            const alias = await getAlias(aliasKey);
+            if (!alias) {
+                await sendSafeMessage(sock, groupId, { text: `❌ Alias não encontrado: ${aliasKey}. Use /listpairs para ver os disponíveis.` });
+                return;
+            }
+
+            const intervalMsRaw = parseIntervalMs(args[0], 5);
+
+            // Guardrails: mínimo 60s, máximo 60min
+            const intervalMs = Math.max(60_000, Math.min(intervalMsRaw, 60 * 60_000));
+
+            // Limite por grupo (evita bagunça)
+            const active = listWatches(groupId);
+            const MAX_WATCHES = parseInt(process.env.MAX_WATCHES_PER_GROUP || '5');
+            if (active.length >= MAX_WATCHES) {
+                await sendSafeMessage(sock, groupId, { text: `❌ Limite de assinaturas ativas atingido neste grupo (${MAX_WATCHES}). Use /watchlist e /unwatch.` });
+                return;
+            }
+
+            const res = await startWatch({ sock, groupId, aliasKey, alias, intervalMs });
+            if (!res.ok) {
+                await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
+                return;
+            }
+
+            const mins = Math.round(intervalMs / 60_000);
+            await sendSafeMessage(sock, groupId, { text: `✅ Assinatura ativada: /${aliasKey} a cada ~${mins} min.\nPara parar: /unwatch ${aliasKey}` });
+            return;
+        }
+
+        // 🛑 /unwatch (admin-only em grupos) - desativa assinatura
+        // Uso:
+        //  - /unwatch <alias>
+        //  - /unwatch all
+        if (normalizedText.startsWith('/unwatch')) {
+            const args = text.replace(/\/unwatch/i, '').trim().split(/\s+/).filter(Boolean);
+            const target = (args.shift() || '').replace(/^\//, '').toLowerCase();
+
+            if (!target) {
+                await sendSafeMessage(sock, groupId, { text: '❌ Use: /unwatch <alias|all>\nEx: /unwatch pnix' });
+                return;
+            }
+
+            if (isGroup) {
+                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
+                if (!ok) return;
+            }
+
+            if (target === 'all') {
+                const res = stopAllWatches(groupId);
+                await sendSafeMessage(sock, groupId, { text: `✅ Assinaturas desativadas: ${res.count}` });
+                return;
+            }
+
+            const res = stopWatch(groupId, target);
+            if (!res.ok) {
+                await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
+                return;
+            }
+            await sendSafeMessage(sock, groupId, { text: `✅ Assinatura desativada: /${target}` });
+            return;
+        }
+
+        // 📡 /watchlist (público) - lista assinaturas ativas no grupo
+        if (normalizedText.startsWith('/watchlist')) {
+            const active = listWatches(groupId);
+            if (!active.length) {
+                await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhuma assinatura ativa neste grupo.' });
+                return;
+            }
+            const msg = active
+                .map(w => `• /${w.aliasKey} — ${Math.round(w.intervalMs / 60_000)} min`)
+                .join('\n');
+            await sendSafeMessage(sock, groupId, { text: `📡 Assinaturas ativas:\n${msg}` });
+            return;
+        }
+    }
+
     // Comando !sorteio (público) - apenas em grupos
     if (normalizedText.startsWith('!sorteio') || normalizedText.startsWith('!participar')) {
         console.log('🎲 SORTEIO DETECTADO - isGroup:', isGroup);
@@ -355,35 +535,132 @@ export async function handleGroupMessages(sock, message) {
         return;
     }
 
-    // Comandos de contratos (Públicos - Contatos de projetos e criptomoedas)
-    const cleanCmd = normalizedText.trim();
+    // 📈 Comando /grafico (público) - Dexscreener (Opção A)
+    // Uso:
+    //  - /grafico <link Dexscreener>
+    //  - /grafico <0xPAIR>
+    //  - /grafico bsc <0xPAIR>
+    //  - /grafico bsc <0xTOKEN>  (resolve pool líder)
+    if (normalizedText.startsWith('/grafico')) {
+        // Rate-limit dedicado (mais pesado que comandos comuns)
+        const cooldown = parseInt(process.env.GRAFICO_COOLDOWN || '8') * 1000;
+        const rateCheck = checkRateLimit(`${senderId}:grafico`, cooldown);
+        if (rateCheck.limited) {
+            await sendSafeMessage(sock, groupId, { text: `⏱️ Aguarde ${rateCheck.remaining}s para pedir outro gráfico.` });
+            return;
+        }
 
-    if (cleanCmd === '/snappy') {
-        await sendSafeMessage(sock, groupId, { text: '0x3a9e15b28E099708D0812E0843a9Ed70c508FB4b' });
+        const argsText = text.replace(/\/grafico/i, '').trim();
+        const resolved = await resolveDexTarget(argsText, 'bsc');
+        if (!resolved.ok) {
+            await sendSafeMessage(sock, groupId, { text: `❌ ${resolved.error}` });
+            return;
+        }
+
+        const key = `${resolved.chain}:${resolved.pairAddress}`;
+
+        // Snapshot (com cache curto interno)
+        const snap = await fetchDexPairSnapshot(resolved.chain, resolved.pairAddress, { allowCache: true });
+        if (!snap.ok) {
+            await sendSafeMessage(sock, groupId, { text: `❌ ${snap.error}` });
+            return;
+        }
+
+        const symbolPair = snap.quoteSymbol ? `${snap.baseSymbol}/${snap.quoteSymbol}` : snap.baseSymbol;
+        const priceTxt = Number.isFinite(snap.priceUsd) ? `$${snap.priceUsd}` : 'N/D';
+        const changeTxt = Number.isFinite(snap.changeH24) ? `${snap.changeH24}%` : 'N/D';
+        const liqTxt = snap.liquidityUsd ? `$${Math.round(snap.liquidityUsd).toLocaleString('pt-BR')}` : 'N/D';
+
+        const caption = `📈 *${symbolPair}* (${resolved.chain.toUpperCase()})\n\n` +
+            `💰 *Preço:* ${priceTxt}\n` +
+            `📊 *Variação 24h:* ${changeTxt}\n` +
+            `💧 *Liquidez:* ${liqTxt}` +
+            (snap.url ? `\n\n🔗 ${snap.url}` : '');
+
+        await sendSafeMessage(sock, groupId, {
+            text: caption
+        });
+
         return;
     }
-    if (cleanCmd === '/nix') {
-        await sendSafeMessage(sock, groupId, { text: '0xBe96fcF736AD906b1821Ef74A0e4e346C74e6221' });
+
+    // Comandos de contratos (Públicos - Contatos de projetos e criptomoedas)
+
+    // 1. Comando /ca (Contract Address) - Apenas o contrato para copiar fácil
+    // Uso: /ca snappy, /ca nix, /ca (mostra lista)
+    if (normalizedText.startsWith('/ca')) {
+        const args = normalizedText.replace(/^\/ca/i, '').trim().split(/\s+/);
+        const tokenName = args[0] ? '/' + args[0].replace(/^\//, '') : '';
+
+        if (tokenName && PROJECT_TOKENS[tokenName]) {
+            await sendSafeMessage(sock, groupId, { text: PROJECT_TOKENS[tokenName].address });
+            return;
+        }
+
+        // Se não achou ou sem argumento, listar opções
+        const options = Object.keys(PROJECT_TOKENS).map(k => k.replace('/', '')).join(', ');
+        await sendSafeMessage(sock, groupId, { text: `❓ Token não encontrado. Tente: /ca [nome]\nOpções: ${options}` });
         return;
     }
-    if (cleanCmd === '/coffee') {
-        await sendSafeMessage(sock, groupId, { text: '0x2cAA9De4E4BB8202547afFB19b5830DC16184451' });
-        return;
-    }
-    if (cleanCmd === '/lux') {
-        await sendSafeMessage(sock, groupId, { text: '0xa3baAAD9C19805f52cFa2490700C297359b4fA52' });
-        return;
-    }
-    if (cleanCmd === '/kenesis') {
-        await sendSafeMessage(sock, groupId, { text: '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad' });
-        return;
-    }
-    if (cleanCmd === '/dcar') {
-        await sendSafeMessage(sock, groupId, { text: '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5' });
-        return;
-    }
-    if (cleanCmd === '/fsx') {
-        await sendSafeMessage(sock, groupId, { text: '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a' });
+
+    const cleanCmd = normalizedText.trim();
+    if (PROJECT_TOKENS[cleanCmd]) {
+        const tokenConfig = PROJECT_TOKENS[cleanCmd];
+
+        // Rate-limit para evitar spam de gráficos
+        const cooldown = parseInt(process.env.GRAFICO_COOLDOWN || '5') * 1000;
+        const rateCheck = checkRateLimit(`${senderId}:${cleanCmd}`, cooldown);
+
+        if (rateCheck.limited) {
+            // Fallback para apenas texto se estiver em cooldown (opcional, ou apenas avisa)
+            // Vamos apenas avisar, pois gerar gráfico é pesado
+            await sendSafeMessage(sock, groupId, { text: `⏱️ Aguarde ${rateCheck.remaining}s...` });
+            return;
+        }
+
+
+
+        // 1. Tentar resolver como PAR primeiro (Snapshot)
+        // Nota: fetchDexPairSnapshot espera um endereço de PAR.
+        // Se o address configurado for do TOKEN, precisamos descobrir o par primeiro.
+        // Vamos tentar resolver inteligente: resolveDexTarget lida com isso.
+
+        const resolved = await resolveDexTarget(`${tokenConfig.chain} ${tokenConfig.address}`, tokenConfig.chain);
+
+        if (!resolved.ok) {
+            // Se falhar API, manda só o contrato como fallback
+            await sendSafeMessage(sock, groupId, { text: `📄 Contrato ${tokenConfig.label}: ${tokenConfig.address}\n(API Temporariamente indisponível)` });
+            return;
+        }
+
+        // 2. Buscar dados atualizados
+        const snap = await fetchDexPairSnapshot(resolved.chain, resolved.pairAddress, { allowCache: true });
+
+        if (!snap.ok) {
+            await sendSafeMessage(sock, groupId, { text: `📄 Contrato ${tokenConfig.label}: ${tokenConfig.address}` });
+            return;
+        }
+
+        // 4. Montar Legenda Rica
+        const symbolPair = snap.quoteSymbol ? `${snap.baseSymbol}/${snap.quoteSymbol}` : snap.baseSymbol;
+        const priceTxt = Number.isFinite(snap.priceUsd) ? `$${snap.priceUsd}` : 'N/D';
+        const changeTxt = Number.isFinite(snap.changeH24) ? `${snap.changeH24 >= 0 ? '+' : ''}${snap.changeH24}%` : 'N/D';
+        const liqTxt = snap.liquidityUsd ? `$${Math.round(snap.liquidityUsd).toLocaleString('pt-BR')}` : 'N/D';
+
+        let caption = `📈 *${tokenConfig.label}* (${symbolPair})\n\n` +
+            `💰 *Preço:* ${priceTxt}\n` +
+            `📊 *Variação 24h:* ${changeTxt}\n` +
+            `💧 *Liquidez:* ${liqTxt}\n` +
+            `📄 *Contrato:* ${tokenConfig.address}`;
+
+        if (snap.url) {
+            caption += `\n\n🔗 ${snap.url}`;
+        }
+
+        // 5. Enviar apenas TEXTO (sem gráfico)
+        await sendSafeMessage(sock, groupId, {
+            text: caption
+        });
         return;
     }
 
@@ -405,7 +682,7 @@ export async function handleGroupMessages(sock, message) {
 
             // Se requer autorização, verificar se o usuário é admin
             if (requiresAuth) {
-                const authorized = await isAuthorized(senderId);
+                const authorized = await checkAuth(sock, senderId, groupId, { allowGroupAdmins: true });
                 if (!authorized) {
                     await sendSafeMessage(sock, groupId, {
                         text: '❌ *Acesso Negado*\n\n⚠️ Apenas administradores autorizados podem usar comandos do bot.\n👥 Integrantes comuns têm acesso somente ao comando /regras.\n\n💡 Entre em contato com um administrador para solicitar permissão.'
@@ -522,10 +799,49 @@ ${messageToPin}
             } else if (normalizedText.startsWith('/aviso')) {
                 const avisoMsg = text.replace(/\/aviso/i, '').trim();
                 if (avisoMsg) {
+                    // Montar lista de membros para mentions (evita variável indefinida)
+                    const metadata = await sock.groupMetadata(groupId);
+                    const members = metadata.participants.map(m => m.id);
                     await sendSafeMessage(sock, groupId, { text: avisoMsg, mentions: members });
                 } else {
                     await sendSafeMessage(sock, groupId, { text: '❌ Use: `/aviso sua mensagem`' });
                 }
+
+            } else if (normalizedText.startsWith('/addpair')) {
+                // /addpair <alias> <chain> <pairAddress> <label opcional...>
+                // Ex: /addpair pnix bsc 0x... NIX/WBNB
+                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
+                if (!ok) return;
+
+                const args = text.replace(/\/addpair/i, '').trim();
+                const parts = args.split(/\s+/);
+                const alias = parts.shift();
+                const chain = parts.shift();
+                const pair = parts.shift();
+                const label = parts.join(' ').trim();
+
+                const res = await addCryptoAlias(alias, chain, pair, label);
+                if (!res.ok) {
+                    await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}\n\nUso: /addpair pnix bsc 0x... NIX/WBNB` });
+                    return;
+                }
+                await sendSafeMessage(sock, groupId, { text: `✅ Atalho criado: /${alias.replace(/^\//, '').toLowerCase()} → ${res.value.label} (${String(res.value.chain).toUpperCase()})` });
+                return;
+
+            } else if (normalizedText.startsWith('/delpair')) {
+                // /delpair <alias>
+                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
+                if (!ok) return;
+
+                const alias = text.replace(/\/delpair/i, '').trim();
+                const res = await removeCryptoAlias(alias);
+                if (!res.ok) {
+                    await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}\n\nUso: /delpair pnix` });
+                    return;
+                }
+                await sendSafeMessage(sock, groupId, { text: `🗑️ Atalho removido: /${String(alias).replace(/^\//, '').toLowerCase()}` });
+                return;
+
             } else if (normalizedText.startsWith('/todos')) {
                 const msg = text.replace(/\/todos/i, '').trim();
                 const metadata = await sock.groupMetadata(groupId);
