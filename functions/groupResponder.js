@@ -219,7 +219,7 @@ function splitMessageAndTimes(input) {
         if (!/^\d{1,2}:\d{2}$/.test(token)) break;
         const parsed = normalizeTimeToken(token);
         if (!parsed.ok) {
-            return { ok: false, error: `Hor?rio inv?lido: ${token}` };
+            return { ok: false, error: `Horário inválido: ${token}` };
         }
         if (!times.includes(parsed.value)) times.unshift(parsed.value);
         tokens.pop();
@@ -253,7 +253,7 @@ function scheduleDailyTime(sock, groupId, config, timeStr) {
     }
 
     return setTimeout(async () => {
-        const msgText = `*NOTIFICA??O AUTOM?TICA*
+        const msgText = `*NOTIFICAÇÃO AUTOMÁTICA*
 
 ${config.comando}
 
@@ -303,9 +303,9 @@ function stopLembreteFixo(groupId, sock = null) {
     saveLembretes();
 
     if (sock) {
-        sendSafeMessage(sock, groupId, { text: `? *Lembrete fixo desativado*
+        sendSafeMessage(sock, groupId, { text: `🛑 *Lembrete fixo desativado*
 
-*_iMavyAgent ? Automa??o Inteligente_*` }).catch(() => { });
+*_iMavyAgent — Automação Inteligente_*` }).catch(() => { });
     }
 }
 
@@ -378,7 +378,7 @@ export async function handleGroupMessages(sock, message) {
 * 📢 /aviso [mensagem] - Menciona todos
 * 📢 /lembrete + mensagem 1h 24h - Lembrete automático
 * 🛑 /stoplembrete - Para lembrete
-* ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo di?rio
+* ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo diário
 * 🛑 /stoplembretefixo - Para lembrete fixo
 * 🚫 /adicionartermo [palavra] - Bloqueia palavra
 * ✏️ /removertermo [palavra] - Remove palavra
@@ -526,14 +526,14 @@ export async function handleGroupMessages(sock, message) {
         return;
     }
 
-    // ?? Atalhos cripto diretos por par (Grupo): comandos tipo /vkinha
+    // 🔗 Atalhos cripto diretos por par (Grupo): comandos tipo /vkinha
     {
         const firstToken = normalizedText.trim().split(/\s+/)[0];
         const directPair = firstToken ? DIRECT_PAIR_COMMANDS[firstToken] : null;
         if (directPair) {
             const snap = await fetchDexPairSnapshot(directPair.chain, directPair.pair, { allowCache: true });
             if (!snap?.ok) {
-                await sendSafeMessage(sock, groupId, { text: `? N?o consegui buscar dados pra ${directPair.label || firstToken.replace('/', '').toUpperCase()}.` });
+                await sendSafeMessage(sock, groupId, { text: `❌ Não consegui buscar dados pra ${directPair.label || firstToken.replace('/', '').toUpperCase()}.` });
                 return;
             }
             const reply = buildCryptoText({
@@ -1222,20 +1222,20 @@ Um membro foi banido do grupo:
                 const partes = text.split(' + ');
 
                 if (partes.length < 2) {
-                    await sendSafeMessage(sock, groupId, { text: `? Use: /lembretefixo + mensagem 08:00 21:00
-Ex: /lembretefixo + LEMBRETE DI?RIO 08:00 15:00 21:00` });
+                    await sendSafeMessage(sock, groupId, { text: `❗ Use: /lembretefixo + mensagem 08:00 21:00
+Ex: /lembretefixo + LEMBRETE DIÁRIO 08:00 15:00 21:00` });
                     return;
                 }
 
                 const parsed = splitMessageAndTimes(partes[1]);
                 if (!parsed.ok) {
-                    await sendSafeMessage(sock, groupId, { text: `? ${parsed.error}
-Ex: /lembretefixo + LEMBRETE DI?RIO 08:00 15:00 21:00` });
+                    await sendSafeMessage(sock, groupId, { text: `⚠️ ${parsed.error}
+Ex: /lembretefixo + LEMBRETE DIÁRIO 08:00 15:00 21:00` });
                     return;
                 }
 
                 if (parsed.times.length > MAX_DAILY_TIMES) {
-                    await sendSafeMessage(sock, groupId, { text: `? M?ximo de hor?rios por lembrete fixo: ${MAX_DAILY_TIMES}.` });
+                    await sendSafeMessage(sock, groupId, { text: `⚠️ Máximo de horários por lembrete fixo: ${MAX_DAILY_TIMES}.` });
                     return;
                 }
 
@@ -1253,9 +1253,9 @@ Ex: /lembretefixo + LEMBRETE DI?RIO 08:00 15:00 21:00` });
                 startLembreteFixo(sock, groupId, config);
 
                 await sendSafeMessage(sock, groupId, {
-                    text: `? Lembrete fixo di?rio ativado.
+                    text: `✅ Lembrete fixo diário ativado.
 
-Hor?rios: ${parsed.times.join(', ')}
+Horários: ${parsed.times.join(', ')}
 Para desativar: /stoplembretefixo`
                 });
             } else if (normalizedText.startsWith('/lembrete') && !normalizedText.startsWith('/lembretes') && !normalizedText.startsWith('/lembretefixo')) {
@@ -1338,9 +1338,9 @@ _iMavyAgent | Sistema de Lembretes_`;
             } else if (normalizedText === '/stoplembretefixo') {
                 if (lembretesFixosAtivos[groupId]) {
                     stopLembreteFixo(groupId);
-                    await sendSafeMessage(sock, groupId, { text: '?? O lembrete fixo foi *desativado* com sucesso!' });
+                    await sendSafeMessage(sock, groupId, { text: '🛑 O lembrete fixo foi *desativado* com sucesso!' });
                 } else {
-                    await sendSafeMessage(sock, groupId, { text: '?? N?o h? nenhum lembrete fixo ativo neste grupo.' });
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Não há nenhum lembrete fixo ativo neste grupo.' });
                 }
             } else if (normalizedText === '/lembretes') {
                 const parts = [];
@@ -1361,12 +1361,12 @@ _iMavyAgent | Sistema de Lembretes_`;
                     const remainingDuration = Math.max(0, (config.startTime + (config.encerramento * 3600000)) - now);
                     const remainingHours = (remainingDuration / 3600000).toFixed(1);
 
-                    const msg = `?? *LEMBRETE ATIVO*\n\n` +
-                        `?? *Mensagem:* ${config.comando}\n` +
-                        `?? *Intervalo:* ${config.intervalo}h\n` +
-                        `?? *Pr?ximo envio em:* ${hours}h ${minutes}m ${seconds}s\n` +
-                        `? *Encerra em:* ${remainingHours}h\n` +
-                        `?? *In?cio:* ${startTime.toLocaleString('pt-BR')}`;
+                    const msg = `⏰ *LEMBRETE ATIVO*\n\n` +
+                        `📝 *Mensagem:* ${config.comando}\n` +
+                        `⏱️ *Intervalo:* ${config.intervalo}h\n` +
+                        `⏭️ *Próximo envio em:* ${hours}h ${minutes}m ${seconds}s\n` +
+                        `⏳ *Encerra em:* ${remainingHours}h\n` +
+                        `📅 *Início:* ${startTime.toLocaleString('pt-BR')}`;
 
                     parts.push(msg);
                 }
@@ -1378,22 +1378,22 @@ _iMavyAgent | Sistema de Lembretes_`;
                     const nextLines = horarios.map((h) => {
                         const nextTs = getNextDailyTrigger(h, now).nextTs;
                         const when = new Date(nextTs).toLocaleString('pt-BR');
-                        return `? ${h} (pr?ximo: ${when})`;
+                        return `• ${h} (próximo: ${when})`;
                     }).join('\n');
 
                     const startTxt = config.startTime ? new Date(config.startTime).toLocaleString('pt-BR') : 'N/D';
 
-                    const msg = `?? *LEMBRETE FIXO DI?RIO*\n\n` +
-                        `?? *Mensagem:* ${config.comando}\n` +
-                        `? *Hor?rios:* ${horarios.join(', ')}\n` +
-                        `?? *In?cio:* ${startTxt}` +
-                        (nextLines ? `\n\n?? *Pr?ximos envios:*\n${nextLines}` : '');
+                    const msg = `📅 *LEMBRETE FIXO DIÁRIO*\n\n` +
+                        `📝 *Mensagem:* ${config.comando}\n` +
+                        `⏰ *Horários:* ${horarios.join(', ')}\n` +
+                        `📅 *Início:* ${startTxt}` +
+                        (nextLines ? `\n\n🔜 *Próximos envios:*\n${nextLines}` : '');
 
                     parts.push(msg);
                 }
 
                 if (parts.length === 0) {
-                    await sendSafeMessage(sock, groupId, { text: '?? Nenhum lembrete ativo no momento.' });
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum lembrete ativo no momento.' });
                 } else {
                     await sendSafeMessage(sock, groupId, { text: parts.join('\n\n') });
                 }
@@ -1550,7 +1550,7 @@ _iMavyAgent | Sistema de Lembretes_`;
 * 📢 /aviso [mensagem] - Menciona todos
 * 📢 /lembrete + mensagem 1h 24h - Lembrete automático
 * 🛑 /stoplembrete - Para lembrete
-* ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo di?rio
+* ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo diário
 * 🛑 /stoplembretefixo - Para lembrete fixo
 * 🚫 /adicionartermo [palavra] - Bloqueia palavra
 * ✏️ /removertermo [palavra] - Remove palavra
