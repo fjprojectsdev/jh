@@ -76,34 +76,72 @@ function normalizeJidUser(jid) {
     return String(jid || '').split(':')[0];
 }
 
+function getJidLocalPart(jid) {
+    const full = normalizeJidUser(jid);
+    return String(full || '').split('@')[0].toLowerCase();
+}
+
+function getJidDigits(jid) {
+    return getJidLocalPart(jid).replace(/\D/g, '');
+}
+
+function isSameJid(a, b) {
+    if (!a || !b) return false;
+    const aLocal = getJidLocalPart(a);
+    const bLocal = getJidLocalPart(b);
+    if (aLocal && bLocal && aLocal === bLocal) return true;
+
+    const aDigits = getJidDigits(a);
+    const bDigits = getJidDigits(b);
+    return Boolean(aDigits && bDigits && aDigits === bDigits);
+}
+
 function getMentionedJidsFromMessage(message) {
     try {
-        const messageObj = message?.message || {};
-        const content = messageObj.conversation
-            ? null
-            : messageObj.extendedTextMessage
-                || messageObj.imageMessage
-                || messageObj.videoMessage
-                || messageObj.documentMessage
-                || messageObj;
+        const root = message?.message || {};
+        const messageObj =
+            root?.ephemeralMessage?.message
+            || root?.viewOnceMessage?.message
+            || root?.viewOnceMessageV2?.message
+            || root?.viewOnceMessageV2Extension?.message
+            || root;
+        const directMentions =
+            messageObj?.extendedTextMessage?.contextInfo?.mentionedJid
+            || messageObj?.imageMessage?.contextInfo?.mentionedJid
+            || messageObj?.videoMessage?.contextInfo?.mentionedJid
+            || messageObj?.documentMessage?.contextInfo?.mentionedJid
+            || messageObj?.documentWithCaptionMessage?.message?.documentMessage?.contextInfo?.mentionedJid
+            || messageObj?.buttonsResponseMessage?.contextInfo?.mentionedJid
+            || messageObj?.listResponseMessage?.contextInfo?.mentionedJid
+            || messageObj?.reactionMessage?.key?.participant
+            || null;
 
-        const directMentions = content?.contextInfo?.mentionedJid;
+        if (typeof directMentions === 'string') return [directMentions];
         if (Array.isArray(directMentions)) return directMentions;
     } catch { }
     return [];
 }
 
 function isImavyMentioned({ text, message, sock }) {
-    const plainTextMention = /(^|\s)@imavy(\s|$|[!?,.:;])/i.test(String(text || ''));
+    const plainTextMention = /(^|\s)@(imavy|imavyagent)(\s|$|[!?,.:;])/i.test(String(text || ''));
     if (plainTextMention) return true;
+
+    const botJid = sock?.user?.id || '';
+    if (botJid) {
+        const botLocal = getJidLocalPart(botJid);
+        const botDigits = getJidDigits(botJid);
+        const lowerText = String(text || '').toLowerCase();
+        if ((botLocal && lowerText.includes(`@${botLocal}`)) || (botDigits && lowerText.includes(`@${botDigits}`))) {
+            return true;
+        }
+    }
 
     const mentioned = getMentionedJidsFromMessage(message);
     if (!mentioned.length) return false;
 
-    const botJid = normalizeJidUser(sock?.user?.id);
     if (!botJid) return false;
 
-    return mentioned.some((jid) => normalizeJidUser(jid) === botJid);
+    return mentioned.some((jid) => isSameJid(jid, botJid));
 }
 
 function formatUsdCompact(value) {
@@ -140,9 +178,9 @@ function formatLiveBrl(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return 'N/A';
     if (Math.abs(n) >= 1) {
-        return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+        return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 5 })}`;
     }
-    return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 8 })}`;
+    return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 5, maximumFractionDigits: 9 })}`;
 }
 
 function buildCryptoText({ label, chain, pairAddress, snap }) {
@@ -637,6 +675,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
     // @IMAVY: analise cripto somente por mencao explicita
     if (imavyMentioned && !isSlashCommand) {
+        console.log(`✅ @IMAVY mencionado por ${senderId}`);
         const cooldown = parseInt(process.env.IMAVY_MENTION_COOLDOWN || '12', 10) * 1000;
         const rateCheck = checkRateLimit(`${senderId}:imavy`, cooldown);
         if (rateCheck.limited) {

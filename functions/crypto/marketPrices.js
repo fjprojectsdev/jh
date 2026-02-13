@@ -19,6 +19,15 @@ const COMMAND_MARKET_MAP = {
 };
 
 const TRACKED_IDS = Array.from(new Set(Object.values(COMMAND_MARKET_MAP).map((x) => x.id)));
+const BINANCE_USDT_PAIRS = {
+  USDT: 'USDTUSDT',
+  BTC: 'BTCUSDT',
+  SOL: 'SOLUSDT',
+  XRP: 'XRPUSDT',
+  BNB: 'BNBUSDT',
+  ETH: 'ETHUSDT',
+  PAXG: 'PAXGUSDT'
+};
 
 let marketCache = {
   ts: 0,
@@ -28,6 +37,18 @@ let marketCache = {
 function safeNumber(v, fallback = NaN) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function getCoinGeckoHeaders() {
+  const key = String(process.env.COINGECKO_API_KEY || '').trim();
+  if (!key) return {};
+
+  const customHeader = String(process.env.COINGECKO_API_HEADER || '').trim();
+  if (customHeader) return { [customHeader]: key };
+
+  const plan = String(process.env.COINGECKO_API_PLAN || 'demo').trim().toLowerCase();
+  if (plan === 'pro') return { 'x-cg-pro-api-key': key };
+  return { 'x-cg-demo-api-key': key };
 }
 
 function getCacheTtlMs() {
@@ -46,6 +67,7 @@ async function fetchAllTrackedFromCoinGecko() {
 
   const { data } = await axios.get(COINGECKO_SIMPLE_PRICE_URL, {
     params,
+    headers: getCoinGeckoHeaders(),
     timeout: 10_000
   });
 
@@ -65,6 +87,20 @@ async function fetchUsdtBrlSpotBinance() {
   return safeNumber(data?.price, NaN);
 }
 
+async function fetchBinanceUsdPrice(symbol) {
+  const pair = BINANCE_USDT_PAIRS[String(symbol || '').toUpperCase()];
+  if (!pair || pair === 'USDTUSDT') {
+    if (String(symbol || '').toUpperCase() === 'USDT') return 1;
+    return NaN;
+  }
+
+  const { data } = await axios.get(BINANCE_TICKER_URL, {
+    params: { symbol: pair },
+    timeout: 5_000
+  });
+  return safeNumber(data?.price, NaN);
+}
+
 async function getMarketDataCached() {
   const now = Date.now();
   const ttlMs = getCacheTtlMs();
@@ -73,9 +109,15 @@ async function getMarketDataCached() {
     return marketCache.data;
   }
 
-  const data = await fetchAllTrackedFromCoinGecko();
-  marketCache = { ts: now, data };
-  return data;
+  try {
+    const data = await fetchAllTrackedFromCoinGecko();
+    marketCache = { ts: now, data };
+    return data;
+  } catch (error) {
+    // Fallback para cache antigo caso CoinGecko esteja limitado/instável.
+    if (marketCache.data) return marketCache.data;
+    throw error;
+  }
 }
 
 function buildCoinMarketCapUrl(cmcSlug) {
@@ -94,48 +136,77 @@ export async function getMarketQuote(commandToken) {
     return { ok: false, error: 'Comando de mercado nao reconhecido.' };
   }
 
+  let quote = null;
+  let allData = null;
   try {
-    const allData = await getMarketDataCached();
-    const quote = allData[meta.id];
+    allData = await getMarketDataCached();
+    quote = allData?.[meta.id] || null;
+  } catch (error) {
+    console.error('CoinGecko indisponivel para getMarketQuote:', error?.message || error);
+  }
 
-    if (!quote) {
-      return { ok: false, error: `Sem cotacao disponivel para ${meta.symbol}.` };
-    }
-
+  try {
     let brlPrice = safeNumber(quote?.brl, NaN);
-    const source = ['CoinGecko'];
+    let usdPrice = safeNumber(quote?.usd, NaN);
+    let change24h = safeNumber(quote?.usd_24h_change, NaN);
+    let lastUpdatedAt = Number.isFinite(safeNumber(quote?.last_updated_at, NaN))
+      ? safeNumber(quote?.last_updated_at, NaN) * 1000
+      : null;
+    const source = [];
 
-    if (meta.useBinanceSpotBrl) {
+    if (quote) source.push('CoinGecko');
+
+    // Fallback geral: Binance spot para simbolos com par USDT.
+    if (!Number.isFinite(usdPrice)) {
       try {
-        const usdtBrlSpot = await fetchUsdtBrlSpotBinance();
-        if (Number.isFinite(usdtBrlSpot)) {
-          brlPrice = usdtBrlSpot;
-          source.push('Binance (spot BRL)');
+        const usdFromBinance = await fetchBinanceUsdPrice(meta.symbol);
+        if (Number.isFinite(usdFromBinance)) {
+          usdPrice = usdFromBinance;
+          source.push('Binance (spot USD)');
         }
-      } catch {
-        // Keep CoinGecko BRL as fallback when Binance is unavailable.
+      } catch (error) {
+        console.error(`Binance USD indisponivel para ${meta.symbol}:`, error?.message || error);
       }
     }
 
-    const lastUpdatedSeconds = safeNumber(quote?.last_updated_at, NaN);
-    const lastUpdatedAt = Number.isFinite(lastUpdatedSeconds)
-      ? (lastUpdatedSeconds * 1000)
-      : null;
+    if (!Number.isFinite(brlPrice) || meta.useBinanceSpotBrl) {
+      try {
+        const usdtBrlSpot = await fetchUsdtBrlSpotBinance();
+        if (Number.isFinite(usdtBrlSpot)) {
+          if (meta.symbol === 'USDT') {
+            brlPrice = usdtBrlSpot;
+          } else if (Number.isFinite(usdPrice)) {
+            brlPrice = usdPrice * usdtBrlSpot;
+          }
+          source.push('Binance (spot BRL)');
+        }
+      } catch (error) {
+        console.error(`Binance BRL indisponivel para ${meta.symbol}:`, error?.message || error);
+      }
+    }
+
+    if (!lastUpdatedAt && source.length > 0) {
+      lastUpdatedAt = Date.now();
+    }
+
+    if (!Number.isFinite(usdPrice) && !Number.isFinite(brlPrice)) {
+      return { ok: false, error: `Sem cotacao disponivel para ${meta.symbol} agora.` };
+    }
 
     return {
       ok: true,
       command: token,
       symbol: meta.symbol,
       label: meta.label,
-      usd: safeNumber(quote?.usd, NaN),
+      usd: usdPrice,
       brl: brlPrice,
-      change24h: safeNumber(quote?.usd_24h_change, NaN),
+      change24h,
       lastUpdatedAt,
       cmcUrl: buildCoinMarketCapUrl(meta.cmcSlug),
-      source: source.join(' + ')
+      source: source.length ? source.join(' + ') : 'N/D'
     };
-  } catch {
+  } catch (error) {
+    console.error(`Falha ao montar cotacao para ${meta.symbol}:`, error?.message || error);
     return { ok: false, error: 'Falha ao consultar cotacao de mercado agora.' };
   }
 }
-
