@@ -123,14 +123,20 @@ function getMentionedJidsFromMessage(message) {
 }
 
 function isImavyMentioned({ text, message, sock }) {
-    const plainTextMention = /(^|\s)@(imavy|imavyagent)(\s|$|[!?,.:;])/i.test(String(text || ''));
+    const rawText = String(text || '');
+    const lowerText = rawText.toLowerCase();
+    const trimmedText = rawText.trim();
+
+    // Regra principal: qualquer frase iniciando com "imavy" (com ou sem "@")
+    if (/^@?(imavy|imavyagent)\b/i.test(trimmedText)) return true;
+
+    const plainTextMention = /(^|\s)@(imavy|imavyagent)(\s|$|[!?,.:;])/i.test(rawText);
     if (plainTextMention) return true;
 
     const botJid = sock?.user?.id || '';
     if (botJid) {
         const botLocal = getJidLocalPart(botJid);
         const botDigits = getJidDigits(botJid);
-        const lowerText = String(text || '').toLowerCase();
         if ((botLocal && lowerText.includes(`@${botLocal}`)) || (botDigits && lowerText.includes(`@${botDigits}`))) {
             return true;
         }
@@ -138,6 +144,11 @@ function isImavyMentioned({ text, message, sock }) {
 
     const mentioned = getMentionedJidsFromMessage(message);
     if (!mentioned.length) return false;
+
+    // Fallback para casos em que @iMavy vira @numero no inicio da mensagem.
+    const numericMentionPrefix = /^@\d{6,}\s+/i.test(trimmedText);
+    const likelyBotCall = /(analisa|analisar|responde|responder|btc|eth|sol|xrp|bnb|usdt|paxg|ouro|cripto|crypto|mercado)/i.test(trimmedText);
+    if (numericMentionPrefix && likelyBotCall) return true;
 
     if (!botJid) return false;
 
