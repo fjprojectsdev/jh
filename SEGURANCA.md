@@ -28,9 +28,6 @@
 #### ✅ `functions/scheduler.js`
 - ID do grupo agora vem de `SCHEDULER_TARGET_GROUP` no `.env`
 
-#### ✅ `diagnostico-site.js`
-- Email e senha removidos, agora usam variáveis de ambiente
-
 ### 4. 📋 Checklist antes de fazer commit:
 
 - [ ] Verifique se `.env` não está sendo commitado (já está no .gitignore)

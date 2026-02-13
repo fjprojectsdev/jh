@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { sendSafeMessage } from './messageHandler.js';
+import { isRestrictedGroupName } from './groupPolicy.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = path.join(__dirname, '..', 'schedule_config.json');
@@ -43,7 +44,7 @@ export function scheduleGroupMessages(sock) {
 
             for (const groupId in allGroups) {
                 const group = allGroups[groupId];
-                if (allowedGroups.includes(group.subject)) {
+                if (allowedGroups.includes(group.subject) && !isRestrictedGroupName(group.subject)) {
                     await sock.groupSettingUpdate(groupId, 'announcement');
                     await sendSafeMessage(sock, groupId, {
                         text: 'Grupo Temporariamente Fechado\n\nO envio de mensagens está desativado até 08:00.\n\nA funcionalidade será reativada automaticamente no horário programado.'
@@ -66,7 +67,7 @@ export function scheduleGroupMessages(sock) {
 
             for (const groupId in allGroups) {
                 const group = allGroups[groupId];
-                if (allowedGroups.includes(group.subject)) {
+                if (allowedGroups.includes(group.subject) && !isRestrictedGroupName(group.subject)) {
                     await sock.groupSettingUpdate(groupId, 'not_announcement');
                     await sendSafeMessage(sock, groupId, {
                         text: 'Grupo Aberto\n\nAs mensagens foram reativadas.\nDesejamos a todos um excelente dia.'

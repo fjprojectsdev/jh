@@ -66,7 +66,7 @@ export async function askChatGPT(question, userId = 'default') {
 }
 
 // Função original desabilitada
-function askChatGPT_DISABLED(question, userId = 'default') {
+async function askChatGPT_DISABLED(question, userId = 'default') {
     console.log('🤖 askChatGPT chamada com:', { question: question.substring(0, 50), userId });
     
     // Verificar APIs novamente na execução

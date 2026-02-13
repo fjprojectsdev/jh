@@ -19,6 +19,7 @@ import { pushPoint, getSeries } from './crypto/timeseries.js';
 import { renderSparklinePng } from './crypto/chart.js';
 import { getAlias, listAliases as listCryptoAliases, addAlias as addCryptoAlias, removeAlias as removeCryptoAlias } from './crypto/aliasStore.js';
 import { startWatch, stopWatch, stopAllWatches, listWatches, parseIntervalMs } from './crypto/watchManager.js';
+import { isRestrictedGroupName } from './groupPolicy.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -40,6 +41,34 @@ const PROJECT_TOKENS = {
 const DIRECT_PAIR_COMMANDS = {
     '/vkinha': { chain: 'bsc', pair: '0x530f75e77eb4f15b124add2a6c8e23b603d9ad64', label: 'VKINHA' }
 };
+
+function getCommandToken(normalizedText) {
+    return String(normalizedText || '').trim().split(/\s+/)[0] || '';
+}
+
+function isCryptoCommandToken(commandToken) {
+    if (!commandToken || !commandToken.startsWith('/')) return false;
+    if (PROJECT_TOKENS[commandToken]) return true;
+    if (DIRECT_PAIR_COMMANDS[commandToken]) return true;
+    if (commandToken.startsWith('/p') && commandToken.length > 2) return true;
+
+    return commandToken === '/ca'
+        || commandToken === '/grafico'
+        || commandToken === '/listpairs'
+        || commandToken === '/addpair'
+        || commandToken === '/delpair'
+        || commandToken === '/watch'
+        || commandToken === '/unwatch'
+        || commandToken === '/watchlist';
+}
+
+function isAllowedCommandForRestrictedGroup(commandToken) {
+    if (!commandToken || !commandToken.startsWith('/')) return false;
+    if (commandToken === '/aviso') return true;
+    if (commandToken === '/lembrete') return true;
+    return isCryptoCommandToken(commandToken);
+}
+
 function formatUsdCompact(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return 'N/A';
@@ -337,7 +366,7 @@ const RESPONSES = {
 //     setTimeout(() => loadLembretes(global.sock), 2000);
 // }
 
-export async function handleGroupMessages(sock, message) {
+export async function handleGroupMessages(sock, message, context = {}) {
     if (!global.sock) global.sock = sock;
     const groupId = message.key.remoteJid;
     const isGroup = groupId.endsWith('@g.us');
@@ -518,7 +547,23 @@ export async function handleGroupMessages(sock, message) {
     }
 
     console.log(`💬 Mensagem de ${senderId}: "${text}"`);
-    const normalizedText = text.toLowerCase();
+    const normalizedText = text.trim().toLowerCase();
+    const commandToken = getCommandToken(normalizedText);
+    const groupSubject = typeof context.groupSubject === 'string' ? context.groupSubject : '';
+    const isRestrictedGroup = isGroup && (context.isRestrictedGroup === true || isRestrictedGroupName(groupSubject));
+
+    if (isRestrictedGroup) {
+        if (!commandToken || !commandToken.startsWith('/')) {
+            return;
+        }
+
+        if (!isAllowedCommandForRestrictedGroup(commandToken)) {
+            await sendSafeMessage(sock, groupId, {
+                text: '⚠️ Neste grupo, apenas funções de cripto, /aviso e /lembrete estão ativas.'
+            });
+            return;
+        }
+    }
 
     // Ignorar comandos dentro de mensagens pré-definidas (como regras)
     if (text.includes('REGRAS OFICIAIS DO GRUPO') || text.includes('iMavyAgent') || text.includes('Bem-vindo(a) ao grupo')) {
@@ -581,103 +626,91 @@ export async function handleGroupMessages(sock, message) {
             .join('\n');
         await sendSafeMessage(sock, groupId, { text: `📋 *ATALHOS CRIPTO*\n\n${msg}` });
         return;
+    }
 
+    // 🔔 /watch (público em grupos) - assinatura automática de preço/infos
+    // Uso:
+    //  - /watch <alias> [intervalo]
+    //    intervalo: 5m (padrão), 10m, 1h, 30s (mínimo recomendado 1m)
+    if (normalizedText.startsWith('/watch')) {
+        const args = text.replace(/\/watch/i, '').trim().split(/\s+/).filter(Boolean);
+        const aliasKey = (args.shift() || '').replace(/^\//, '').toLowerCase();
 
-        // 🔔 /watch (admin-only em grupos) - assinatura automática de preço/infos
-        // Uso:
-        //  - /watch <alias> [intervalo]
-        //    intervalo: 5m (padrão), 10m, 1h, 30s (mínimo recomendado 1m)
-        if (normalizedText.startsWith('/watch')) {
-            const args = text.replace(/\/watch/i, '').trim().split(/\s+/).filter(Boolean);
-            const aliasKey = (args.shift() || '').replace(/^\//, '').toLowerCase();
-
-            if (!aliasKey) {
-                await sendSafeMessage(sock, groupId, { text: '❌ Use: /watch <alias> [intervalo]\nEx: /watch pnix 5m' });
-                return;
-            }
-
-            // Em grupo: só admin pode (evita spam)
-            if (isGroup) {
-                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
-                if (!ok) return;
-            }
-
-            const alias = await getAlias(aliasKey);
-            if (!alias) {
-                await sendSafeMessage(sock, groupId, { text: `❌ Alias não encontrado: ${aliasKey}. Use /listpairs para ver os disponíveis.` });
-                return;
-            }
-
-            const intervalMsRaw = parseIntervalMs(args[0], 5);
-
-            // Guardrails: mínimo 60s, máximo 60min
-            const intervalMs = Math.max(60_000, Math.min(intervalMsRaw, 60 * 60_000));
-
-            // Limite por grupo (evita bagunça)
-            const active = listWatches(groupId);
-            const MAX_WATCHES = parseInt(process.env.MAX_WATCHES_PER_GROUP || '5');
-            if (active.length >= MAX_WATCHES) {
-                await sendSafeMessage(sock, groupId, { text: `❌ Limite de assinaturas ativas atingido neste grupo (${MAX_WATCHES}). Use /watchlist e /unwatch.` });
-                return;
-            }
-
-            const res = await startWatch({ sock, groupId, aliasKey, alias, intervalMs });
-            if (!res.ok) {
-                await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
-                return;
-            }
-
-            const mins = Math.round(intervalMs / 60_000);
-            await sendSafeMessage(sock, groupId, { text: `✅ Assinatura ativada: /${aliasKey} a cada ~${mins} min.\nPara parar: /unwatch ${aliasKey}` });
+        if (!aliasKey) {
+            await sendSafeMessage(sock, groupId, { text: '❌ Use: /watch <alias> [intervalo]\nEx: /watch pnix 5m' });
             return;
         }
 
-        // 🛑 /unwatch (admin-only em grupos) - desativa assinatura
-        // Uso:
-        //  - /unwatch <alias>
-        //  - /unwatch all
-        if (normalizedText.startsWith('/unwatch')) {
-            const args = text.replace(/\/unwatch/i, '').trim().split(/\s+/).filter(Boolean);
-            const target = (args.shift() || '').replace(/^\//, '').toLowerCase();
-
-            if (!target) {
-                await sendSafeMessage(sock, groupId, { text: '❌ Use: /unwatch <alias|all>\nEx: /unwatch pnix' });
-                return;
-            }
-
-            if (isGroup) {
-                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
-                if (!ok) return;
-            }
-
-            if (target === 'all') {
-                const res = stopAllWatches(groupId);
-                await sendSafeMessage(sock, groupId, { text: `✅ Assinaturas desativadas: ${res.count}` });
-                return;
-            }
-
-            const res = stopWatch(groupId, target);
-            if (!res.ok) {
-                await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
-                return;
-            }
-            await sendSafeMessage(sock, groupId, { text: `✅ Assinatura desativada: /${target}` });
+        const alias = await getAlias(aliasKey);
+        if (!alias) {
+            await sendSafeMessage(sock, groupId, { text: `❌ Alias não encontrado: ${aliasKey}. Use /listpairs para ver os disponíveis.` });
             return;
         }
 
-        // 📡 /watchlist (público) - lista assinaturas ativas no grupo
-        if (normalizedText.startsWith('/watchlist')) {
-            const active = listWatches(groupId);
-            if (!active.length) {
-                await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhuma assinatura ativa neste grupo.' });
-                return;
-            }
-            const msg = active
-                .map(w => `• /${w.aliasKey} — ${Math.round(w.intervalMs / 60_000)} min`)
-                .join('\n');
-            await sendSafeMessage(sock, groupId, { text: `📡 Assinaturas ativas:\n${msg}` });
+        const intervalMsRaw = parseIntervalMs(args[0], 5);
+
+        // Guardrails: mínimo 60s, máximo 60min
+        const intervalMs = Math.max(60_000, Math.min(intervalMsRaw, 60 * 60_000));
+
+        // Limite por grupo (evita bagunça)
+        const active = listWatches(groupId);
+        const MAX_WATCHES = parseInt(process.env.MAX_WATCHES_PER_GROUP || '5');
+        if (active.length >= MAX_WATCHES) {
+            await sendSafeMessage(sock, groupId, { text: `❌ Limite de assinaturas ativas atingido neste grupo (${MAX_WATCHES}). Use /watchlist e /unwatch.` });
             return;
         }
+
+        const res = await startWatch({ sock, groupId, aliasKey, alias, intervalMs });
+        if (!res.ok) {
+            await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
+            return;
+        }
+
+        const mins = Math.round(intervalMs / 60_000);
+        await sendSafeMessage(sock, groupId, { text: `✅ Assinatura ativada: /${aliasKey} a cada ~${mins} min.\nPara parar: /unwatch ${aliasKey}` });
+        return;
+    }
+
+    // 🛑 /unwatch (público em grupos) - desativa assinatura
+    // Uso:
+    //  - /unwatch <alias>
+    //  - /unwatch all
+    if (normalizedText.startsWith('/unwatch')) {
+        const args = text.replace(/\/unwatch/i, '').trim().split(/\s+/).filter(Boolean);
+        const target = (args.shift() || '').replace(/^\//, '').toLowerCase();
+
+        if (!target) {
+            await sendSafeMessage(sock, groupId, { text: '❌ Use: /unwatch <alias|all>\nEx: /unwatch pnix' });
+            return;
+        }
+
+        if (target === 'all') {
+            const res = stopAllWatches(groupId);
+            await sendSafeMessage(sock, groupId, { text: `✅ Assinaturas desativadas: ${res.count}` });
+            return;
+        }
+
+        const res = stopWatch(groupId, target);
+        if (!res.ok) {
+            await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}` });
+            return;
+        }
+        await sendSafeMessage(sock, groupId, { text: `✅ Assinatura desativada: /${target}` });
+        return;
+    }
+
+    // 📡 /watchlist (público) - lista assinaturas ativas no grupo
+    if (normalizedText.startsWith('/watchlist')) {
+        const active = listWatches(groupId);
+        if (!active.length) {
+            await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhuma assinatura ativa neste grupo.' });
+            return;
+        }
+        const msg = active
+            .map(w => `• /${w.aliasKey} — ${Math.round(w.intervalMs / 60_000)} min`)
+            .join('\n');
+        await sendSafeMessage(sock, groupId, { text: `📡 Assinaturas ativas:\n${msg}` });
+        return;
     }
 
     // Comando !sorteio (público) - apenas em grupos
@@ -991,9 +1024,6 @@ ${messageToPin}
             } else if (normalizedText.startsWith('/addpair')) {
                 // /addpair <alias> <chain> <pairAddress> <label opcional...>
                 // Ex: /addpair pnix bsc 0x... NIX/WBNB
-                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
-                if (!ok) return;
-
                 const args = text.replace(/\/addpair/i, '').trim();
                 const parts = args.split(/\s+/);
                 const alias = parts.shift();
@@ -1011,9 +1041,6 @@ ${messageToPin}
 
             } else if (normalizedText.startsWith('/delpair')) {
                 // /delpair <alias>
-                const ok = await checkAuth(sock, message, groupId, senderId, { allowGroupAdmins: true });
-                if (!ok) return;
-
                 const alias = text.replace(/\/delpair/i, '').trim();
                 const res = await removeCryptoAlias(alias);
                 if (!res.ok) {

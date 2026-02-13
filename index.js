@@ -34,6 +34,7 @@ import { startAutoPromo } from './functions/autoPromo.js';
 import { handleConnectionUpdate, resetReconnectAttempts } from './functions/connectionManager.js';
 import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup, clearSessionBackup } from './keepalive.js';
 import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from './functions/devCommands.js';
+import { isRestrictedGroupName } from './functions/groupPolicy.js';
 
 console.log('🤖 IA de Moderação:', isAIEnabled() ? '✅ ATIVA (Groq)' : '❌ Desabilitada');
 console.log('💼 IA de Vendas:', isAISalesEnabled() ? '✅ ATIVA (Groq)' : '❌ Desabilitada');
@@ -58,6 +59,16 @@ let qrCodeData = null;
 
 // Timestamp de inicialização do bot para ignorar mensagens antigas
 const botStartTime = Date.now();
+const unauthorizedGroupNoticeCooldown = new Map();
+const UNAUTHORIZED_GROUP_NOTICE_MS = parseInt(process.env.UNAUTHORIZED_GROUP_NOTICE_MS || '180000', 10);
+
+function normalizeGroupName(name) {
+    return String(name || '')
+        .normalize('NFKC')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
 
 async function startBot() {
     console.log("===============================================");
@@ -358,7 +369,7 @@ async function startBot() {
                 if (fs.existsSync(allowedPath)) {
                     const parsed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
                     if (Array.isArray(parsed)) {
-                        ALLOWED_GROUP_NAMES = new Set(parsed.map(s => s.trim()).filter(Boolean));
+                        ALLOWED_GROUP_NAMES = new Set(parsed.map(normalizeGroupName).filter(Boolean));
                     }
                 }
             } catch (e) {
@@ -374,31 +385,53 @@ async function startBot() {
                 console.warn('⚠️ Falha ao obter metadata do grupo:', e.message);
             }
 
-            if (!groupSubject || !ALLOWED_GROUP_NAMES.has(groupSubject)) {
+            const normalizedGroupSubject = normalizeGroupName(groupSubject);
+            if (!groupSubject || !ALLOWED_GROUP_NAMES.has(normalizedGroupSubject)) {
                 console.log(`⏭️ Ignorado: Grupo "${groupSubject}" não está na lista permitida.`);
                 // DEBUG: Listar permitidos se falhar
                 // console.log('Permitidos:', Array.from(ALLOWED_GROUP_NAMES));
+
+                const normalizedTextForGate = String(messageText || '').trimStart();
+                if (normalizedTextForGate.startsWith('/')) {
+                    const lastNoticeTs = unauthorizedGroupNoticeCooldown.get(chatId) || 0;
+                    const nowTs = Date.now();
+                    if (nowTs - lastNoticeTs >= UNAUTHORIZED_GROUP_NOTICE_MS) {
+                        unauthorizedGroupNoticeCooldown.set(chatId, nowTs);
+                        await sendSafeMessage(sock, chatId, {
+                            text: '⚠️ Este grupo não está autorizado para comandos.\n\nPeça a um admin para adicionar o grupo na lista permitida.'
+                        });
+                    }
+                }
                 continue;
             }
 
             console.log('✅ Grupo autorizado:', groupSubject);
+            const isRestrictedGroup = isRestrictedGroupName(groupSubject);
+            if (isRestrictedGroup) {
+                console.log(`🔒 Modo restrito ativo para o grupo: "${groupSubject}"`);
+            }
 
             // 4.1. COMANDOS (prioridade máxima - mas moderação SEMPRE roda)
-            const isCommand = messageText.startsWith('/');
+            const isCommand = String(messageText || '').trimStart().startsWith('/');
             console.log(`🔍 DEBUG: isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
 
             if (isCommand) {
                 console.log('⚡ COMANDO detectado:', messageText.split(' ')[0]);
 
                 // Comando DEV (funciona em grupo e privado)
-                if (messageText.toLowerCase().startsWith('/dev')) {
+                if (!isRestrictedGroup && messageText.toLowerCase().startsWith('/dev')) {
                     await handleDevCommand(sock, message, messageText);
                     continue;
                 }
 
                 // Processar comando
-                await handleGroupMessages(sock, message);
+                await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
                 // NÃO continue aqui - deixar moderação rodar
+            }
+
+            if (isRestrictedGroup) {
+                // Neste grupo, o bot só atende funções específicas tratadas no groupResponder.
+                continue;
             }
 
             // 4.2. MODERAÇÃO MINIMALISTA (2 regras: REPEAT + LINK)
@@ -483,6 +516,19 @@ async function startBot() {
 
             // Delegar para o handler inteligente com batch
             if (action === 'add') {
+                let groupSubject = '';
+                try {
+                    const groupMetadata = await sock.groupMetadata(groupId);
+                    groupSubject = groupMetadata?.subject || '';
+                } catch (e) {
+                    console.warn('⚠️ Não foi possível obter nome do grupo para filtro de boas-vindas:', e.message);
+                }
+
+                if (isRestrictedGroupName(groupSubject)) {
+                    console.log(`⏭️ Boas-vindas desativadas no grupo restrito: "${groupSubject}"`);
+                    return;
+                }
+
                 handleWelcomeEvent(sock, groupId, participants);
             }
         } catch (error) {

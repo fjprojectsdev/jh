@@ -6,11 +6,9 @@
     "start": "node index.js",
     "dev": "node watcher.js",
     "health": "node health-check.js",
-    "test-iptv": "node test-iptv.js",
-    "test-iptv-melhorado": "node test-iptv-melhorado.js",
-    "test-automation": "node test-automation.js",
-    "debug": "node debug-selectors.js",
-    "debug-site": "node debug-site.js"
+    "test-preview": "node scripts/test_preview.js",
+    "test-adreply": "node scripts/test_adreply.js",
+    "test-contracts": "node --check scripts/test-contracts.js"
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.2",
