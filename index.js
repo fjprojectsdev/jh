@@ -431,6 +431,10 @@ async function startBot() {
 
             if (isRestrictedGroup) {
                 // Neste grupo, o bot só atende funções específicas tratadas no groupResponder.
+                // Inclui comandos cripto e menção explícita ao @IMAVY.
+                if (!isCommand) {
+                    await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
+                }
                 continue;
             }
 
@@ -496,6 +500,9 @@ async function startBot() {
             if (isCommand) {
                 continue;
             }
+
+            // Mensagens não-comando podem acionar o IMAVY via menção explícita.
+            await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
         }
     });
 

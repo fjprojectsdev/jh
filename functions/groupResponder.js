@@ -19,6 +19,8 @@ import { pushPoint, getSeries } from './crypto/timeseries.js';
 import { renderSparklinePng } from './crypto/chart.js';
 import { getAlias, listAliases as listCryptoAliases, addAlias as addCryptoAlias, removeAlias as removeCryptoAlias } from './crypto/aliasStore.js';
 import { startWatch, stopWatch, stopAllWatches, listWatches, parseIntervalMs } from './crypto/watchManager.js';
+import { isMarketPriceCommand, getMarketQuote } from './crypto/marketPrices.js';
+import { generateImavyCryptoReply } from './crypto/imavyAnalyst.js';
 import { isRestrictedGroupName } from './groupPolicy.js';
 import fs from 'fs';
 import path from 'path';
@@ -50,6 +52,7 @@ function isCryptoCommandToken(commandToken) {
     if (!commandToken || !commandToken.startsWith('/')) return false;
     if (PROJECT_TOKENS[commandToken]) return true;
     if (DIRECT_PAIR_COMMANDS[commandToken]) return true;
+    if (isMarketPriceCommand(commandToken)) return true;
     if (commandToken.startsWith('/p') && commandToken.length > 2) return true;
 
     return commandToken === '/ca'
@@ -67,6 +70,40 @@ function isAllowedCommandForRestrictedGroup(commandToken) {
     if (commandToken === '/aviso') return true;
     if (commandToken === '/lembrete') return true;
     return isCryptoCommandToken(commandToken);
+}
+
+function normalizeJidUser(jid) {
+    return String(jid || '').split(':')[0];
+}
+
+function getMentionedJidsFromMessage(message) {
+    try {
+        const messageObj = message?.message || {};
+        const content = messageObj.conversation
+            ? null
+            : messageObj.extendedTextMessage
+                || messageObj.imageMessage
+                || messageObj.videoMessage
+                || messageObj.documentMessage
+                || messageObj;
+
+        const directMentions = content?.contextInfo?.mentionedJid;
+        if (Array.isArray(directMentions)) return directMentions;
+    } catch { }
+    return [];
+}
+
+function isImavyMentioned({ text, message, sock }) {
+    const plainTextMention = /(^|\s)@imavy(\s|$|[!?,.:;])/i.test(String(text || ''));
+    if (plainTextMention) return true;
+
+    const mentioned = getMentionedJidsFromMessage(message);
+    if (!mentioned.length) return false;
+
+    const botJid = normalizeJidUser(sock?.user?.id);
+    if (!botJid) return false;
+
+    return mentioned.some((jid) => normalizeJidUser(jid) === botJid);
 }
 
 function formatUsdCompact(value) {
@@ -88,6 +125,24 @@ function formatPriceUsd(value) {
     if (!Number.isFinite(n)) return 'N/A';
     if (Math.abs(n) >= 1) return `$${n.toFixed(4)}`;
     return `$${n.toFixed(8)}`;
+}
+
+function formatLiveUsd(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 'N/A';
+    if (Math.abs(n) >= 1) {
+        return `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+    }
+    return `$${n.toFixed(8)}`;
+}
+
+function formatLiveBrl(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 'N/A';
+    if (Math.abs(n) >= 1) {
+        return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+    }
+    return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 4, maximumFractionDigits: 8 })}`;
 }
 
 function buildCryptoText({ label, chain, pairAddress, snap }) {
@@ -425,6 +480,9 @@ export async function handleGroupMessages(sock, message, context = {}) {
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot
 * 📱 /comandos - Lista de comandos
+* @IMAVY [pergunta] - Analista cripto por menção
+* 💹 /btc /eth /bnb /sol /xrp /usdt - Cotação de mercado
+* 🥇 /ouro (ou /paxg) - Pax Gold com gráfico no CoinMarketCap
 ━━━━━━━━━━━━━━━━
 📝 *CONTRATOS E PROJETOS:*
 
@@ -551,13 +609,19 @@ export async function handleGroupMessages(sock, message, context = {}) {
     const commandToken = getCommandToken(normalizedText);
     const groupSubject = typeof context.groupSubject === 'string' ? context.groupSubject : '';
     const isRestrictedGroup = isGroup && (context.isRestrictedGroup === true || isRestrictedGroupName(groupSubject));
+    const imavyMentioned = isImavyMentioned({ text, message, sock });
+    const isSlashCommand = commandToken.startsWith('/');
+
+    if (!isSlashCommand && !imavyMentioned) {
+        return;
+    }
 
     if (isRestrictedGroup) {
-        if (!commandToken || !commandToken.startsWith('/')) {
+        if (!imavyMentioned && !isSlashCommand) {
             return;
         }
 
-        if (!isAllowedCommandForRestrictedGroup(commandToken)) {
+        if (!imavyMentioned && !isAllowedCommandForRestrictedGroup(commandToken)) {
             await sendSafeMessage(sock, groupId, {
                 text: '⚠️ Neste grupo, apenas funções de cripto, /aviso e /lembrete estão ativas.'
             });
@@ -569,6 +633,60 @@ export async function handleGroupMessages(sock, message, context = {}) {
     if (text.includes('REGRAS OFICIAIS DO GRUPO') || text.includes('iMavyAgent') || text.includes('Bem-vindo(a) ao grupo')) {
         console.log('⏭️ Ignorando comandos dentro de mensagem pré-definida');
         return;
+    }
+
+    // @IMAVY: analise cripto somente por mencao explicita
+    if (imavyMentioned && !isSlashCommand) {
+        const cooldown = parseInt(process.env.IMAVY_MENTION_COOLDOWN || '12', 10) * 1000;
+        const rateCheck = checkRateLimit(`${senderId}:imavy`, cooldown);
+        if (rateCheck.limited) {
+            await sendSafeMessage(sock, groupId, { text: `Aguarde ${rateCheck.remaining}s para chamar o @IMAVY novamente.` });
+            return;
+        }
+
+        const reply = await generateImavyCryptoReply(text);
+        await sendSafeMessage(sock, groupId, { text: reply });
+        return;
+    }
+
+    // Comandos de mercado global: /usdt /btc /sol /xrp /bnb /eth /ouro(/paxg)
+    {
+        const firstToken = normalizedText.trim().split(/\s+/)[0];
+        if (isMarketPriceCommand(firstToken)) {
+            const quote = await getMarketQuote(firstToken);
+            if (!quote?.ok) {
+                await sendSafeMessage(sock, groupId, { text: `❌ ${quote?.error || 'Nao foi possivel buscar cotacao agora.'}` });
+                return;
+            }
+
+            const change = Number(quote.change24h);
+            const changeTxt = Number.isFinite(change)
+                ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`
+                : 'N/A';
+            const updatedTxt = quote.lastUpdatedAt
+                ? new Date(quote.lastUpdatedAt).toLocaleString('pt-BR', { hour12: false })
+                : null;
+
+            let reply =
+                `📊 *${quote.symbol}* (${quote.label})\n` +
+                `💵 USD: ${formatLiveUsd(quote.usd)}\n` +
+                `🇧🇷 BRL: ${formatLiveBrl(quote.brl)}\n` +
+                `🕒 24h: ${changeTxt}\n` +
+                `📈 CoinMarketCap: ${quote.cmcUrl}`;
+
+            if (quote.command === '/usdt') {
+                reply += `\n✅ USDT em preco real: ${formatLiveBrl(quote.brl)}`;
+            }
+            if (updatedTxt) {
+                reply += `\n⏱️ Atualizado: ${updatedTxt}`;
+            }
+            if (quote.source) {
+                reply += `\n📡 Fonte: ${quote.source}`;
+            }
+
+            await sendSafeMessage(sock, groupId, { text: reply });
+            return;
+        }
     }
 
     // 🔗 Atalhos cripto diretos por par (Grupo): comandos tipo /vkinha
@@ -1595,6 +1713,9 @@ _iMavyAgent | Sistema de Lembretes_`;
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot
 * 📱 /comandos - Lista de comandos
+* @IMAVY [pergunta] - Analista cripto por menção
+* 💹 /btc /eth /bnb /sol /xrp /usdt - Cotação de mercado
+* 🥇 /ouro (ou /paxg) - Pax Gold com gráfico no CoinMarketCap
 ━━━━━━━━━━━━━━━━
 🔒 *Sistema de Segurança Ativo*
 * Anti-spam automático com IA
