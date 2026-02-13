@@ -3,11 +3,14 @@
 
 import axios from 'axios';
 import Groq from 'groq-sdk';
+import { getMarketQuote } from './marketPrices.js';
 
 const COINGECKO_BASE_URL = process.env.COINGECKO_BASE_URL || 'https://api.coingecko.com/api/v3';
 const GROQ_MODEL = process.env.IMAVY_GROQ_MODEL || 'llama-3.3-70b-versatile';
 const MAX_COINS_PER_REQUEST = Math.max(1, Math.min(Number(process.env.IMAVY_MAX_COINS || 4), 8));
 const REQUEST_TIMEOUT_MS = 12000;
+const SNAPSHOT_CACHE_TTL_MS = Math.max(5000, Number(process.env.IMAVY_SNAPSHOT_CACHE_MS || 30000));
+const SNAPSHOT_STALE_TTL_MS = Math.max(SNAPSHOT_CACHE_TTL_MS, Number(process.env.IMAVY_SNAPSHOT_STALE_MS || 900000));
 
 const KNOWN_COINS = [
     { id: 'bitcoin', symbol: 'BTC', keywords: ['btc', 'bitcoin'] },
@@ -99,6 +102,19 @@ function mapById(items) {
     return out;
 }
 
+const SYMBOL_BY_ID = Object.fromEntries(KNOWN_COINS.map((c) => [c.id, c.symbol]));
+const ID_BY_SYMBOL = Object.fromEntries(KNOWN_COINS.map((c) => [c.symbol.toUpperCase(), c.id]));
+let snapshotCache = {
+    ts: 0,
+    snapshot: null
+};
+
+function snapshotHasAllIds(snapshot, requiredIds) {
+    if (!snapshot || !Array.isArray(snapshot.markets)) return false;
+    const have = new Set(snapshot.markets.map((m) => m?.id).filter(Boolean));
+    return requiredIds.every((id) => have.has(id));
+}
+
 async function fetchCoinGeckoSnapshot(coinIds) {
     const headers = getCoinGeckoHeaders();
 
@@ -127,8 +143,76 @@ async function fetchCoinGeckoSnapshot(coinIds) {
     return {
         markets,
         globalData,
-        fetchedAt: Date.now()
+        fetchedAt: Date.now(),
+        source: 'CoinGecko'
     };
+}
+
+async function buildFallbackSnapshotFromMarketQuotes(orderedCoinIds) {
+    const markets = [];
+    for (const id of orderedCoinIds) {
+        const symbol = SYMBOL_BY_ID[id];
+        if (!symbol) continue;
+        const quote = await getMarketQuote(`/${symbol.toLowerCase()}`);
+        if (!quote?.ok) continue;
+        markets.push({
+            id,
+            symbol: symbol.toLowerCase(),
+            current_price: safeNumber(quote.usd, NaN),
+            total_volume: NaN,
+            market_cap: NaN,
+            price_change_percentage_24h: safeNumber(quote.change24h, NaN)
+        });
+    }
+
+    if (!markets.length) return null;
+
+    return {
+        markets,
+        globalData: {},
+        fetchedAt: Date.now(),
+        source: 'Market fallback'
+    };
+}
+
+async function getSnapshotWithFallback(coinIds) {
+    const now = Date.now();
+
+    if (
+        snapshotCache.snapshot
+        && (now - snapshotCache.ts) <= SNAPSHOT_CACHE_TTL_MS
+        && snapshotHasAllIds(snapshotCache.snapshot, coinIds)
+    ) {
+        return snapshotCache.snapshot;
+    }
+
+    try {
+        const fresh = await fetchCoinGeckoSnapshot(coinIds);
+        snapshotCache = { ts: now, snapshot: fresh };
+        return fresh;
+    } catch (error) {
+        const status = Number(error?.response?.status || 0);
+        if (status === 429) {
+            console.warn('CoinGecko 429 no IMAVY, usando fallback.');
+        } else {
+            console.error('Falha CoinGecko no IMAVY:', error?.message || error);
+        }
+
+        if (
+            snapshotCache.snapshot
+            && (now - snapshotCache.ts) <= SNAPSHOT_STALE_TTL_MS
+            && snapshotHasAllIds(snapshotCache.snapshot, coinIds)
+        ) {
+            return {
+                ...snapshotCache.snapshot,
+                source: `${snapshotCache.snapshot.source || 'CoinGecko'} (cache/stale)`
+            };
+        }
+
+        const fallback = await buildFallbackSnapshotFromMarketQuotes(coinIds);
+        if (fallback) return fallback;
+        throw error;
+    }
 }
 
 function buildDataBlock(snapshot, orderedCoinIds) {
@@ -152,9 +236,10 @@ function buildDataBlock(snapshot, orderedCoinIds) {
     const totalVolume24h = safeNumber(snapshot.globalData?.total_volume?.usd);
     const globalCapChange24h = safeNumber(snapshot.globalData?.market_cap_change_percentage_24h_usd);
     const updatedAt = new Date(snapshot.fetchedAt).toLocaleString('pt-BR', { hour12: false });
+    const source = snapshot?.source || 'CoinGecko';
 
     return [
-        'Dados atuais (CoinGecko):',
+        `Dados atuais (${source}):`,
         ...coinLines,
         `Dominancia BTC: ${Number.isFinite(btcDominance) ? `${btcDominance.toFixed(2)}%` : 'N/D'}`,
         `Market cap total: ${formatUsdCompact(totalMarketCap)}`,
@@ -218,7 +303,7 @@ export async function generateImavyCryptoReply(rawQuestion) {
 
     let snapshot;
     try {
-        snapshot = await fetchCoinGeckoSnapshot(requestedCoinIds);
+        snapshot = await getSnapshotWithFallback(requestedCoinIds);
     } catch (error) {
         console.error('Erro ao buscar snapshot CoinGecko para IMAVY:', error?.message || error);
         return 'Nao tenho dados atualizados disponiveis neste momento.';
