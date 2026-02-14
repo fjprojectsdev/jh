@@ -1,5 +1,23 @@
 const STORAGE_KEY = 'imavy_multitenant_token';
 
+function getNextPath() {
+  const params = new URLSearchParams(window.location.search || '');
+  const next = (params.get('next') || '').trim();
+  if (!next || !next.startsWith('/')) {
+    return '';
+  }
+  return next;
+}
+
+function irParaProximaRotaSeExiste() {
+  const next = getNextPath();
+  if (next) {
+    window.location.replace(next);
+    return true;
+  }
+  return false;
+}
+
 function byId(id) {
   return document.getElementById(id);
 }
@@ -61,6 +79,9 @@ async function registrar() {
 
   setToken(body.token || '');
   setStatus('Cliente registrado com sucesso.');
+  if (irParaProximaRotaSeExiste()) {
+    return;
+  }
   await carregarGrupos();
 }
 
@@ -75,6 +96,9 @@ async function login() {
 
   setToken(body.token || '');
   setStatus('Login realizado com sucesso.');
+  if (irParaProximaRotaSeExiste()) {
+    return;
+  }
   await carregarGrupos();
 }
 

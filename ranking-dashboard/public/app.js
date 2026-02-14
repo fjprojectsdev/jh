@@ -10,6 +10,7 @@ const state = {
 };
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
+const AUTH_STORAGE_KEY = 'imavy_multitenant_token';
 
 const SAMPLE_DATA = [
     { nome: 'Joao', data: '2026-02-01', grupo: 'Vendas' },
@@ -28,6 +29,75 @@ const SAMPLE_DATA = [
     { nome: 'Lia', data: '2026-01-31', grupo: 'Marketing' },
     { nome: 'Paulo', data: '2026-01-31', grupo: 'Suporte' }
 ];
+
+function getAuthToken() {
+    try {
+        return localStorage.getItem(AUTH_STORAGE_KEY) || '';
+    } catch (_) {
+        return '';
+    }
+}
+
+function decodeJwtPayload(token) {
+    if (!token || typeof token !== 'string') {
+        return null;
+    }
+
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+        return null;
+    }
+
+    try {
+        const normalized = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+        return JSON.parse(atob(padded));
+    } catch (_) {
+        return null;
+    }
+}
+
+function isTokenAtivo(token) {
+    const payload = decodeJwtPayload(token);
+    if (!payload || typeof payload.exp !== 'number') {
+        return false;
+    }
+
+    return (payload.exp * 1000) > Date.now();
+}
+
+function redirectToLoginMultiCliente() {
+    const next = encodeURIComponent(`${window.location.pathname}${window.location.search || ''}`);
+    window.location.replace(`./multitenant.html?next=${next}`);
+}
+
+function garantirSessaoAutenticada() {
+    const token = getAuthToken();
+    if (!isTokenAtivo(token)) {
+        redirectToLoginMultiCliente();
+        return null;
+    }
+
+    return decodeJwtPayload(token);
+}
+
+function preencherSessaoInfo(payload) {
+    const el = byId('sessaoInfo');
+    if (!el) {
+        return;
+    }
+
+    const plano = payload && payload.plano ? payload.plano : 'desconhecido';
+    el.textContent = `Sessao autenticada (${plano}).`;
+}
+
+function logoutPrincipal() {
+    try {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch (_) {}
+
+    window.location.replace('./multitenant.html');
+}
 
 function byId(id) {
     return document.getElementById(id);
@@ -851,6 +921,13 @@ function initQuickFilters() {
 }
 
 function init() {
+    const authPayload = garantirSessaoAutenticada();
+    if (!authPayload) {
+        return;
+    }
+
+    preencherSessaoInfo(authPayload);
+
     byId('gerarBtn').addEventListener('click', gerarDashboard);
     byId('exemploBtn').addEventListener('click', carregarExemplo);
     byId('exportCsvBtn').addEventListener('click', exportarCsv);
@@ -858,6 +935,7 @@ function init() {
     byId('copiarBtn').addEventListener('click', copiarRanking);
     byId('conectarTempoRealBtn').addEventListener('click', conectarTempoReal);
     byId('desconectarTempoRealBtn').addEventListener('click', desconectarTempoReal);
+    byId('logoutMainBtn').addEventListener('click', logoutPrincipal);
     byId('interacoesJson').addEventListener('input', onInteracoesChange);
 
     initQuickFilters();
