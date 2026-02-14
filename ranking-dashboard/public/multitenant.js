@@ -59,6 +59,11 @@ function toggleLoginOnlySections(isAuthenticated) {
   if (gruposCard) {
     gruposCard.classList.toggle('hidden', !isAuthenticated);
   }
+
+  const rankingCard = byId('rankingCard');
+  if (rankingCard) {
+    rankingCard.classList.toggle('hidden', !isAuthenticated);
+  }
 }
 
 function formatResumoSync(sync) {
