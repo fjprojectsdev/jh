@@ -1,5 +1,5 @@
-// index.js
-console.log('ðŸ”¥ [DEBUG] Carregando index.js...');
+﻿// index.js
+console.log('Ã°Å¸â€Â¥ [DEBUG] Carregando index.js...');
 import 'dotenv/config';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, getContentType } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
@@ -37,8 +37,8 @@ import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from 
 import { isRestrictedGroupName } from './functions/groupPolicy.js';
 import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js';
 
-console.log('ðŸ¤– IA de ModeraÃ§Ã£o:', isAIEnabled() ? 'âœ… ATIVA (Groq)' : 'âŒ Desabilitada');
-console.log('ðŸ’¼ IA de Vendas:', isAISalesEnabled() ? 'âœ… ATIVA (Groq)' : 'âŒ Desabilitada');
+console.log('Ã°Å¸Â¤â€“ IA de ModeraÃƒÂ§ÃƒÂ£o:', isAIEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
+console.log('Ã°Å¸â€™Â¼ IA de Vendas:', isAISalesEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
 
 // Servidor HTTP para Railway/Render
 const PORT = process.env.PORT || 3000;
@@ -51,14 +51,14 @@ http.createServer((req, res) => {
         res.end('Bot WhatsApp iMavyAgent - Online\n\nAcesse /qr para ver o QR Code');
     }
 }).listen(PORT, () => {
-    console.log(`ðŸŒ Servidor HTTP rodando na porta ${PORT}`);
+    console.log(`Ã°Å¸Å’Â Servidor HTTP rodando na porta ${PORT}`);
 });
 
-// VariÃ¡vel para armazenar o servidor HTTP temporÃ¡rio
+// VariÃƒÂ¡vel para armazenar o servidor HTTP temporÃƒÂ¡rio
 let qrServer = null;
 let qrCodeData = null;
 
-// Timestamp de inicializaÃ§Ã£o do bot para ignorar mensagens antigas
+// Timestamp de inicializaÃƒÂ§ÃƒÂ£o do bot para ignorar mensagens antigas
 const botStartTime = Date.now();
 const unauthorizedGroupNoticeCooldown = new Map();
 const UNAUTHORIZED_GROUP_NOTICE_MS = parseInt(process.env.UNAUTHORIZED_GROUP_NOTICE_MS || '180000', 10);
@@ -95,29 +95,29 @@ function publishInteractionForDashboard(message, senderId, groupSubject, chatId,
         dataIso,
         texto: messageText
     }).catch((error) => {
-        console.warn('âš ï¸ Falha ao publicar interaÃ§Ã£o em tempo real:', error.message);
+        console.warn('Ã¢Å¡Â Ã¯Â¸Â Falha ao publicar interaÃƒÂ§ÃƒÂ£o em tempo real:', error.message);
     });
 }
 
 async function startBot() {
     console.log("===============================================");
-    console.log("ðŸš€ Iniciando iMavyAgent - Respostas PrÃ©-Definidas");
+    console.log("Ã°Å¸Å¡â‚¬ Iniciando iMavyAgent - Respostas PrÃƒÂ©-Definidas");
     console.log("===============================================");
 
-    console.log('â³ [DEBUG] ensureCoreConfigFiles...');
+    console.log('Ã¢ÂÂ³ [DEBUG] ensureCoreConfigFiles...');
     await ensureCoreConfigFiles();
 
-    console.log('â³ [DEBUG] restoreSessionFromBackup...');
-    // Tentar restaurar sessÃ£o do backup se necessÃ¡rio
+    console.log('Ã¢ÂÂ³ [DEBUG] restoreSessionFromBackup...');
+    // Tentar restaurar sessÃƒÂ£o do backup se necessÃƒÂ¡rio
     restoreSessionFromBackup();
 
-    console.log('â³ [DEBUG] useMultiFileAuthState...');
+    console.log('Ã¢ÂÂ³ [DEBUG] useMultiFileAuthState...');
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
 
-    console.log('â³ [DEBUG] fetchLatestBaileysVersion...');
+    console.log('Ã¢ÂÂ³ [DEBUG] fetchLatestBaileysVersion...');
     const { version } = await fetchLatestBaileysVersion();
 
-    console.log('â³ [DEBUG] Criando socket...');
+    console.log('Ã¢ÂÂ³ [DEBUG] Criando socket...');
 
     const sock = makeWASocket({
         auth: state,
@@ -137,7 +137,7 @@ async function startBot() {
         }
     });
 
-    // Anexar guarda de saÃ­da (Monkey Patch)
+    // Anexar guarda de saÃƒÂ­da (Monkey Patch)
     attachOutgoingGuard(sock);
 
     sock.ev.on('creds.update', saveCreds);
@@ -146,28 +146,28 @@ async function startBot() {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr && connection !== 'open') {
-            console.log("\nâ•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
-            console.log("â•‘           ðŸ” AUTENTICAÃ‡ÃƒO WHATSAPP REQUERIDA ðŸ”              â•‘");
-            console.log("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
-            console.log("â•‘ Escaneie este QR code no WhatsApp Web                      â•‘");
-            console.log("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\n");
+            console.log("\nÃ¢â€¢â€Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢â€”");
+            console.log("Ã¢â€¢â€˜           Ã°Å¸â€Â AUTENTICAÃƒâ€¡ÃƒÆ’O WHATSAPP REQUERIDA Ã°Å¸â€Â              Ã¢â€¢â€˜");
+            console.log("Ã¢â€¢Â Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â£");
+            console.log("Ã¢â€¢â€˜ Escaneie este QR code no WhatsApp Web                      Ã¢â€¢â€˜");
+            console.log("Ã¢â€¢Å¡Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â\n");
 
             qrcode.generate(qr, { small: true });
 
             try {
                 qrCodeData = await QRCode.toDataURL(qr, { width: 600 });
-                console.log("\nðŸ”— QR CODE DISPONÃVEL EM:");
+                console.log("\nÃ°Å¸â€â€” QR CODE DISPONÃƒÂVEL EM:");
                 console.log(`http://localhost:${PORT}/qr`);
-                console.log("\nâš ï¸ O QR code fica disponÃ­vel por 60 segundos\n");
+                console.log("\nÃ¢Å¡Â Ã¯Â¸Â O QR code fica disponÃƒÂ­vel por 60 segundos\n");
             } catch (e) {
                 console.log("Erro ao gerar link QR:", e.message);
             }
 
-            // Detectar se estÃ¡ no Railway ou produÃ§Ã£o
+            // Detectar se estÃƒÂ¡ no Railway ou produÃƒÂ§ÃƒÂ£o
             const isProduction = process.env.RAILWAY_ENVIRONMENT || process.env.NODE_ENV === 'production';
 
             if (isProduction) {
-                // Em produÃ§Ã£o (Railway), mostrar QR code compacto + base64
+                // Em produÃƒÂ§ÃƒÂ£o (Railway), mostrar QR code compacto + base64
                 qrcode.generate(qr, { small: true });
 
                 try {
@@ -177,11 +177,11 @@ async function startBot() {
                         margin: 2
                     });
 
-                    console.log("\nðŸ”— LINK BASE64 DO QR CODE (copie e cole no navegador):");
+                    console.log("\nÃ°Å¸â€â€” LINK BASE64 DO QR CODE (copie e cole no navegador):");
                     console.log(qrImageDataUrl);
-                    console.log("\nðŸ’¡ Copie o link acima, cole na barra de endereÃ§os do navegador e escaneie\n");
+                    console.log("\nÃ°Å¸â€™Â¡ Copie o link acima, cole na barra de endereÃƒÂ§os do navegador e escaneie\n");
                 } catch (error) {
-                    console.log("\nðŸ’¡ Escaneie o QR code acima com o WhatsApp Web\n");
+                    console.log("\nÃ°Å¸â€™Â¡ Escaneie o QR code acima com o WhatsApp Web\n");
                 }
             } else {
                 // Local, mostrar QR code maior + servidor HTTP
@@ -205,12 +205,12 @@ async function startBot() {
                     // Fechar servidor anterior se existir
                     if (qrServer) {
                         qrServer.close(() => {
-                            console.log('ðŸ”„ Servidor QR anterior fechado');
+                            console.log('Ã°Å¸â€â€ž Servidor QR anterior fechado');
                         });
                         qrServer = null;
                     }
 
-                    // Criar servidor HTTP temporÃ¡rio
+                    // Criar servidor HTTP temporÃƒÂ¡rio
                     const port = process.env.QR_SERVER_PORT || 3001;
 
                     qrServer = http.createServer((req, res) => {
@@ -230,9 +230,9 @@ async function startBot() {
 
                     qrServer.on('error', (err) => {
                         if (err.code === 'EADDRINUSE') {
-                            console.error(`âŒ Porta ${port} jÃ¡ estÃ¡ em uso. Tente usar outra porta.`);
+                            console.error(`Ã¢ÂÅ’ Porta ${port} jÃƒÂ¡ estÃƒÂ¡ em uso. Tente usar outra porta.`);
                         } else {
-                            console.error('âŒ Erro no servidor QR code:', err);
+                            console.error('Ã¢ÂÅ’ Erro no servidor QR code:', err);
                         }
                     });
 
@@ -254,66 +254,66 @@ async function startBot() {
 
                         const networkUrl = networkIp ? `http://${networkIp}:${port}/qr.png` : null;
 
-                        console.log("\nâ•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
-                        console.log("â•‘                    ðŸ”— LINK DE ACESSO ðŸ”—                     â•‘");
-                        console.log("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
-                        console.log("â•‘ OpÃ§Ã£o 1: Escaneie o QR code acima no WhatsApp             â•‘");
-                        console.log("â•‘                                                             â•‘");
-                        console.log("â•‘ OpÃ§Ã£o 2: Acesse o link abaixo para ver a imagem do QR:    â•‘");
-                        console.log("â•‘                                                             â•‘");
-                        console.log(`â•‘ ${localUrl}`);
+                        console.log("\nÃ¢â€¢â€Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢â€”");
+                        console.log("Ã¢â€¢â€˜                    Ã°Å¸â€â€” LINK DE ACESSO Ã°Å¸â€â€”                     Ã¢â€¢â€˜");
+                        console.log("Ã¢â€¢Â Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â£");
+                        console.log("Ã¢â€¢â€˜ OpÃƒÂ§ÃƒÂ£o 1: Escaneie o QR code acima no WhatsApp             Ã¢â€¢â€˜");
+                        console.log("Ã¢â€¢â€˜                                                             Ã¢â€¢â€˜");
+                        console.log("Ã¢â€¢â€˜ OpÃƒÂ§ÃƒÂ£o 2: Acesse o link abaixo para ver a imagem do QR:    Ã¢â€¢â€˜");
+                        console.log("Ã¢â€¢â€˜                                                             Ã¢â€¢â€˜");
+                        console.log(`Ã¢â€¢â€˜ ${localUrl}`);
                         if (networkUrl) {
-                            console.log("â•‘                                                             â•‘");
-                            console.log("â•‘ Link alternativo (rede local):                             â•‘");
-                            console.log(`â•‘ ${networkUrl}`);
+                            console.log("Ã¢â€¢â€˜                                                             Ã¢â€¢â€˜");
+                            console.log("Ã¢â€¢â€˜ Link alternativo (rede local):                             Ã¢â€¢â€˜");
+                            console.log(`Ã¢â€¢â€˜ ${networkUrl}`);
                         }
-                        console.log("â•‘                                                             â•‘");
-                        console.log("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\n");
-                        console.log("ðŸ’¡ Dica: Abra o link no navegador para ver a imagem do QR code");
+                        console.log("Ã¢â€¢â€˜                                                             Ã¢â€¢â€˜");
+                        console.log("Ã¢â€¢Å¡Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â\n");
+                        console.log("Ã°Å¸â€™Â¡ Dica: Abra o link no navegador para ver a imagem do QR code");
                         console.log("   e escaneie com o WhatsApp Web.\n");
                     });
 
                 } catch (error) {
-                    console.error('âŒ Erro ao criar servidor QR code:', error);
-                    console.log("\nâ•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
-                    console.log("â•‘                    âš ï¸  INFORMAÃ‡ÃƒO âš ï¸                        â•‘");
-                    console.log("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
-                    console.log("â•‘ Por favor, escaneie o QR code acima no WhatsApp Web        â•‘");
-                    console.log("â•‘ O QR code contÃ©m dados de autenticaÃ§Ã£o que precisam ser   â•‘");
-                    console.log("â•‘ escaneados diretamente pelo aplicativo WhatsApp.         â•‘");
-                    console.log("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•\n");
+                    console.error('Ã¢ÂÅ’ Erro ao criar servidor QR code:', error);
+                    console.log("\nÃ¢â€¢â€Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢â€”");
+                    console.log("Ã¢â€¢â€˜                    Ã¢Å¡Â Ã¯Â¸Â  INFORMAÃƒâ€¡ÃƒÆ’O Ã¢Å¡Â Ã¯Â¸Â                        Ã¢â€¢â€˜");
+                    console.log("Ã¢â€¢Â Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â£");
+                    console.log("Ã¢â€¢â€˜ Por favor, escaneie o QR code acima no WhatsApp Web        Ã¢â€¢â€˜");
+                    console.log("Ã¢â€¢â€˜ O QR code contÃƒÂ©m dados de autenticaÃƒÂ§ÃƒÂ£o que precisam ser   Ã¢â€¢â€˜");
+                    console.log("Ã¢â€¢â€˜ escaneados diretamente pelo aplicativo WhatsApp.         Ã¢â€¢â€˜");
+                    console.log("Ã¢â€¢Å¡Ã¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢ÂÃ¢â€¢Â\n");
                 }
             }
         }
 
         // Fechar servidor quando conectar
         if (connection === 'open' && qrServer) {
-            console.log('ðŸ”’ Fechando servidor QR code temporÃ¡rio...');
+            console.log('Ã°Å¸â€â€™ Fechando servidor QR code temporÃƒÂ¡rio...');
             qrServer.close();
             qrServer = null;
         }
 
-        console.log('ðŸ“¡ Status da conexÃ£o:', connection);
+        console.log('Ã°Å¸â€œÂ¡ Status da conexÃƒÂ£o:', connection);
 
         if (connection === 'open') {
             logger.info('Conectado ao WhatsApp');
             resetReconnectAttempts();
             setConnected(true);
 
-            // Iniciar serviÃ§os apenas uma vez apÃ³s conexÃ£o bem-sucedida
+            // Iniciar serviÃƒÂ§os apenas uma vez apÃƒÂ³s conexÃƒÂ£o bem-sucedida
             try {
                 scheduleGroupMessages(sock);
                 scheduleBackups();
                 startScheduler(sock);
-                // Iniciar sistema de lembretes com socket vÃ¡lido
+                // Iniciar sistema de lembretes com socket vÃƒÂ¡lido
                 initLembretes(sock);
                 scheduleSupabaseBackup();
                 startAutoPromo(sock);
                 startHealthMonitor();
                 startSessionBackup();
-                console.log('âœ… Todos os serviÃ§os iniciados com sucesso');
+                console.log('Ã¢Å“â€¦ Todos os serviÃƒÂ§os iniciados com sucesso');
             } catch (e) {
-                console.error('âŒ Erro ao iniciar serviÃ§os:', e.message);
+                console.error('Ã¢ÂÅ’ Erro ao iniciar serviÃƒÂ§os:', e.message);
             }
         }
 
@@ -322,22 +322,22 @@ async function startBot() {
             setConnected(false);
 
             if (reason === DisconnectReason.loggedOut) {
-                console.log('âš ï¸ SessÃ£o desconectada manualmente. Deletando credenciais antigas...');
+                console.log('Ã¢Å¡Â Ã¯Â¸Â SessÃƒÂ£o desconectada manualmente. Deletando credenciais antigas...');
                 try {
                     const authPath = path.join(__dirname, 'auth_info');
                     if (fs.existsSync(authPath)) {
                         fs.rmSync(authPath, { recursive: true, force: true });
-                        console.log('ðŸ—‘ï¸ Credenciais antigas removidas');
+                        console.log('Ã°Å¸â€”â€˜Ã¯Â¸Â Credenciais antigas removidas');
                     }
-                    // TambÃ©m limpar o backup para evitar loop de restauraÃ§Ã£o
+                    // TambÃƒÂ©m limpar o backup para evitar loop de restauraÃƒÂ§ÃƒÂ£o
                     clearSessionBackup();
                 } catch (e) {
                     console.error('Erro ao remover credenciais:', e.message);
                 }
-                console.log('ðŸ”„ Reiniciando para gerar novo QR code...');
+                console.log('Ã°Å¸â€â€ž Reiniciando para gerar novo QR code...');
                 setTimeout(() => startBot(), 3000);
             } else {
-                // Usar gerenciador de conexÃ£o para reconexÃµes automÃ¡ticas
+                // Usar gerenciador de conexÃƒÂ£o para reconexÃƒÂµes automÃƒÂ¡ticas
                 handleConnectionUpdate(update, startBot);
             }
         }
@@ -358,7 +358,7 @@ async function startBot() {
             const messageTimestamp = message.messageTimestamp ? parseInt(message.messageTimestamp) * 1000 : Date.now();
             if (messageTimestamp < botStartTime) continue;
 
-            // ========== 2. SEPARAÃ‡ÃƒO DE CONTEXTO ==========
+            // ========== 2. SEPARAÃƒâ€¡ÃƒÆ’O DE CONTEXTO ==========
             const isGroup = message.key.remoteJid?.endsWith('@g.us');
             const senderId = message.key.participant || message.key.remoteJid;
             const chatId = message.key.remoteJid;
@@ -389,9 +389,9 @@ async function startBot() {
             // Mover leitura de arquivo para fora do loop de mensagens ou usar cache?
             // Vamos logar tudo para debug agora.
 
-            console.log(`ðŸ” DEBUG: Processando msg de ${senderId} no grupo ${chatId}`);
+            console.log(`Ã°Å¸â€Â DEBUG: Processando msg de ${senderId} no grupo ${chatId}`);
 
-            // Carregar allowed_groups (Ideal: mover par memÃ³ria global recarregÃ¡vel)
+            // Carregar allowed_groups (Ideal: mover par memÃƒÂ³ria global recarregÃƒÂ¡vel)
             let ALLOWED_GROUP_NAMES = new Set();
             try {
                 const allowedPath = path.join(__dirname, 'allowed_groups.json');
@@ -402,21 +402,21 @@ async function startBot() {
                     }
                 }
             } catch (e) {
-                console.warn('âš ï¸ Falha ao ler allowed_groups.json:', e.message);
+                console.warn('Ã¢Å¡Â Ã¯Â¸Â Falha ao ler allowed_groups.json:', e.message);
             }
 
             let groupSubject = null;
             try {
                 const groupMetadata = await sock.groupMetadata(chatId);
                 groupSubject = groupMetadata.subject || '';
-                console.log(`ðŸ” DEBUG: Nome do grupo obtido: "${groupSubject}"`);
+                console.log(`Ã°Å¸â€Â DEBUG: Nome do grupo obtido: "${groupSubject}"`);
             } catch (e) {
-                console.warn('âš ï¸ Falha ao obter metadata do grupo:', e.message);
+                console.warn('Ã¢Å¡Â Ã¯Â¸Â Falha ao obter metadata do grupo:', e.message);
             }
 
             const normalizedGroupSubject = normalizeGroupName(groupSubject);
             if (!groupSubject || !ALLOWED_GROUP_NAMES.has(normalizedGroupSubject)) {
-                console.log(`â­ï¸ Ignorado: Grupo "${groupSubject}" nÃ£o estÃ¡ na lista permitida.`);
+                console.log(`Ã¢ÂÂ­Ã¯Â¸Â Ignorado: Grupo "${groupSubject}" nÃƒÂ£o estÃƒÂ¡ na lista permitida.`);
                 // DEBUG: Listar permitidos se falhar
                 // console.log('Permitidos:', Array.from(ALLOWED_GROUP_NAMES));
 
@@ -427,25 +427,28 @@ async function startBot() {
                     if (nowTs - lastNoticeTs >= UNAUTHORIZED_GROUP_NOTICE_MS) {
                         unauthorizedGroupNoticeCooldown.set(chatId, nowTs);
                         await sendSafeMessage(sock, chatId, {
-                            text: 'âš ï¸ Este grupo nÃ£o estÃ¡ autorizado para comandos.\n\nPeÃ§a a um admin para adicionar o grupo na lista permitida.'
+                            text: 'Ã¢Å¡Â Ã¯Â¸Â Este grupo nÃƒÂ£o estÃƒÂ¡ autorizado para comandos.\n\nPeÃƒÂ§a a um admin para adicionar o grupo na lista permitida.'
                         });
                     }
                 }
                 continue;
             }
 
-            console.log('âœ… Grupo autorizado:', groupSubject);
+            console.log('Ã¢Å“â€¦ Grupo autorizado:', groupSubject);
             const isRestrictedGroup = isRestrictedGroupName(groupSubject);
             if (isRestrictedGroup) {
-                console.log(`ðŸ”’ Modo restrito ativo para o grupo: "${groupSubject}"`);
+                console.log(`Ã°Å¸â€â€™ Modo restrito ativo para o grupo: "${groupSubject}"`);
             }
 
-            // 4.1. COMANDOS (prioridade mÃ¡xima - mas moderaÃ§Ã£o SEMPRE roda)
+            // Salva toda mensagem de texto de grupos autorizados (incluindo comandos).
+            publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
+
+            // 4.1. COMANDOS (prioridade mÃƒÂ¡xima - mas moderaÃƒÂ§ÃƒÂ£o SEMPRE roda)
             const isCommand = String(messageText || '').trimStart().startsWith('/');
-            console.log(`ðŸ” DEBUG: isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
+            console.log(`Ã°Å¸â€Â DEBUG: isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
 
             if (isCommand) {
-                console.log('âš¡ COMANDO detectado:', messageText.split(' ')[0]);
+                console.log('Ã¢Å¡Â¡ COMANDO detectado:', messageText.split(' ')[0]);
 
                 // Comando DEV (funciona em grupo e privado)
                 if (!isRestrictedGroup && messageText.toLowerCase().startsWith('/dev')) {
@@ -455,21 +458,20 @@ async function startBot() {
 
                 // Processar comando
                 await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
-                // NÃƒO continue aqui - deixar moderaÃ§Ã£o rodar
+                // NÃƒÆ’O continue aqui - deixar moderaÃƒÂ§ÃƒÂ£o rodar
             }
 
             if (isRestrictedGroup) {
-                // Neste grupo, o bot sÃ³ atende funÃ§Ãµes especÃ­ficas tratadas no groupResponder.
-                // Inclui comandos cripto e menÃ§Ã£o explÃ­cita ao @IMAVY.
+                // Neste grupo, o bot sÃƒÂ³ atende funÃƒÂ§ÃƒÂµes especÃƒÂ­ficas tratadas no groupResponder.
+                // Inclui comandos cripto e menÃƒÂ§ÃƒÂ£o explÃƒÂ­cita ao @IMAVY.
                 if (!isCommand) {
-                    publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
                     await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
                 }
                 continue;
             }
 
-            // 4.2. MODERAÃ‡ÃƒO MINIMALISTA (2 regras: REPEAT + LINK)
-            // Verificar se Ã© admin do bot ou do grupo
+            // 4.2. MODERAÃƒâ€¡ÃƒÆ’O MINIMALISTA (2 regras: REPEAT + LINK)
+            // Verificar se ÃƒÂ© admin do bot ou do grupo
             let isUserAdmin = false;
             try {
                 const isBotAdmin = await isAuthorized(senderId);
@@ -485,37 +487,37 @@ async function startBot() {
             const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
 
             if (violation.violated) {
-                console.log(`ðŸš¨ VIOLAÃ‡ÃƒO: ${violation.rule} - User: ${senderId}`);
+                console.log(`Ã°Å¸Å¡Â¨ VIOLAÃƒâ€¡ÃƒÆ’O: ${violation.rule} - User: ${senderId}`);
 
                 // Deletar mensagem
                 let deleteError = null;
                 try {
                     await sendSafeMessage(sock, chatId, { delete: message.key });
-                    console.log('âœ… Mensagem deletada');
+                    console.log('Ã¢Å“â€¦ Mensagem deletada');
                 } catch (e) {
-                    deleteError = `NÃ£o consegui apagar a mensagem (sem permissÃ£o).`;
-                    console.error('âŒ Erro ao deletar:', e.message);
+                    deleteError = `NÃƒÂ£o consegui apagar a mensagem (sem permissÃƒÂ£o).`;
+                    console.error('Ã¢ÂÅ’ Erro ao deletar:', e.message);
                 }
 
                 // Adicionar strike
                 const strikeCount = addStrike(chatId, senderId, violation.rule, messageText);
-                console.log(`âš ï¸ Strike aplicado: ${strikeCount}/3`);
+                console.log(`Ã¢Å¡Â Ã¯Â¸Â Strike aplicado: ${strikeCount}/3`);
 
                 // Aviso no grupo
                 const warning = violation.rule === 'REPEAT'
-                    ? `âš ï¸ Evite repetir mensagens. (Strike ${strikeCount}/3)`
-                    : `ðŸš« Links nÃ£o sÃ£o permitidos. (Strike ${strikeCount}/3)`;
+                    ? `Ã¢Å¡Â Ã¯Â¸Â Evite repetir mensagens. (Strike ${strikeCount}/3)`
+                    : `Ã°Å¸Å¡Â« Links nÃƒÂ£o sÃƒÂ£o permitidos. (Strike ${strikeCount}/3)`;
 
                 try {
                     await sendSafeMessage(sock, chatId, { text: warning });
                 } catch (e) {
-                    console.error('âŒ Erro ao enviar aviso:', e.message);
+                    console.error('Ã¢ÂÅ’ Erro ao enviar aviso:', e.message);
                 }
 
                 // Notificar admins
                 await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount, messageText, deleteError);
 
-                // Aplicar puniÃ§Ã£o se 3/3
+                // Aplicar puniÃƒÂ§ÃƒÂ£o se 3/3
                 if (strikeCount >= 3) {
                     await applyPunishment(sock, chatId, senderId, strikeCount);
                 }
@@ -526,30 +528,29 @@ async function startBot() {
 
 
 
-            // Se foi comando e nÃ£o violou, jÃ¡ foi processado
+            // Se foi comando e nÃƒÂ£o violou, jÃƒÂ¡ foi processado
             if (isCommand) {
                 continue;
             }
 
-            // Mensagens nÃ£o-comando podem acionar o IMAVY via menÃ§Ã£o explÃ­cita.
-            publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
+            // Mensagens nÃƒÂ£o-comando podem acionar o IMAVY via menÃƒÂ§ÃƒÂ£o explÃƒÂ­cita.
             await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
         }
     });
 
     // Evento para detectar novos membros no grupo
-    // PerÃ­odo de tolerÃ¢ncia de inicializaÃ§Ã£o (10s) para evitar processar histÃ³rico
+    // PerÃƒÂ­odo de tolerÃƒÂ¢ncia de inicializaÃƒÂ§ÃƒÂ£o (10s) para evitar processar histÃƒÂ³rico
     const BOOT_GRACE_PERIOD = Date.now() + 10000;
 
     sock.ev.on('group-participants.update', async (update) => {
         try {
-            // Ignorar eventos antigas ou durante inicializaÃ§Ã£o
+            // Ignorar eventos antigas ou durante inicializaÃƒÂ§ÃƒÂ£o
             if (Date.now() < BOOT_GRACE_PERIOD) {
-                console.log('â³ Ignorando evento de participantes durante inicializaÃ§Ã£o...');
+                console.log('Ã¢ÂÂ³ Ignorando evento de participantes durante inicializaÃƒÂ§ÃƒÂ£o...');
                 return;
             }
 
-            console.log('ðŸ“‹ AtualizaÃ§Ã£o de participantes:', JSON.stringify(update, null, 2));
+            console.log('Ã°Å¸â€œâ€¹ AtualizaÃƒÂ§ÃƒÂ£o de participantes:', JSON.stringify(update, null, 2));
             const { id: groupId, participants, action } = update;
 
             // Delegar para o handler inteligente com batch
@@ -559,27 +560,29 @@ async function startBot() {
                     const groupMetadata = await sock.groupMetadata(groupId);
                     groupSubject = groupMetadata?.subject || '';
                 } catch (e) {
-                    console.warn('âš ï¸ NÃ£o foi possÃ­vel obter nome do grupo para filtro de boas-vindas:', e.message);
+                    console.warn('Ã¢Å¡Â Ã¯Â¸Â NÃƒÂ£o foi possÃƒÂ­vel obter nome do grupo para filtro de boas-vindas:', e.message);
                 }
 
                 if (isRestrictedGroupName(groupSubject)) {
-                    console.log(`â­ï¸ Boas-vindas desativadas no grupo restrito: "${groupSubject}"`);
+                    console.log(`Ã¢ÂÂ­Ã¯Â¸Â Boas-vindas desativadas no grupo restrito: "${groupSubject}"`);
                     return;
                 }
 
                 handleWelcomeEvent(sock, groupId, participants);
             }
         } catch (error) {
-            console.error('âŒ Erro no evento de participantes:', error);
+            console.error('Ã¢ÂÅ’ Erro no evento de participantes:', error);
         }
     });
 
-    // Evento alternativo para capturar mudanÃ§as no grupo
+    // Evento alternativo para capturar mudanÃƒÂ§as no grupo
     sock.ev.on('groups.update', async (updates) => {
-        console.log('ðŸ”„ AtualizaÃ§Ã£o de grupos:', JSON.stringify(updates, null, 2));
+        console.log('Ã°Å¸â€â€ž AtualizaÃƒÂ§ÃƒÂ£o de grupos:', JSON.stringify(updates, null, 2));
     });
 }
 
 startBot();
+
+
 
 
