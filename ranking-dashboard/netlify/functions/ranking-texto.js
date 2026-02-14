@@ -24,8 +24,8 @@ exports.handler = async (event) => {
 
     try {
         const payload = event.body ? JSON.parse(event.body) : {};
-        const { interacoes, dataInicio, dataFim } = payload;
-        const resultado = gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim);
+        const { interacoes, dataInicio, dataFim, grupoSelecionado } = payload;
+        const resultado = gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim, grupoSelecionado);
         return response(200, resultado);
     } catch (error) {
         return response(400, {
@@ -34,3 +34,4 @@ exports.handler = async (event) => {
         });
     }
 };
+

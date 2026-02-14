@@ -1,7 +1,7 @@
-﻿:root {
+:root {
     --bg: #f3f7ff;
     --bg-accent: #e9f0ff;
-    --panel: rgba(255, 255, 255, 0.8);
+    --panel: rgba(255, 255, 255, 0.86);
     --line: #c5d5f1;
     --text: #0c1d36;
     --muted: #486188;
@@ -9,6 +9,9 @@
     --primary-2: #1783d2;
     --success: #17763f;
     --danger: #a73737;
+    --neutral: #697b9e;
+    --gold-1: #fff2c6;
+    --gold-2: #f5bf3a;
     --shadow: 0 20px 40px rgba(13, 76, 146, 0.14);
 }
 
@@ -37,8 +40,8 @@ body {
 }
 
 .container {
-    width: min(1200px, 94vw);
-    margin: 28px auto 40px;
+    width: min(1280px, 94vw);
+    margin: 24px auto 40px;
     display: grid;
     gap: 16px;
 }
@@ -89,6 +92,10 @@ h1 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.premium-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 label {
     display: grid;
     gap: 6px;
@@ -100,12 +107,14 @@ label span {
 }
 
 input,
+select,
 textarea,
 button {
     font: inherit;
 }
 
 input,
+select,
 textarea {
     width: 100%;
     border: 1px solid var(--line);
@@ -121,6 +130,28 @@ textarea {
     line-height: 1.4;
     resize: vertical;
     min-height: 210px;
+}
+
+.quick-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.chip {
+    border: 1px solid #b8cdf0;
+    background: #ecf4ff;
+    color: var(--primary);
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-weight: 700;
+}
+
+.chip.active {
+    background: linear-gradient(135deg, var(--primary), var(--primary-2));
+    color: #fff;
+    border-color: transparent;
 }
 
 .actions {
@@ -165,6 +196,49 @@ button.ghost {
     display: none;
 }
 
+.top1-spotlight {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 12px;
+    border: 1px solid #ecd18a;
+    background: linear-gradient(135deg, var(--gold-1), #ffffff);
+}
+
+.spotlight-tag {
+    margin: 0;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #8b6a11;
+    font-weight: 700;
+}
+
+.top1-spotlight h2 {
+    margin: 4px 0 6px;
+    font-size: 1.9rem;
+}
+
+.spotlight-sub {
+    margin: 0;
+    color: #725f26;
+}
+
+.spotlight-metrics {
+    align-self: center;
+    background: rgba(255, 255, 255, 0.75);
+    border: 1px solid rgba(139, 106, 17, 0.24);
+    border-radius: 12px;
+    padding: 12px;
+}
+
+.spotlight-metrics p {
+    margin: 0 0 6px;
+}
+
+.spotlight-metrics p:last-child {
+    margin-bottom: 0;
+}
+
 .stat-card h2 {
     margin: 0;
     font-size: 0.92rem;
@@ -178,6 +252,12 @@ button.ghost {
     color: var(--primary);
 }
 
+.metric-caption {
+    margin: 6px 0 0;
+    font-size: 0.86rem;
+    color: var(--muted);
+}
+
 .insights {
     margin: 0;
     padding-left: 18px;
@@ -187,6 +267,11 @@ button.ghost {
 
 .table-wrap {
     overflow: auto;
+    max-height: 420px;
+}
+
+.ranking-scroll {
+    max-height: 540px;
 }
 
 table {
@@ -200,12 +285,57 @@ thead th {
     color: var(--muted);
     border-bottom: 1px solid var(--line);
     padding: 10px 8px;
+    position: sticky;
+    top: 0;
+    background: #f6f9ff;
+    z-index: 2;
 }
 
 tbody td {
     border-bottom: 1px solid #dde8fb;
     padding: 10px 8px;
     font-size: 0.92rem;
+    vertical-align: middle;
+}
+
+.risk-row {
+    background: #fff5f5;
+}
+
+.level-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    padding: 3px 10px;
+    border: 1px solid #c7d8f5;
+    background: #f4f8ff;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+.bar-cell {
+    display: grid;
+    gap: 6px;
+}
+
+.bar-track {
+    width: 100%;
+    height: 8px;
+    border-radius: 999px;
+    background: #e4ecfb;
+    overflow: hidden;
+}
+
+.bar-fill {
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #2e9bff, #135fc2);
+    animation: grow-bar 900ms ease-out;
+}
+
+.growth {
+    font-weight: 700;
 }
 
 .delta-pos {
@@ -219,13 +349,34 @@ tbody td {
 }
 
 .delta-zero {
-    color: var(--muted);
+    color: var(--neutral);
     font-weight: 700;
+}
+
+@keyframes grow-bar {
+    from {
+        width: 0;
+        opacity: 0.4;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@media (max-width: 1080px) {
+    .premium-cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .top1-spotlight {
+        grid-template-columns: 1fr;
+    }
 }
 
 @media (max-width: 900px) {
     .cards,
-    .two-cols {
+    .two-cols,
+    .premium-cards {
         grid-template-columns: 1fr;
     }
 

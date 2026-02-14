@@ -1,9 +1,9 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Ranking de Participantes | iMavy</title>
+    <title>iMavy Analytics 2.5 | Ranking de Participantes</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -14,9 +14,9 @@
 
     <main class="container">
         <header class="hero">
-            <p class="eyebrow">iMavy Analytics</p>
-            <h1>Dashboard de Ranking de Participantes</h1>
-            <p class="subtitle">Analise mensagens de texto por periodo com comparacao automatica do ciclo anterior.</p>
+            <p class="eyebrow">iMavy Analytics 2.5</p>
+            <h1>Dashboard Premium de Ranking de Participantes</h1>
+            <p class="subtitle">Analise mensagens por periodo, risco, concentracao e projecao estrategica.</p>
         </header>
 
         <section class="panel input-panel">
@@ -31,6 +31,20 @@
                 </label>
             </div>
 
+            <div class="quick-filters">
+                <button type="button" class="chip" data-range="7d">Ultimos 7 dias</button>
+                <button type="button" class="chip" data-range="30d">Ultimos 30 dias</button>
+                <button type="button" class="chip" data-range="month">Este mes</button>
+                <button type="button" class="chip" data-range="previous">Ciclo anterior</button>
+            </div>
+
+            <label>
+                <span>Grupo</span>
+                <select id="grupoSelecionado">
+                    <option value="">Todos os grupos</option>
+                </select>
+            </label>
+
             <label>
                 <span>Interacoes (JSON)</span>
                 <textarea id="interacoesJson" rows="12" spellcheck="false"></textarea>
@@ -39,13 +53,29 @@
             <div class="actions">
                 <button id="gerarBtn" type="button">Gerar Dashboard</button>
                 <button id="exemploBtn" type="button" class="ghost">Carregar Exemplo</button>
+                <button id="exportCsvBtn" type="button" class="ghost">Exportar CSV</button>
+                <button id="exportJsonBtn" type="button" class="ghost">Exportar JSON</button>
+                <button id="copiarBtn" type="button" class="ghost">Copiar ranking</button>
             </div>
 
             <p id="status" class="status">Pronto para gerar ranking.</p>
         </section>
 
         <section id="resultados" class="results hidden">
-            <div class="grid cards">
+            <article class="panel top1-spotlight">
+                <div>
+                    <p class="spotlight-tag">Top 1</p>
+                    <h2 id="top1Nome">-</h2>
+                    <p id="top1Resumo" class="spotlight-sub">Aguardando dados.</p>
+                </div>
+                <div class="spotlight-metrics">
+                    <p><strong id="top1Total">0</strong> mensagens</p>
+                    <p><strong id="top1Score">0</strong> score de engajamento</p>
+                    <p id="top1Projecao">Sem projecao.</p>
+                </div>
+            </article>
+
+            <div class="grid cards premium-cards">
                 <article class="panel stat-card">
                     <h2>Total geral</h2>
                     <p id="totalGeral" class="metric">0</p>
@@ -58,11 +88,29 @@
                     <h2>Media por participante</h2>
                     <p id="mediaPorParticipante" class="metric">0</p>
                 </article>
+                <article class="panel stat-card">
+                    <h2>Indice de Concentracao (Top 3)</h2>
+                    <p id="indiceConcentracao" class="metric">0%</p>
+                    <p id="classificacaoConcentracao" class="metric-caption">-</p>
+                </article>
+                <article class="panel stat-card">
+                    <h2>Score medio de engajamento</h2>
+                    <p id="scoreMedio" class="metric">0</p>
+                </article>
+                <article class="panel stat-card">
+                    <h2>Participantes em risco</h2>
+                    <p id="participantesRisco" class="metric">0</p>
+                </article>
             </div>
 
             <section class="panel">
-                <h2>Insights</h2>
+                <h2>Insights Base</h2>
                 <ul id="insightsList" class="insights"></ul>
+            </section>
+
+            <section class="panel">
+                <h2>Insights Premium</h2>
+                <ul id="insightsPremiumList" class="insights"></ul>
             </section>
 
             <section class="panel">
@@ -73,8 +121,10 @@
                             <tr>
                                 <th>Posicao</th>
                                 <th>Nome</th>
+                                <th>Nivel</th>
                                 <th>Total</th>
-                                <th>Percentual</th>
+                                <th>Participacao</th>
+                                <th>Score</th>
                                 <th>Crescimento</th>
                             </tr>
                         </thead>
@@ -85,14 +135,16 @@
 
             <section class="panel">
                 <h2>Ranking completo</h2>
-                <div class="table-wrap">
+                <div class="table-wrap ranking-scroll">
                     <table>
                         <thead>
                             <tr>
                                 <th>Posicao</th>
                                 <th>Nome</th>
+                                <th>Nivel</th>
                                 <th>Total</th>
-                                <th>Percentual</th>
+                                <th>Participacao</th>
+                                <th>Score</th>
                                 <th>Crescimento</th>
                             </tr>
                         </thead>
@@ -103,6 +155,7 @@
         </section>
     </main>
 
+    <script src="./analyticsPremium.js"></script>
     <script src="./app.js"></script>
 </body>
 </html>

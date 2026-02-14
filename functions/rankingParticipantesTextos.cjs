@@ -1,4 +1,4 @@
-﻿const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 // Arredonda numeros para 2 casas para manter a saida consistente.
 function round2(value) {
@@ -50,6 +50,20 @@ function formatSignedPercent(value) {
     return `${rounded}%`;
 }
 
+// Normaliza filtro de grupo; vazio ou "todos" significa sem filtro.
+function normalizeGroupFilter(grupoSelecionado) {
+    if (grupoSelecionado === undefined || grupoSelecionado === null) {
+        return null;
+    }
+
+    const value = String(grupoSelecionado).trim();
+    if (!value || value.toLowerCase() === 'todos') {
+        return null;
+    }
+
+    return value.toLowerCase();
+}
+
 // Valida e normaliza o intervalo principal informado.
 function normalizeRange(dataInicio, dataFim) {
     const startDate = parseIsoDate(dataInicio);
@@ -79,7 +93,7 @@ function getPreviousRange(startDate, endDate) {
 }
 
 // Filtra somente interacoes validas dentro do intervalo solicitado.
-function filterInteractionsByRange(interacoes, startDate, endDate) {
+function filterInteractionsByRange(interacoes, startDate, endDate, groupFilter) {
     return interacoes
         .filter((registro) => {
             if (!registro || typeof registro.nome !== 'string') {
@@ -96,11 +110,19 @@ function filterInteractionsByRange(interacoes, startDate, endDate) {
                 return false;
             }
 
+            if (groupFilter) {
+                const grupoRegistro = typeof registro.grupo === 'string' ? registro.grupo.trim().toLowerCase() : '';
+                if (grupoRegistro !== groupFilter) {
+                    return false;
+                }
+            }
+
             return data.getTime() >= startDate.getTime() && data.getTime() <= endDate.getTime();
         })
         .map((registro) => ({
             nome: registro.nome.trim(),
-            data: registro.data
+            data: registro.data,
+            grupo: typeof registro.grupo === 'string' ? registro.grupo.trim() : ''
         }));
 }
 
@@ -232,17 +254,18 @@ function buildInsights(rankingCompleto, resumo, movement) {
 }
 
 // Funcao principal para gerar dashboard completo de ranking de participantes por texto.
-function gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim) {
+function gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim, grupoSelecionado) {
     if (!Array.isArray(interacoes)) {
         throw new Error('interacoes deve ser um array.');
     }
 
     const { startDate, endDate } = normalizeRange(dataInicio, dataFim);
     const { previousStartDate, previousEndDate } = getPreviousRange(startDate, endDate);
+    const groupFilter = normalizeGroupFilter(grupoSelecionado);
 
     // 1) Filtra interacoes do periodo atual e do periodo anterior.
-    const interacoesPeriodoAtual = filterInteractionsByRange(interacoes, startDate, endDate);
-    const interacoesPeriodoAnterior = filterInteractionsByRange(interacoes, previousStartDate, previousEndDate);
+    const interacoesPeriodoAtual = filterInteractionsByRange(interacoes, startDate, endDate, groupFilter);
+    const interacoesPeriodoAnterior = filterInteractionsByRange(interacoes, previousStartDate, previousEndDate, groupFilter);
 
     // 2) Calcula totais por participante e totais gerais.
     const totaisAtuais = countMessagesByParticipant(interacoesPeriodoAtual);

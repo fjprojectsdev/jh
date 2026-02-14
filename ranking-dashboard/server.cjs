@@ -1,4 +1,4 @@
-﻿const http = require('http');
+const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
@@ -118,8 +118,8 @@ async function handleApi(req, res, pathname) {
     if (req.method === 'POST' && pathname === '/api/ranking-texto') {
         try {
             const payload = await readJsonBody(req);
-            const { interacoes, dataInicio, dataFim } = payload || {};
-            const resultado = gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim);
+            const { interacoes, dataInicio, dataFim, grupoSelecionado } = payload || {};
+            const resultado = gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim, grupoSelecionado);
             sendJson(res, 200, resultado);
             return;
         } catch (error) {
@@ -162,3 +162,4 @@ server.listen(PORT, HOST, () => {
     console.log(`Ranking Dashboard ativo em http://localhost:${PORT}`);
     console.log(`API health: http://localhost:${PORT}/api/health`);
 });
+
