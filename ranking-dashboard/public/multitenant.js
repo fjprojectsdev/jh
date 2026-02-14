@@ -42,6 +42,22 @@ function setToken(token) {
   byId('tokenStatus').textContent = token ? 'autenticado' : 'nao autenticado';
 }
 
+function formatResumoSync(sync) {
+  if (!sync || typeof sync !== 'object') {
+    return '';
+  }
+
+  if (!sync.ok) {
+    return sync.erro ? ` Vinculo de grupos: ${sync.erro}` : ' Vinculo de grupos nao concluido.';
+  }
+
+  const resumo = sync.resumo || {};
+  const criados = Number(resumo.criados || 0);
+  const jaVinculados = Number(resumo.jaVinculadosAoCliente || 0);
+  const bloqueados = Number(resumo.bloqueadosPorOutroCliente || 0);
+  return ` Grupos sincronizados: +${criados}, existentes ${jaVinculados}, bloqueados ${bloqueados}.`;
+}
+
 async function apiFetch(path, options = {}) {
   const token = getToken();
   const headers = {
@@ -82,7 +98,7 @@ async function registrar() {
   });
 
   setToken(body.token || '');
-  setStatus('Cliente registrado com sucesso.');
+  setStatus(`Cliente registrado com sucesso.${formatResumoSync(body.gruposAutorizadosSync)}`);
   if (irParaProximaRotaSeExiste()) {
     return;
   }
@@ -99,7 +115,7 @@ async function login() {
   });
 
   setToken(body.token || '');
-  setStatus('Login realizado com sucesso.');
+  setStatus(`Login realizado com sucesso.${formatResumoSync(body.gruposAutorizadosSync)}`);
   if (irParaProximaRotaSeExiste()) {
     return;
   }

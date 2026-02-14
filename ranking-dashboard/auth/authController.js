@@ -7,6 +7,7 @@ const {
 } = require('../models/cliente.js');
 const { sanitizeText, sanitizeEmail } = require('../services/supabaseTenantClient.js');
 const { getJwtSecret } = require('./authMiddleware.js');
+const { vincularGruposAutorizadosAoCliente } = require('../services/allowedGroupsSyncService.js');
 
 const TOKEN_EXPIRATION = process.env.IMAVY_TOKEN_EXPIRATION || '12h';
 
@@ -25,6 +26,21 @@ function gerarToken(cliente) {
         jwtSecret,
         { expiresIn: TOKEN_EXPIRATION }
     );
+}
+
+async function executarVinculoAutomaticoGrupos(clienteId) {
+    try {
+        const resumo = await vincularGruposAutorizadosAoCliente(clienteId);
+        return {
+            ok: true,
+            resumo
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            erro: error.message || 'Falha na sincronizacao de grupos autorizados.'
+        };
+    }
 }
 
 async function registrarCliente(req, res, helpers) {
@@ -58,13 +74,15 @@ async function registrarCliente(req, res, helpers) {
 
         const senhaHash = await bcrypt.hash(senha, 12);
         const cliente = await createCliente({ nome, email, senhaHash, plano });
+        const syncResult = await executarVinculoAutomaticoGrupos(cliente.id);
         const token = gerarToken(cliente);
 
         helpers.sendJson(res, 201, {
             ok: true,
             cliente,
             token,
-            expiraEm: TOKEN_EXPIRATION
+            expiraEm: TOKEN_EXPIRATION,
+            gruposAutorizadosSync: syncResult
         });
     } catch (error) {
         helpers.sendJson(res, error.statusCode || 500, {
@@ -105,13 +123,15 @@ async function loginCliente(req, res, helpers) {
             criadoEm: cliente.criadoEm
         };
 
+        const syncResult = await executarVinculoAutomaticoGrupos(clienteSeguro.id);
         const token = gerarToken(clienteSeguro);
 
         helpers.sendJson(res, 200, {
             ok: true,
             cliente: clienteSeguro,
             token,
-            expiraEm: TOKEN_EXPIRATION
+            expiraEm: TOKEN_EXPIRATION,
+            gruposAutorizadosSync: syncResult
         });
     } catch (error) {
         helpers.sendJson(res, error.statusCode || 500, {
