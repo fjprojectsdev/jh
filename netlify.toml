@@ -1,7 +1,10 @@
-[build]
-  base = "dashboard"
-  publish = "dashboard/public"
-  command = "npm install"
+﻿[build]
+  base = "ranking-dashboard"
+  publish = "public"
+  command = "echo 'Ranking dashboard pronto'"
+
+[functions]
+  directory = "netlify/functions"
 
 [[redirects]]
   from = "/api/*"
