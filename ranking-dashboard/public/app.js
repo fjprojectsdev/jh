@@ -870,8 +870,8 @@ function init() {
     byId('dataFim').value = isoHoje;
     setFonteDados('Manual (JSON)');
     setLiveBadge('Offline', 'loading');
-
-    carregarExemplo();
+    setStatus('Pronto. Para dados reais, conecte em tempo real. Para teste, use "Carregar Exemplo".', 'ok');
+    carregarGruposDoSupabase().catch(() => {});
 }
 
 window.addEventListener('DOMContentLoaded', init);
