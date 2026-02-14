@@ -1,4 +1,4 @@
-﻿[build]
+[build]
   base = "ranking-dashboard"
   publish = "public"
   command = "echo 'Ranking dashboard pronto'"
