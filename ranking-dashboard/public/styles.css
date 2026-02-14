@@ -1,0 +1,235 @@
+﻿:root {
+    --bg: #f3f7ff;
+    --bg-accent: #e9f0ff;
+    --panel: rgba(255, 255, 255, 0.8);
+    --line: #c5d5f1;
+    --text: #0c1d36;
+    --muted: #486188;
+    --primary: #0d4c92;
+    --primary-2: #1783d2;
+    --success: #17763f;
+    --danger: #a73737;
+    --shadow: 0 20px 40px rgba(13, 76, 146, 0.14);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    background: var(--bg);
+}
+
+.bg-layer {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    background:
+        radial-gradient(circle at 10% 10%, rgba(23, 131, 210, 0.24), transparent 30%),
+        radial-gradient(circle at 85% 15%, rgba(13, 76, 146, 0.2), transparent 35%),
+        radial-gradient(circle at 50% 85%, rgba(23, 131, 210, 0.18), transparent 35%),
+        linear-gradient(135deg, var(--bg), var(--bg-accent));
+}
+
+.container {
+    width: min(1200px, 94vw);
+    margin: 28px auto 40px;
+    display: grid;
+    gap: 16px;
+}
+
+.hero {
+    padding: 8px 4px;
+}
+
+.eyebrow {
+    margin: 0 0 6px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--primary);
+}
+
+h1 {
+    margin: 0;
+    font-size: clamp(1.7rem, 2.2vw, 2.4rem);
+    line-height: 1.15;
+}
+
+.subtitle {
+    margin: 8px 0 0;
+    color: var(--muted);
+}
+
+.panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px;
+    backdrop-filter: blur(8px);
+    box-shadow: var(--shadow);
+}
+
+.grid {
+    display: grid;
+    gap: 12px;
+}
+
+.two-cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+label {
+    display: grid;
+    gap: 6px;
+}
+
+label span {
+    font-size: 0.92rem;
+    color: var(--muted);
+}
+
+input,
+textarea,
+button {
+    font: inherit;
+}
+
+input,
+textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    padding: 10px;
+    color: var(--text);
+}
+
+textarea {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.88rem;
+    line-height: 1.4;
+    resize: vertical;
+    min-height: 210px;
+}
+
+.actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+button {
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+button:hover {
+    transform: translateY(-1px);
+}
+
+#gerarBtn {
+    color: #fff;
+    background: linear-gradient(135deg, var(--primary), var(--primary-2));
+    box-shadow: 0 8px 20px rgba(13, 76, 146, 0.28);
+}
+
+button.ghost {
+    color: var(--primary);
+    background: #ecf4ff;
+    border: 1px solid #b8cdf0;
+}
+
+.status {
+    margin: 10px 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.hidden {
+    display: none;
+}
+
+.stat-card h2 {
+    margin: 0;
+    font-size: 0.92rem;
+    color: var(--muted);
+}
+
+.metric {
+    margin: 6px 0 0;
+    font-size: clamp(1.45rem, 2vw, 2.05rem);
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.insights {
+    margin: 0;
+    padding-left: 18px;
+    display: grid;
+    gap: 6px;
+}
+
+.table-wrap {
+    overflow: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+thead th {
+    text-align: left;
+    font-size: 0.84rem;
+    color: var(--muted);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 8px;
+}
+
+tbody td {
+    border-bottom: 1px solid #dde8fb;
+    padding: 10px 8px;
+    font-size: 0.92rem;
+}
+
+.delta-pos {
+    color: var(--success);
+    font-weight: 700;
+}
+
+.delta-neg {
+    color: var(--danger);
+    font-weight: 700;
+}
+
+.delta-zero {
+    color: var(--muted);
+    font-weight: 700;
+}
+
+@media (max-width: 900px) {
+    .cards,
+    .two-cols {
+        grid-template-columns: 1fr;
+    }
+
+    .container {
+        margin-top: 16px;
+    }
+}

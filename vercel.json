@@ -1,23 +1,27 @@
-{
+﻿{
   "version": 2,
   "builds": [
     {
-      "src": "dashboard/public/**",
+      "src": "ranking-dashboard/public/**",
       "use": "@vercel/static"
     },
     {
-      "src": "dashboard/server.js",
+      "src": "ranking-dashboard/server.cjs",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "dashboard/server.js"
+      "dest": "ranking-dashboard/server.cjs"
+    },
+    {
+      "src": "/",
+      "dest": "ranking-dashboard/public/index.html"
     },
     {
       "src": "/(.*)",
-      "dest": "dashboard/public/$1"
+      "dest": "ranking-dashboard/public/$1"
     }
   ]
 }

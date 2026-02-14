@@ -1,0 +1,108 @@
+﻿<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ranking de Participantes | iMavy</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+    <div class="bg-layer"></div>
+
+    <main class="container">
+        <header class="hero">
+            <p class="eyebrow">iMavy Analytics</p>
+            <h1>Dashboard de Ranking de Participantes</h1>
+            <p class="subtitle">Analise mensagens de texto por periodo com comparacao automatica do ciclo anterior.</p>
+        </header>
+
+        <section class="panel input-panel">
+            <div class="grid two-cols">
+                <label>
+                    <span>Data inicio</span>
+                    <input id="dataInicio" type="date" required />
+                </label>
+                <label>
+                    <span>Data fim</span>
+                    <input id="dataFim" type="date" required />
+                </label>
+            </div>
+
+            <label>
+                <span>Interacoes (JSON)</span>
+                <textarea id="interacoesJson" rows="12" spellcheck="false"></textarea>
+            </label>
+
+            <div class="actions">
+                <button id="gerarBtn" type="button">Gerar Dashboard</button>
+                <button id="exemploBtn" type="button" class="ghost">Carregar Exemplo</button>
+            </div>
+
+            <p id="status" class="status">Pronto para gerar ranking.</p>
+        </section>
+
+        <section id="resultados" class="results hidden">
+            <div class="grid cards">
+                <article class="panel stat-card">
+                    <h2>Total geral</h2>
+                    <p id="totalGeral" class="metric">0</p>
+                </article>
+                <article class="panel stat-card">
+                    <h2>Participantes</h2>
+                    <p id="totalParticipantes" class="metric">0</p>
+                </article>
+                <article class="panel stat-card">
+                    <h2>Media por participante</h2>
+                    <p id="mediaPorParticipante" class="metric">0</p>
+                </article>
+            </div>
+
+            <section class="panel">
+                <h2>Insights</h2>
+                <ul id="insightsList" class="insights"></ul>
+            </section>
+
+            <section class="panel">
+                <h2>Top 15</h2>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Posicao</th>
+                                <th>Nome</th>
+                                <th>Total</th>
+                                <th>Percentual</th>
+                                <th>Crescimento</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top15Body"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="panel">
+                <h2>Ranking completo</h2>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Posicao</th>
+                                <th>Nome</th>
+                                <th>Total</th>
+                                <th>Percentual</th>
+                                <th>Crescimento</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rankingBody"></tbody>
+                    </table>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <script src="./app.js"></script>
+</body>
+</html>
