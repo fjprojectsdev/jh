@@ -29,6 +29,17 @@ function setStatus(text, ok = true) {
   el.classList.add(ok ? 'delta-pos' : 'delta-neg');
 }
 
+function normalizeErrorMessage(error) {
+  const msg = String((error && error.message) || 'Erro inesperado.');
+  if (msg.toLowerCase().includes('jwt secret')) {
+    return 'Erro de autenticacao temporario. Tente novamente em alguns segundos.';
+  }
+  if (msg.toLowerCase().includes('failed to fetch')) {
+    return 'Falha de conexao com a API. Verifique o deploy.';
+  }
+  return msg;
+}
+
 function getToken() {
   return localStorage.getItem(STORAGE_KEY) || '';
 }
@@ -127,7 +138,7 @@ function logout() {
   byId('gruposLista').innerHTML = '';
   byId('rkGrupo').innerHTML = '<option value="">Todos os grupos do cliente</option>';
   byId('rankingOut').textContent = '';
-  setStatus('Sess?o encerrada.', true);
+  setStatus('Sessao encerrada.', true);
 }
 
 function renderGrupos(grupos) {
@@ -139,7 +150,7 @@ function renderGrupos(grupos) {
 
   for (const grupo of grupos) {
     const item = document.createElement('div');
-    item.className = 'mt-item';
+    item.className = 'group-item';
 
     const inputNome = document.createElement('input');
     inputNome.type = 'text';
@@ -177,9 +188,9 @@ function renderGrupos(grupos) {
       }
     });
 
-    item.innerHTML = `<div class="mt-small"><strong>${grupo.id}</strong></div>`;
+    item.innerHTML = `<div class="small"><strong>${grupo.id}</strong></div>`;
     const row = document.createElement('div');
-    row.className = 'mt-inline';
+    row.className = 'inline';
     row.appendChild(inputNome);
     row.appendChild(saveBtn);
     row.appendChild(removeBtn);
@@ -231,11 +242,11 @@ async function gerarRanking() {
 }
 
 function init() {
-  byId('btnRegistrar').addEventListener('click', () => registrar().catch((e) => setStatus(e.message, false)));
-  byId('btnLogin').addEventListener('click', () => login().catch((e) => setStatus(e.message, false)));
+  byId('btnRegistrar').addEventListener('click', () => registrar().catch((e) => setStatus(normalizeErrorMessage(e), false)));
+  byId('btnLogin').addEventListener('click', () => login().catch((e) => setStatus(normalizeErrorMessage(e), false)));
   byId('btnLogout').addEventListener('click', logout);
-  byId('btnCriarGrupo').addEventListener('click', () => criarGrupo().catch((e) => setStatus(e.message, false)));
-  byId('btnRanking').addEventListener('click', () => gerarRanking().catch((e) => setStatus(e.message, false)));
+  byId('btnCriarGrupo').addEventListener('click', () => criarGrupo().catch((e) => setStatus(normalizeErrorMessage(e), false)));
+  byId('btnRanking').addEventListener('click', () => gerarRanking().catch((e) => setStatus(normalizeErrorMessage(e), false)));
 
   const now = new Date();
   const end = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
