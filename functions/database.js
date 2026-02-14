@@ -1,6 +1,59 @@
 // Supabase Database
 import { createClient } from '@supabase/supabase-js';
 
+class FallbackQueryBuilder {
+    constructor() {
+        this.expectSingle = false;
+        this.writeOperation = false;
+    }
+
+    select() { return this; }
+    eq() { return this; }
+    order() { return this; }
+    limit() { return this; }
+
+    single() {
+        this.expectSingle = true;
+        return this;
+    }
+
+    insert() {
+        this.writeOperation = true;
+        return this;
+    }
+
+    upsert() {
+        this.writeOperation = true;
+        return this;
+    }
+
+    update() {
+        this.writeOperation = true;
+        return this;
+    }
+
+    delete() {
+        this.writeOperation = true;
+        return this;
+    }
+
+    then(resolve, reject) {
+        const payload = this.expectSingle
+            ? { data: null, error: null }
+            : { data: [], error: null };
+
+        return Promise.resolve(payload).then(resolve, reject);
+    }
+}
+
+function createFallbackSupabaseClient() {
+    return {
+        from() {
+            return new FallbackQueryBuilder();
+        }
+    };
+}
+
 function getSupabaseCredentials() {
     const supabaseUrl = process.env.IMAVY_SUPABASE_URL || process.env.SUPABASE_URL || '';
     const supabaseKey =
@@ -13,18 +66,19 @@ function getSupabaseCredentials() {
         process.env.SUPABASE_KEY ||
         '';
 
-    if (!supabaseUrl || !supabaseKey) {
-        throw new Error(
-            'Supabase nao configurado. Defina IMAVY_SUPABASE_URL e IMAVY_SUPABASE_SERVICE_KEY (ou SUPABASE_URL e SUPABASE_KEY). Tambem aceita IMAVY_SUPABASE_ANON_KEY/PUBLISHABLE.'
-        );
-    }
-
-    return { supabaseUrl, supabaseKey };
+    const configured = Boolean(supabaseUrl && supabaseKey);
+    return { supabaseUrl, supabaseKey, configured };
 }
 
-const { supabaseUrl, supabaseKey } = getSupabaseCredentials();
+const { supabaseUrl, supabaseKey, configured } = getSupabaseCredentials();
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+if (!configured) {
+    console.warn('⚠️ Supabase nao configurado no runtime. Executando em modo fallback (sem persistencia no Supabase).');
+}
+
+export const supabase = configured
+    ? createClient(supabaseUrl, supabaseKey)
+    : createFallbackSupabaseClient();
 
 // Strikes
 export async function getStrikes(userId) {
