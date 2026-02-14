@@ -18,6 +18,10 @@ function irParaProximaRotaSeExiste() {
   return false;
 }
 
+function irParaDashboardPrincipal() {
+  window.location.replace('/');
+}
+
 function byId(id) {
   return document.getElementById(id);
 }
@@ -126,7 +130,7 @@ async function registrar() {
   if (irParaProximaRotaSeExiste()) {
     return;
   }
-  await carregarGrupos();
+  irParaDashboardPrincipal();
 }
 
 async function login() {
@@ -143,7 +147,7 @@ async function login() {
   if (irParaProximaRotaSeExiste()) {
     return;
   }
-  await carregarGrupos();
+  irParaDashboardPrincipal();
 }
 
 function logout() {
@@ -269,6 +273,12 @@ function init() {
   byId('rkInicio').value = start;
   byId('rkFim').value = end;
   setToken(getToken());
+  const token = getToken();
+  if (token && !getNextPath()) {
+    irParaDashboardPrincipal();
+    return;
+  }
+
   carregarGrupos().catch(() => {});
 }
 
