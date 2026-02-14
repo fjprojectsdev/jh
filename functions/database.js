@@ -8,12 +8,14 @@ function getSupabaseCredentials() {
         process.env.SUPABASE_SERVICE_ROLE_KEY ||
         process.env.IMAVY_SUPABASE_ANON_KEY ||
         process.env.SUPABASE_ANON_KEY ||
+        process.env.IMAVY_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.SUPABASE_PUBLISHABLE_KEY ||
         process.env.SUPABASE_KEY ||
         '';
 
     if (!supabaseUrl || !supabaseKey) {
         throw new Error(
-            'Supabase nao configurado. Defina IMAVY_SUPABASE_URL e IMAVY_SUPABASE_SERVICE_KEY (ou SUPABASE_URL e SUPABASE_KEY).'
+            'Supabase nao configurado. Defina IMAVY_SUPABASE_URL e IMAVY_SUPABASE_SERVICE_KEY (ou SUPABASE_URL e SUPABASE_KEY). Tambem aceita IMAVY_SUPABASE_ANON_KEY/PUBLISHABLE.'
         );
     }
 
