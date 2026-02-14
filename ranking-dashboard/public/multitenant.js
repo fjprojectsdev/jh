@@ -59,6 +59,10 @@ async function apiFetch(path, options = {}) {
   });
 
   const body = await response.json().catch(() => ({}));
+  if (body && typeof body === 'object' && body.ok === false) {
+    throw new Error(body.error || 'Erro retornado pela API.');
+  }
+
   if (!response.ok) {
     throw new Error(body.error || `Erro HTTP ${response.status}`);
   }

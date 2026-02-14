@@ -38,6 +38,22 @@ function getAuthToken() {
     }
 }
 
+async function fetchComAuth(url, options = {}) {
+    const token = getAuthToken();
+    const headers = {
+        ...(options.headers || {})
+    };
+
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+
+    return fetch(url, {
+        ...options,
+        headers
+    });
+}
+
 function decodeJwtPayload(token) {
     if (!token || typeof token !== 'string') {
         return null;
@@ -605,10 +621,10 @@ function shouldUseSupabaseSource(options) {
 }
 
 async function carregarGruposDoSupabase() {
-    const response = await fetch('/api/grupos-texto', { method: 'GET' });
+    const response = await fetchComAuth('/api/grupos-texto', { method: 'GET' });
     const body = await response.json();
 
-    if (!response.ok) {
+    if (!response.ok || (body && body.ok === false)) {
         throw new Error(body.error || 'Erro ao listar grupos do Supabase.');
     }
 
@@ -727,10 +743,10 @@ async function carregarInteracoesDoSupabase(dataInicio, dataFim, grupoSelecionad
         query.set('grupoSelecionado', grupoSelecionado);
     }
 
-    const response = await fetch(`/api/interacoes-texto?${query.toString()}`, { method: 'GET' });
+    const response = await fetchComAuth(`/api/interacoes-texto?${query.toString()}`, { method: 'GET' });
     const body = await response.json();
 
-    if (!response.ok) {
+    if (!response.ok || (body && body.ok === false)) {
         throw new Error(body.error || 'Erro ao carregar interacoes do Supabase.');
     }
 
@@ -758,7 +774,7 @@ async function gerarDashboard(options = {}) {
             atualizarSeletorGrupos(interacoes);
         }
 
-        const response = await fetch('/api/ranking-texto', {
+        const response = await fetchComAuth('/api/ranking-texto', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -773,7 +789,7 @@ async function gerarDashboard(options = {}) {
         });
 
         const body = await response.json();
-        if (!response.ok) {
+        if (!response.ok || (body && body.ok === false)) {
             throw new Error(body.error || 'Erro ao gerar ranking.');
         }
 

@@ -71,12 +71,19 @@ function getSupabaseCredentials() {
 }
 
 const { supabaseUrl, supabaseKey, configured } = getSupabaseCredentials();
+const allowFallback = String(process.env.IMAVY_ALLOW_SUPABASE_FALLBACK || 'false').toLowerCase() === 'true';
 
-if (!configured) {
+if (!configured && !allowFallback) {
+    throw new Error(
+        'Supabase nao configurado. Defina IMAVY_SUPABASE_URL e IMAVY_SUPABASE_SERVICE_KEY (ou SUPABASE_URL e SUPABASE_KEY).'
+    );
+}
+
+if (!configured && allowFallback) {
     console.warn('⚠️ Supabase nao configurado no runtime. Executando em modo fallback (sem persistencia no Supabase).');
 }
 
-export const supabase = configured
+export const supabase = (configured || !allowFallback)
     ? createClient(supabaseUrl, supabaseKey)
     : createFallbackSupabaseClient();
 

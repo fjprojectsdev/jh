@@ -6,7 +6,7 @@ const {
     normalizePlano
 } = require('../models/cliente.js');
 const { sanitizeText, sanitizeEmail } = require('../services/supabaseTenantClient.js');
-const { JWT_SECRET } = require('./authMiddleware.js');
+const { getJwtSecret } = require('./authMiddleware.js');
 
 const TOKEN_EXPIRATION = process.env.IMAVY_TOKEN_EXPIRATION || '12h';
 
@@ -16,12 +16,13 @@ function validarEmail(email) {
 }
 
 function gerarToken(cliente) {
+    const jwtSecret = getJwtSecret();
     return jwt.sign(
         {
             clienteId: cliente.id,
             plano: cliente.plano
         },
-        JWT_SECRET,
+        jwtSecret,
         { expiresIn: TOKEN_EXPIRATION }
     );
 }

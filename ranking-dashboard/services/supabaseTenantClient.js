@@ -4,10 +4,6 @@ function getSupabaseConfig() {
         key:
             process.env.IMAVY_SUPABASE_SERVICE_KEY ||
             process.env.SUPABASE_SERVICE_ROLE_KEY ||
-            process.env.IMAVY_SUPABASE_ANON_KEY ||
-            process.env.SUPABASE_ANON_KEY ||
-            process.env.IMAVY_SUPABASE_PUBLISHABLE_KEY ||
-            process.env.SUPABASE_PUBLISHABLE_KEY ||
             process.env.SUPABASE_KEY ||
             ''
     };
@@ -18,7 +14,7 @@ function assertSupabaseConfig() {
 
     if (!url || !key) {
         throw new Error(
-            'Supabase nao configurado. Defina IMAVY_SUPABASE_URL e IMAVY_SUPABASE_ANON_KEY (ou SUPABASE_URL e SUPABASE_KEY).'
+            'Supabase multi-tenant nao configurado com service role. Defina IMAVY_SUPABASE_URL e IMAVY_SUPABASE_SERVICE_KEY (ou SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY/SUPABASE_KEY com service role).'
         );
     }
 }

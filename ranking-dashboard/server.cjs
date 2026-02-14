@@ -11,6 +11,7 @@ const {
 const { handleAuthRoutes } = require('./routes/authRoutes.js');
 const { handleGrupoRoutes } = require('./routes/grupoRoutes.js');
 const { handleDashboardRoutes } = require('./routes/dashboardRoutes.js');
+const { verificarToken } = require('./auth/authMiddleware.js');
 
 const HOST = process.env.RANKING_DASHBOARD_HOST || '0.0.0.0';
 const PORT = Number(process.env.RANKING_DASHBOARD_PORT || 3010);
@@ -114,6 +115,7 @@ function serveStaticFile(req, res, urlPath) {
 
 async function handleApi(req, res, parsedUrl) {
     const pathname = parsedUrl.pathname;
+    const authHelpers = { sendJson };
 
     if (req.method === 'GET' && pathname === '/api/health') {
         sendJson(res, 200, {
@@ -125,6 +127,10 @@ async function handleApi(req, res, parsedUrl) {
     }
 
     if (req.method === 'POST' && pathname === '/api/ranking-texto') {
+        if (!(await verificarToken(req, res, authHelpers))) {
+            return;
+        }
+
         try {
             const payload = await readJsonBody(req);
             const {
@@ -152,6 +158,10 @@ async function handleApi(req, res, parsedUrl) {
     }
 
     if (req.method === 'GET' && pathname === '/api/grupos-texto') {
+        if (!(await verificarToken(req, res, authHelpers))) {
+            return;
+        }
+
         try {
             const grupos = await fetchGroupsFromSupabase();
             sendJson(res, 200, { grupos });
@@ -166,6 +176,10 @@ async function handleApi(req, res, parsedUrl) {
     }
 
     if (req.method === 'GET' && pathname === '/api/interacoes-texto') {
+        if (!(await verificarToken(req, res, authHelpers))) {
+            return;
+        }
+
         try {
             const dataInicio = parsedUrl.searchParams.get('dataInicio');
             const dataFim = parsedUrl.searchParams.get('dataFim');
@@ -190,7 +204,7 @@ async function handleApi(req, res, parsedUrl) {
 
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {

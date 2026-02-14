@@ -1,7 +1,13 @@
 const jwt = require('jsonwebtoken');
 const { findGrupoById } = require('../models/grupo.js');
 
-const JWT_SECRET = process.env.IMAVY_JWT_SECRET || process.env.JWT_SECRET || 'imavy_multitenant_secret_change_me';
+function getJwtSecret() {
+    const secret = process.env.IMAVY_JWT_SECRET || process.env.JWT_SECRET || '';
+    if (!secret || secret.length < 24) {
+        throw new Error('JWT secret nao configurado. Defina IMAVY_JWT_SECRET (>=24 caracteres).');
+    }
+    return secret;
+}
 
 function parseBearerToken(req) {
     const authHeader = req.headers && (req.headers.authorization || req.headers.Authorization);
@@ -25,7 +31,8 @@ async function verificarToken(req, res, helpers) {
     }
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const jwtSecret = getJwtSecret();
+        const decoded = jwt.verify(token, jwtSecret);
         req.auth = {
             clienteId: decoded.clienteId,
             plano: decoded.plano,
@@ -33,7 +40,12 @@ async function verificarToken(req, res, helpers) {
         };
 
         return true;
-    } catch (_) {
+    } catch (error) {
+        if (error && error.message && error.message.includes('JWT secret nao configurado')) {
+            helpers.sendJson(res, 500, { ok: false, error: error.message });
+            return false;
+        }
+
         helpers.sendJson(res, 401, { ok: false, error: 'Token invalido ou expirado.' });
         return false;
     }
@@ -57,7 +69,7 @@ async function verificarGrupoDoCliente(req, res, helpers, grupoId) {
 }
 
 module.exports = {
-    JWT_SECRET,
+    getJwtSecret,
     verificarToken,
     verificarGrupoDoCliente
 };

@@ -36,36 +36,59 @@ alter table public.clientes enable row level security;
 alter table public.grupos enable row level security;
 alter table public.interacoes_cliente enable row level security;
 
--- Back-end usa chave anon por HTTP REST.
--- Mantemos politicas permissivas aqui para compatibilidade imediata.
+-- Seguranca:
+-- 1) remove politicas antigas permissivas para anon
+-- 2) bloqueia acesso anon direto nas tabelas multi-tenant
+-- 3) backend deve usar service_role key nas rotas multi-cliente
 
 do $$
 begin
-  if not exists (
+  if exists (
     select 1 from pg_policies
     where schemaname='public' and tablename='clientes' and policyname='clientes_select_anon'
   ) then
-    create policy clientes_select_anon on public.clientes for select to anon using (true);
+    drop policy clientes_select_anon on public.clientes;
   end if;
 
-  if not exists (
+  if exists (
     select 1 from pg_policies
     where schemaname='public' and tablename='clientes' and policyname='clientes_insert_anon'
   ) then
-    create policy clientes_insert_anon on public.clientes for insert to anon with check (true);
+    drop policy clientes_insert_anon on public.clientes;
   end if;
 
-  if not exists (
+  if exists (
     select 1 from pg_policies
     where schemaname='public' and tablename='grupos' and policyname='grupos_all_anon'
   ) then
-    create policy grupos_all_anon on public.grupos for all to anon using (true) with check (true);
+    drop policy grupos_all_anon on public.grupos;
+  end if;
+
+  if exists (
+    select 1 from pg_policies
+    where schemaname='public' and tablename='interacoes_cliente' and policyname='interacoes_cliente_all_anon'
+  ) then
+    drop policy interacoes_cliente_all_anon on public.interacoes_cliente;
   end if;
 
   if not exists (
     select 1 from pg_policies
-    where schemaname='public' and tablename='interacoes_cliente' and policyname='interacoes_cliente_all_anon'
+    where schemaname='public' and tablename='clientes' and policyname='clientes_deny_anon'
   ) then
-    create policy interacoes_cliente_all_anon on public.interacoes_cliente for all to anon using (true) with check (true);
+    create policy clientes_deny_anon on public.clientes for all to anon using (false) with check (false);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname='public' and tablename='grupos' and policyname='grupos_deny_anon'
+  ) then
+    create policy grupos_deny_anon on public.grupos for all to anon using (false) with check (false);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname='public' and tablename='interacoes_cliente' and policyname='interacoes_cliente_deny_anon'
+  ) then
+    create policy interacoes_cliente_deny_anon on public.interacoes_cliente for all to anon using (false) with check (false);
   end if;
 end $$;
