@@ -1,4 +1,4 @@
-﻿const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 // Arredonda numeros para 2 casas para manter a saida consistente.
 function round2(value) {

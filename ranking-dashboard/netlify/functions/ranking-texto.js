@@ -1,4 +1,4 @@
-﻿const gerarRankingParticipantesTexto = require('./ranking-engine.cjs');
+const gerarRankingParticipantesTexto = require('./ranking-engine.cjs');
 
 function response(statusCode, body) {
     return {
