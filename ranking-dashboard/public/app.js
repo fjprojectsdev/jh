@@ -2,8 +2,14 @@ const state = {
     ultimoResultado: null,
     rankingEnriquecido: [],
     insightsPremium: [],
-    premiumMeta: null
+    premiumMeta: null,
+    realtimeEnabled: false,
+    realtimeClient: null,
+    realtimeChannel: null,
+    realtimeDebounceTimer: null
 };
+
+const realtimeConfig = window.ImavyRealtimeConfig || {};
 
 const SAMPLE_DATA = [
     { nome: 'Joao', data: '2026-02-01', grupo: 'Vendas' },
@@ -43,6 +49,57 @@ function setStatus(text, type) {
     } else {
         el.classList.add('delta-zero');
     }
+}
+
+function setFonteDados(text) {
+    const el = byId('fonteDados');
+    if (el) {
+        el.textContent = text;
+    }
+}
+
+function setLiveBadge(text, statusType) {
+    const el = byId('liveBadge');
+    if (!el) {
+        return;
+    }
+
+    el.textContent = text;
+    el.classList.remove('delta-pos', 'delta-neg', 'delta-zero');
+
+    if (statusType === 'ok') {
+        el.classList.add('delta-pos');
+    } else if (statusType === 'error') {
+        el.classList.add('delta-neg');
+    } else {
+        el.classList.add('delta-zero');
+    }
+}
+
+function isSupabaseRealtimeReady() {
+    return Boolean(
+        window.supabase &&
+        typeof window.supabase.createClient === 'function' &&
+        realtimeConfig.supabaseUrl &&
+        realtimeConfig.supabaseAnonKey
+    );
+}
+
+function createRealtimeClient() {
+    if (!isSupabaseRealtimeReady()) {
+        throw new Error('Configuracao Supabase Realtime indisponivel no frontend.');
+    }
+
+    if (state.realtimeClient) {
+        return state.realtimeClient;
+    }
+
+    state.realtimeClient = window.supabase.createClient(
+        realtimeConfig.supabaseUrl,
+        realtimeConfig.supabaseAnonKey
+    );
+
+    return state.realtimeClient;
 }
 
 function parseInputJson() {
@@ -469,18 +526,166 @@ function renderResultado(resultado, rankingEnriquecido, premiumMeta) {
     byId('resultados').classList.remove('hidden');
 }
 
-async function gerarDashboard() {
+function shouldUseSupabaseSource(options) {
+    if (options && options.forceSupabase) {
+        return true;
+    }
+
+    return state.realtimeEnabled;
+}
+
+async function carregarGruposDoSupabase() {
+    const response = await fetch('/api/grupos-texto', { method: 'GET' });
+    const body = await response.json();
+
+    if (!response.ok) {
+        throw new Error(body.error || 'Erro ao listar grupos do Supabase.');
+    }
+
+    if (!body || !Array.isArray(body.grupos)) {
+        return;
+    }
+
+    const select = byId('grupoSelecionado');
+    const atual = select.value;
+    const existentes = new Set(Array.from(select.options).map((opt) => opt.value));
+
+    for (const grupo of body.grupos) {
+        if (!grupo || existentes.has(grupo)) {
+            continue;
+        }
+
+        const option = document.createElement('option');
+        option.value = grupo;
+        option.textContent = grupo;
+        select.appendChild(option);
+        existentes.add(grupo);
+    }
+
+    if (atual && existentes.has(atual)) {
+        select.value = atual;
+    }
+}
+
+function agendarAtualizacaoRealtime() {
+    if (!state.realtimeEnabled) {
+        return;
+    }
+
+    if (state.realtimeDebounceTimer) {
+        clearTimeout(state.realtimeDebounceTimer);
+    }
+
+    state.realtimeDebounceTimer = setTimeout(() => {
+        gerarDashboard({ forceSupabase: true, silentStatus: true }).catch(() => {
+            // status tratado na pr??pria fun????o.
+        });
+    }, 700);
+}
+
+async function conectarTempoReal() {
     try {
-        setStatus('Processando ranking premium...', 'ok');
-        const interacoes = parseInputJson();
-        atualizarSeletorGrupos(interacoes);
+        const client = createRealtimeClient();
+        const tableName = realtimeConfig.tableName || 'interacoes_texto';
+
+        if (state.realtimeChannel) {
+            try {
+                client.removeChannel(state.realtimeChannel);
+            } catch (_) {}
+            state.realtimeChannel = null;
+        }
+
+        state.realtimeEnabled = true;
+        setFonteDados('Supabase Realtime');
+        setLiveBadge('Conectando...', 'loading');
+
+        state.realtimeChannel = client
+            .channel('imavy-ranking-live')
+            .on(
+                'postgres_changes',
+                { event: 'INSERT', schema: 'public', table: tableName },
+                () => {
+                    agendarAtualizacaoRealtime();
+                }
+            )
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    setLiveBadge('Online', 'ok');
+                } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    setLiveBadge('Erro', 'error');
+                } else {
+                    setLiveBadge(status || 'Aguardando', 'loading');
+                }
+            });
+
+        await carregarGruposDoSupabase();
+        await gerarDashboard({ forceSupabase: true });
+    } catch (error) {
+        state.realtimeEnabled = false;
+        setFonteDados('Manual (JSON)');
+        setLiveBadge('Offline', 'error');
+        setStatus(error.message || 'Falha ao conectar em tempo real.', 'error');
+    }
+}
+
+function desconectarTempoReal() {
+    state.realtimeEnabled = false;
+
+    if (state.realtimeDebounceTimer) {
+        clearTimeout(state.realtimeDebounceTimer);
+        state.realtimeDebounceTimer = null;
+    }
+
+    if (state.realtimeClient && state.realtimeChannel) {
+        try {
+            state.realtimeClient.removeChannel(state.realtimeChannel);
+        } catch (_) {}
+    }
+
+    state.realtimeChannel = null;
+    setFonteDados('Manual (JSON)');
+    setLiveBadge('Offline', 'loading');
+    setStatus('Tempo real desconectado. Modo manual ativo.', 'ok');
+}
+
+async function carregarInteracoesDoSupabase(dataInicio, dataFim, grupoSelecionado) {
+    const query = new URLSearchParams();
+    query.set('dataInicio', dataInicio);
+    query.set('dataFim', dataFim);
+
+    if (grupoSelecionado) {
+        query.set('grupoSelecionado', grupoSelecionado);
+    }
+
+    const response = await fetch(`/api/interacoes-texto?${query.toString()}`, { method: 'GET' });
+    const body = await response.json();
+
+    if (!response.ok) {
+        throw new Error(body.error || 'Erro ao carregar interacoes do Supabase.');
+    }
+
+    return Array.isArray(body.interacoes) ? body.interacoes : [];
+}
+
+async function gerarDashboard(options = {}) {
+    try {
+        if (!options.silentStatus) {
+            setStatus('Processando ranking premium...', 'ok');
+        }
 
         const dataInicio = byId('dataInicio').value;
         const dataFim = byId('dataFim').value;
         const grupoSelecionado = byId('grupoSelecionado').value;
+        const usarSupabase = shouldUseSupabaseSource(options);
 
         if (!dataInicio || !dataFim) {
             throw new Error('Informe data inicio e data fim.');
+        }
+
+        let interacoes = [];
+        if (!usarSupabase) {
+            interacoes = parseInputJson();
+            atualizarSeletorGrupos(interacoes);
         }
 
         const response = await fetch('/api/ranking-texto', {
@@ -488,12 +693,22 @@ async function gerarDashboard() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ interacoes, dataInicio, dataFim, grupoSelecionado })
+            body: JSON.stringify({
+                interacoes: usarSupabase ? undefined : interacoes,
+                dataInicio,
+                dataFim,
+                grupoSelecionado,
+                usarSupabase
+            })
         });
 
         const body = await response.json();
         if (!response.ok) {
             throw new Error(body.error || 'Erro ao gerar ranking.');
+        }
+
+        if (usarSupabase) {
+            interacoes = await carregarInteracoesDoSupabase(dataInicio, dataFim, grupoSelecionado);
         }
 
         const rankingEnriquecido = enrichRanking(body);
@@ -508,10 +723,12 @@ async function gerarDashboard() {
 
         renderResultado(body, rankingEnriquecido, premiumMeta);
 
-        if (grupoSelecionado) {
-            setStatus(`iMavy Analytics 2.5 atualizado para o grupo "${grupoSelecionado}".`, 'ok');
-        } else {
-            setStatus('iMavy Analytics 2.5 atualizado para todos os grupos.', 'ok');
+        if (!options.silentStatus) {
+            if (grupoSelecionado) {
+                setStatus(`iMavy Analytics 2.5 atualizado para o grupo "${grupoSelecionado}".`, 'ok');
+            } else {
+                setStatus('iMavy Analytics 2.5 atualizado para todos os grupos.', 'ok');
+            }
         }
     } catch (error) {
         setStatus(error.message || 'Erro inesperado.', 'error');
@@ -528,6 +745,10 @@ function carregarExemplo() {
 }
 
 function onInteracoesChange() {
+    if (state.realtimeEnabled) {
+        return;
+    }
+
     try {
         const interacoes = parseInputJson();
         atualizarSeletorGrupos(interacoes);
@@ -635,6 +856,8 @@ function init() {
     byId('exportCsvBtn').addEventListener('click', exportarCsv);
     byId('exportJsonBtn').addEventListener('click', exportarJson);
     byId('copiarBtn').addEventListener('click', copiarRanking);
+    byId('conectarTempoRealBtn').addEventListener('click', conectarTempoReal);
+    byId('desconectarTempoRealBtn').addEventListener('click', desconectarTempoReal);
     byId('interacoesJson').addEventListener('input', onInteracoesChange);
 
     initQuickFilters();
@@ -645,8 +868,11 @@ function init() {
 
     byId('dataInicio').value = isoHoje;
     byId('dataFim').value = isoHoje;
+    setFonteDados('Manual (JSON)');
+    setLiveBadge('Offline', 'loading');
 
     carregarExemplo();
 }
 
 window.addEventListener('DOMContentLoaded', init);
+

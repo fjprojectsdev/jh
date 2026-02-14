@@ -17,6 +17,7 @@
             <p class="eyebrow">iMavy Analytics 2.5</p>
             <h1>Dashboard Premium de Ranking de Participantes</h1>
             <p class="subtitle">Analise mensagens por periodo, risco, concentracao e projecao estrategica.</p>
+            <p class="subtitle"><a href="./multitenant.html">Abrir modo multi-cliente</a></p>
         </header>
 
         <section class="panel input-panel">
@@ -56,9 +57,12 @@
                 <button id="exportCsvBtn" type="button" class="ghost">Exportar CSV</button>
                 <button id="exportJsonBtn" type="button" class="ghost">Exportar JSON</button>
                 <button id="copiarBtn" type="button" class="ghost">Copiar ranking</button>
+                <button id="conectarTempoRealBtn" type="button" class="ghost">Conectar tempo real</button>
+                <button id="desconectarTempoRealBtn" type="button" class="ghost">Desconectar tempo real</button>
             </div>
 
             <p id="status" class="status">Pronto para gerar ranking.</p>
+            <p class="status">Fonte: <strong id="fonteDados">Manual (JSON)</strong> | Realtime: <strong id="liveBadge" class="delta-zero">Offline</strong></p>
         </section>
 
         <section id="resultados" class="results hidden">
@@ -155,6 +159,8 @@
         </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="./realtimeConfig.js"></script>
     <script src="./analyticsPremium.js"></script>
     <script src="./app.js"></script>
 </body>

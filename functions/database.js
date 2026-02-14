@@ -1,8 +1,26 @@
 // Supabase Database
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://lxqyacryiizzcyrkcfya.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx4cXlhY3J5aWl6emN5cmtjZnlhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM4MjE1ODQsImV4cCI6MjA3OTM5NzU4NH0.hiZwcpP-3O8miqAkZ9ht9QGtngJw8Hc0Gg6xAaMQRAE';
+function getSupabaseCredentials() {
+    const supabaseUrl = process.env.IMAVY_SUPABASE_URL || process.env.SUPABASE_URL || '';
+    const supabaseKey =
+        process.env.IMAVY_SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.IMAVY_SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_KEY ||
+        '';
+
+    if (!supabaseUrl || !supabaseKey) {
+        throw new Error(
+            'Supabase nao configurado. Defina IMAVY_SUPABASE_URL e IMAVY_SUPABASE_SERVICE_KEY (ou SUPABASE_URL e SUPABASE_KEY).'
+        );
+    }
+
+    return { supabaseUrl, supabaseKey };
+}
+
+const { supabaseUrl, supabaseKey } = getSupabaseCredentials();
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 

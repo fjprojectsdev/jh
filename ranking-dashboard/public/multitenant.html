@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>iMavy Multi-Cliente</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <style>
+    .mt-grid { display:grid; gap:12px; }
+    .mt-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .mt-actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .mt-inline { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .mt-item { border:1px solid var(--line); border-radius:10px; padding:10px; background:#fff; }
+    .mt-small { font-size:.85rem; color:var(--muted); }
+    @media (max-width:900px){ .mt-2 { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="bg-layer"></div>
+  <main class="container">
+    <header class="hero">
+      <p class="eyebrow">iMavy SaaS Core</p>
+      <h1>Multi-Cliente</h1>
+      <p class="subtitle">Autentica??o por cliente, grupos isolados e ranking filtrado por tenant.</p>
+    </header>
+
+    <section class="panel mt-grid mt-2">
+      <article class="panel">
+        <h2>Registro</h2>
+        <label><span>Nome</span><input id="regNome" type="text" /></label>
+        <label><span>Email</span><input id="regEmail" type="email" /></label>
+        <label><span>Senha</span><input id="regSenha" type="password" /></label>
+        <label>
+          <span>Plano</span>
+          <select id="regPlano">
+            <option value="free">free</option>
+            <option value="pro">pro</option>
+            <option value="enterprise">enterprise</option>
+          </select>
+        </label>
+        <div class="mt-actions"><button id="btnRegistrar" type="button">Registrar</button></div>
+      </article>
+
+      <article class="panel">
+        <h2>Login</h2>
+        <label><span>Email</span><input id="logEmail" type="email" /></label>
+        <label><span>Senha</span><input id="logSenha" type="password" /></label>
+        <div class="mt-actions">
+          <button id="btnLogin" type="button">Entrar</button>
+          <button id="btnLogout" type="button" class="ghost">Sair</button>
+        </div>
+        <p class="mt-small">Token: <strong id="tokenStatus">nao autenticado</strong></p>
+      </article>
+    </section>
+
+    <section class="panel">
+      <h2>Grupos do Cliente</h2>
+      <div class="mt-grid mt-2">
+        <label><span>ID do Grupo (ex: 123@g.us)</span><input id="grupoId" type="text" /></label>
+        <label><span>Nome do Grupo</span><input id="grupoNome" type="text" /></label>
+      </div>
+      <div class="mt-actions"><button id="btnCriarGrupo" type="button">Criar Grupo</button></div>
+      <div id="gruposLista" class="mt-grid"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Ranking do Cliente</h2>
+      <div class="mt-grid mt-2">
+        <label><span>Data in?cio</span><input id="rkInicio" type="date" /></label>
+        <label><span>Data fim</span><input id="rkFim" type="date" /></label>
+      </div>
+      <label>
+        <span>Grupo (opcional)</span>
+        <select id="rkGrupo"><option value="">Todos os grupos do cliente</option></select>
+      </label>
+      <div class="mt-actions"><button id="btnRanking" type="button">Gerar Ranking</button></div>
+      <pre id="rankingOut" class="mt-item" style="max-height:360px;overflow:auto"></pre>
+    </section>
+
+    <p id="mtStatus" class="status">Pronto.</p>
+  </main>
+  <script src="./multitenant.js"></script>
+</body>
+</html>

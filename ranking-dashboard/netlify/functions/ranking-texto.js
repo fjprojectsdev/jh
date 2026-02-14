@@ -1,4 +1,5 @@
 const gerarRankingParticipantesTexto = require('./ranking-engine.cjs');
+const { fetchInteractionsFromSupabase } = require('../../realtimeSupabaseSource.cjs');
 
 function response(statusCode, body) {
     return {
@@ -24,8 +25,20 @@ exports.handler = async (event) => {
 
     try {
         const payload = event.body ? JSON.parse(event.body) : {};
-        const { interacoes, dataInicio, dataFim, grupoSelecionado } = payload;
-        const resultado = gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim, grupoSelecionado);
+        const {
+            interacoes,
+            dataInicio,
+            dataFim,
+            grupoSelecionado,
+            usarSupabase
+        } = payload;
+
+        const fonteSupabase = Boolean(usarSupabase) || !Array.isArray(interacoes);
+        const baseInteracoes = fonteSupabase
+            ? await fetchInteractionsFromSupabase({ dataInicio, dataFim, grupoSelecionado })
+            : interacoes;
+
+        const resultado = gerarRankingParticipantesTexto(baseInteracoes, dataInicio, dataFim, grupoSelecionado);
         return response(200, resultado);
     } catch (error) {
         return response(400, {

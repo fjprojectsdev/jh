@@ -4,6 +4,13 @@ const path = require('path');
 const { URL } = require('url');
 
 const gerarRankingParticipantesTexto = require('../functions/rankingParticipantesTextos.cjs');
+const {
+    fetchInteractionsFromSupabase,
+    fetchGroupsFromSupabase
+} = require('./realtimeSupabaseSource.cjs');
+const { handleAuthRoutes } = require('./routes/authRoutes.js');
+const { handleGrupoRoutes } = require('./routes/grupoRoutes.js');
+const { handleDashboardRoutes } = require('./routes/dashboardRoutes.js');
 
 const HOST = process.env.RANKING_DASHBOARD_HOST || '0.0.0.0';
 const PORT = Number(process.env.RANKING_DASHBOARD_PORT || 3010);
@@ -105,7 +112,9 @@ function serveStaticFile(req, res, urlPath) {
     });
 }
 
-async function handleApi(req, res, pathname) {
+async function handleApi(req, res, parsedUrl) {
+    const pathname = parsedUrl.pathname;
+
     if (req.method === 'GET' && pathname === '/api/health') {
         sendJson(res, 200, {
             ok: true,
@@ -118,14 +127,56 @@ async function handleApi(req, res, pathname) {
     if (req.method === 'POST' && pathname === '/api/ranking-texto') {
         try {
             const payload = await readJsonBody(req);
-            const { interacoes, dataInicio, dataFim, grupoSelecionado } = payload || {};
-            const resultado = gerarRankingParticipantesTexto(interacoes, dataInicio, dataFim, grupoSelecionado);
+            const {
+                interacoes,
+                dataInicio,
+                dataFim,
+                grupoSelecionado,
+                usarSupabase
+            } = payload || {};
+
+            const fonteSupabase = Boolean(usarSupabase) || !Array.isArray(interacoes);
+            const baseInteracoes = fonteSupabase
+                ? await fetchInteractionsFromSupabase({ dataInicio, dataFim, grupoSelecionado })
+                : interacoes;
+            const resultado = gerarRankingParticipantesTexto(baseInteracoes, dataInicio, dataFim, grupoSelecionado);
             sendJson(res, 200, resultado);
             return;
         } catch (error) {
             sendJson(res, 400, {
                 ok: false,
                 error: error.message || 'Erro ao processar requisicao.'
+            });
+            return;
+        }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/grupos-texto') {
+        try {
+            const grupos = await fetchGroupsFromSupabase();
+            sendJson(res, 200, { grupos });
+            return;
+        } catch (error) {
+            sendJson(res, 400, {
+                ok: false,
+                error: error.message || 'Erro ao listar grupos.'
+            });
+            return;
+        }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/interacoes-texto') {
+        try {
+            const dataInicio = parsedUrl.searchParams.get('dataInicio');
+            const dataFim = parsedUrl.searchParams.get('dataFim');
+            const grupoSelecionado = parsedUrl.searchParams.get('grupoSelecionado') || '';
+            const interacoes = await fetchInteractionsFromSupabase({ dataInicio, dataFim, grupoSelecionado });
+            sendJson(res, 200, { interacoes });
+            return;
+        } catch (error) {
+            sendJson(res, 400, {
+                ok: false,
+                error: error.message || 'Erro ao listar interacoes.'
             });
             return;
         }
@@ -140,7 +191,7 @@ async function handleApi(req, res, pathname) {
 const server = http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
     if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -149,9 +200,26 @@ const server = http.createServer(async (req, res) => {
     }
 
     const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const helpers = {
+        sendJson,
+        readJsonBody
+    };
+
+    // Rotas multi-cliente adicionadas de forma isolada.
+    if (await handleAuthRoutes(req, res, parsedUrl, helpers)) {
+        return;
+    }
+
+    if (await handleGrupoRoutes(req, res, parsedUrl, helpers)) {
+        return;
+    }
+
+    if (await handleDashboardRoutes(req, res, parsedUrl, helpers)) {
+        return;
+    }
 
     if (parsedUrl.pathname.startsWith('/api/')) {
-        await handleApi(req, res, parsedUrl.pathname);
+        await handleApi(req, res, parsedUrl);
         return;
     }
 
