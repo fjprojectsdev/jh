@@ -7,6 +7,26 @@
   directory = "netlify/functions"
 
 [[redirects]]
+  from = "/api/auth/*"
+  to = "/.netlify/functions/auth/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/grupos"
+  to = "/.netlify/functions/grupos"
+  status = 200
+
+[[redirects]]
+  from = "/api/grupos/*"
+  to = "/.netlify/functions/grupos/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/api/dashboard/*"
+  to = "/.netlify/functions/dashboard/:splat"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
