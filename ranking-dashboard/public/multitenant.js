@@ -51,6 +51,14 @@ function setToken(token) {
     localStorage.removeItem(STORAGE_KEY);
   }
   byId('tokenStatus').textContent = token ? 'autenticado' : 'nao autenticado';
+  toggleLoginOnlySections(Boolean(token));
+}
+
+function toggleLoginOnlySections(isAuthenticated) {
+  const gruposCard = byId('gruposCard');
+  if (gruposCard) {
+    gruposCard.classList.toggle('hidden', !isAuthenticated);
+  }
 }
 
 function formatResumoSync(sync) {
