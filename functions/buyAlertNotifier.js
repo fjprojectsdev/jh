@@ -1,0 +1,325 @@
+import { createRequire } from 'module';
+import { logger } from './logger.js';
+
+const require = createRequire(import.meta.url);
+
+if (typeof global.WebSocket === 'undefined') {
+    global.WebSocket = require('ws');
+}
+
+const { JsonRpcProvider } = require('ethers');
+const { BuyDetector } = require('../imavy-bsc-buy-notifier/src/bsc/buyDetector/index.js');
+const { BscSwapListener } = require('../imavy-bsc-buy-notifier/src/bsc/listener/index.js');
+const { DedupFilter } = require('../imavy-bsc-buy-notifier/src/filters/dedup/index.js');
+const { CooldownFilter } = require('../imavy-bsc-buy-notifier/src/filters/cooldown/index.js');
+const { MevFilter } = require('../imavy-bsc-buy-notifier/src/filters/mev/index.js');
+const { BnbUsdPriceService } = require('../imavy-bsc-buy-notifier/src/pricing/bnbUsd/index.js');
+const { TOKENS, WBNB } = require('../imavy-bsc-buy-notifier/src/config/tokens.js');
+
+export const BUY_ALERT_GROUP = '120363420942677345@g.us';
+
+let runtime = null;
+
+function env(name, fallback = '') {
+    const value = process.env[name];
+    if (value === undefined || value === null || String(value).trim() === '') {
+        return fallback;
+    }
+    return String(value).trim();
+}
+
+function envNumber(name, fallback) {
+    const parsed = Number(env(name, String(fallback)));
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function envBoolean(name, fallback = false) {
+    const raw = env(name, fallback ? 'true' : 'false').toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+function envNumberList(name, fallback) {
+    const raw = env(name, '');
+    if (!raw) {
+        return fallback;
+    }
+    const list = raw
+        .split(',')
+        .map((item) => Number(item.trim()))
+        .filter((item) => Number.isFinite(item) && item > 0);
+    return list.length > 0 ? list : fallback;
+}
+
+function shortWallet(address) {
+    const safe = String(address || '').trim();
+    if (!safe.startsWith('0x') || safe.length < 10) {
+        return '0x????...????';
+    }
+    return `${safe.slice(0, 6)}...${safe.slice(-4)}`;
+}
+
+function formatUsd(value) {
+    return Number(value || 0).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+
+function formatTokenAmount(value) {
+    const number = Number(value || 0);
+    if (!Number.isFinite(number) || number <= 0) {
+        return '0';
+    }
+    if (number >= 1_000_000) {
+        return number.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    }
+    if (number >= 10_000) {
+        return number.toLocaleString('en-US', { maximumFractionDigits: 2 });
+    }
+    if (number >= 1) {
+        return number.toLocaleString('en-US', { maximumFractionDigits: 4 });
+    }
+    return number.toLocaleString('en-US', { maximumFractionDigits: 8 });
+}
+
+function buildBuyAlertMessage(payload) {
+    return [
+        `🟢 NOVA COMPRA | ${payload.symbol}`,
+        '',
+        `💰 USD: $${formatUsd(payload.usdValue)}`,
+        `🪙 Tokens: ${formatTokenAmount(payload.tokenOut)}`,
+        `👤 Wallet: ${shortWallet(payload.wallet)}`,
+        `🔗 Tx: https://bscscan.com/tx/${payload.txHash}`,
+        `📊 Chart: https://dexscreener.com/bsc/${payload.pair}`,
+        '🌐 BSC'
+    ].join('\n');
+}
+
+function buildConfig() {
+    return {
+        bscWsUrl: env('BSC_WS_URL', 'wss://bsc.publicnode.com'),
+        bscHttpUrl: env('BSC_HTTP_URL', 'https://bsc.publicnode.com'),
+        minUsdAlert: envNumber('MIN_USD_ALERT', 5),
+        tokenCooldownMs: envNumber('TOKEN_COOLDOWN_MS', 8_000),
+        dedupTtlMs: envNumber('DEDUP_TTL_MS', 24 * 60 * 60 * 1_000),
+        enableMevFilter: envBoolean('ENABLE_MEV_FILTER', true),
+        mevSwapLimit: envNumber('MEV_SWAP_LIMIT', 3),
+        bnbPriceUrl: env('BNB_PRICE_URL', 'https://api.mexc.com/api/v3/ticker/price?symbol=BNBUSDT'),
+        bnbPriceRefreshMs: envNumber('BNB_PRICE_REFRESH_MS', 60_000),
+        heartbeatMs: envNumber('HEARTBEAT_MS', 30_000),
+        pollIntervalMs: envNumber('POLL_INTERVAL_MS', 5_000),
+        pollBatchSize: envNumber('POLL_BATCH_SIZE', 200),
+        wsBackoffMs: envNumberList('WS_BACKOFF_STEPS_MS', [2_000, 5_000, 10_000, 20_000, 30_000, 45_000, 60_000])
+    };
+}
+
+async function sendBuyAlert(sock, text) {
+    try {
+        await sock.sendMessage(BUY_ALERT_GROUP, { text });
+        logger.info('✅ BUY ALERT enviado para TESTE IMAVY');
+    } catch (err) {
+        logger.error('❌ Erro ao enviar BUY ALERT', { error: err.message || String(err) });
+    }
+}
+
+async function stopRuntime() {
+    if (!runtime) {
+        return;
+    }
+
+    try {
+        if (runtime.listener) {
+            await runtime.listener.stop();
+        }
+    } catch (error) {
+        logger.warn('Falha ao parar listener BUY ALERT', { error: error.message });
+    }
+
+    try {
+        if (runtime.priceService) {
+            runtime.priceService.stop();
+        }
+    } catch (error) {
+        logger.warn('Falha ao parar precificacao BUY ALERT', { error: error.message });
+    }
+
+    try {
+        if (runtime.dedupFilter) {
+            runtime.dedupFilter.stop();
+        }
+    } catch (error) {
+        logger.warn('Falha ao parar dedup BUY ALERT', { error: error.message });
+    }
+
+    runtime = null;
+}
+
+export async function stopBuyAlertNotifier() {
+    await stopRuntime();
+}
+
+export async function startBuyAlertNotifier(sock) {
+    if (!sock) {
+        throw new Error('Socket Baileys nao fornecido para startBuyAlertNotifier.');
+    }
+
+    await stopRuntime();
+
+    const config = buildConfig();
+    logger.info('Iniciando BUY ALERT integrado ao bot principal', {
+        group: BUY_ALERT_GROUP,
+        tokens: TOKENS.map((token) => token.symbol)
+    });
+
+    const httpProvider = new JsonRpcProvider(config.bscHttpUrl);
+    const detectors = TOKENS.map((tokenConfig) => new BuyDetector({
+        tokenConfig,
+        wbnbAddress: WBNB,
+        logger
+    }));
+
+    for (const detector of detectors) {
+        await detector.initialize(httpProvider);
+    }
+
+    const dedupFilter = new DedupFilter(config.dedupTtlMs, logger);
+    dedupFilter.start();
+
+    const cooldownFilter = new CooldownFilter(config.tokenCooldownMs);
+    const mevFilter = new MevFilter({
+        provider: httpProvider,
+        swapTopic: BuyDetector.getSwapTopic(),
+        enabled: config.enableMevFilter,
+        maxSwapLogsPerTx: config.mevSwapLimit,
+        logger
+    });
+
+    const priceService = new BnbUsdPriceService({
+        url: config.bnbPriceUrl,
+        refreshMs: config.bnbPriceRefreshMs,
+        logger
+    });
+    await priceService.start();
+
+    const listener = new BscSwapListener({
+        wsUrl: config.bscWsUrl,
+        httpUrl: config.bscHttpUrl,
+        detectors,
+        heartbeatMs: config.heartbeatMs,
+        pollIntervalMs: config.pollIntervalMs,
+        pollBatchSize: config.pollBatchSize,
+        wsBackoffStepsMs: config.wsBackoffMs,
+        logger
+    });
+
+    listener.on('buy', async (buyEvent) => {
+        try {
+            const dedupKey = `${buyEvent.txHash}:${buyEvent.logIndex}`;
+            if (dedupFilter.isDuplicateAndMark(dedupKey)) {
+                logger.info('BUY IGNORADO: duplicado', {
+                    txHash: buyEvent.txHash,
+                    symbol: buyEvent.symbol,
+                    dedupKey
+                });
+                return;
+            }
+
+            const bnbPrice = priceService.getPrice();
+            if (!Number.isFinite(bnbPrice) || bnbPrice <= 0) {
+                logger.warn('BUY IGNORADO: preco BNB indisponivel', {
+                    txHash: buyEvent.txHash,
+                    symbol: buyEvent.symbol
+                });
+                return;
+            }
+
+            const usdValue = Number(buyEvent.bnbIn || 0) * bnbPrice;
+            if (!Number.isFinite(usdValue) || usdValue <= config.minUsdAlert) {
+                logger.info('BUY IGNORADO: abaixo do minimo USD', {
+                    txHash: buyEvent.txHash,
+                    symbol: buyEvent.symbol,
+                    usdValue,
+                    minUsdAlert: config.minUsdAlert
+                });
+                return;
+            }
+
+            if (cooldownFilter.isInCooldown(buyEvent.symbol)) {
+                logger.info('BUY IGNORADO: cooldown ativo', {
+                    txHash: buyEvent.txHash,
+                    symbol: buyEvent.symbol
+                });
+                return;
+            }
+
+            const suspicious = await mevFilter.isSuspicious(buyEvent.txHash);
+            if (suspicious) {
+                logger.info('BUY IGNORADO: filtro MEV/arbitragem', {
+                    txHash: buyEvent.txHash,
+                    symbol: buyEvent.symbol
+                });
+                return;
+            }
+
+            let wallet = buyEvent.to;
+            try {
+                const tx = await httpProvider.getTransaction(buyEvent.txHash);
+                if (tx && tx.from) {
+                    wallet = tx.from;
+                }
+            } catch (error) {
+                logger.warn('Falha ao resolver wallet do BUY ALERT. Usando campo "to".', {
+                    txHash: buyEvent.txHash,
+                    error: error.message
+                });
+            }
+
+            cooldownFilter.hit(buyEvent.symbol);
+
+            const message = buildBuyAlertMessage({
+                symbol: buyEvent.symbol,
+                usdValue,
+                tokenOut: buyEvent.tokenOut,
+                wallet,
+                txHash: buyEvent.txHash,
+                pair: buyEvent.pair
+            });
+
+            await sendBuyAlert(sock, message);
+            logger.info('BUY processado com sucesso', {
+                txHash: buyEvent.txHash,
+                symbol: buyEvent.symbol,
+                usdValue,
+                source: buyEvent.source
+            });
+        } catch (error) {
+            logger.error('Erro ao processar evento BUY integrado', {
+                txHash: buyEvent && buyEvent.txHash,
+                symbol: buyEvent && buyEvent.symbol,
+                error: error.message || String(error)
+            });
+        }
+    });
+
+    listener.on('ws:offline', ({ reason }) => {
+        logger.warn('BUY ALERT listener WS offline (fallback polling ativo)', { reason });
+    });
+
+    listener.on('ws:online', () => {
+        logger.info('BUY ALERT listener WS online');
+    });
+
+    await listener.start();
+
+    runtime = {
+        listener,
+        priceService,
+        dedupFilter
+    };
+
+    logger.info('BUY ALERT integrado iniciou e esta monitorando compras validas.');
+}
+
+export async function sendBuyAlertDirect(sock, text) {
+    await sendBuyAlert(sock, text);
+}

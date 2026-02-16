@@ -36,6 +36,7 @@ import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, 
 import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from './functions/devCommands.js';
 import { isRestrictedGroupName } from './functions/groupPolicy.js';
 import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js';
+import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
 
 console.log('Ã°Å¸Â¤â€“ IA de ModeraÃƒÂ§ÃƒÂ£o:', isAIEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
 console.log('Ã°Å¸â€™Â¼ IA de Vendas:', isAISalesEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
@@ -311,6 +312,7 @@ async function startBot() {
                 startAutoPromo(sock);
                 startHealthMonitor();
                 startSessionBackup();
+                await startBuyAlertNotifier(sock);
                 console.log('Ã¢Å“â€¦ Todos os serviÃƒÂ§os iniciados com sucesso');
             } catch (e) {
                 console.error('Ã¢ÂÅ’ Erro ao iniciar serviÃƒÂ§os:', e.message);
@@ -320,6 +322,7 @@ async function startBot() {
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             setConnected(false);
+            await stopBuyAlertNotifier();
 
             if (reason === DisconnectReason.loggedOut) {
                 console.log('Ã¢Å¡Â Ã¯Â¸Â SessÃƒÂ£o desconectada manualmente. Deletando credenciais antigas...');
