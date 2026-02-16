@@ -3,240 +3,451 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>iMavy SaaS Core</title>
+  <title>DASHBOARD IMAVYAGENT</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #f5f7fb;
+      --bg-1: #0f1c49;
+      --bg-2: #5b3faf;
+      --bg-3: #8ab4ff;
+      --surface: #ffffff;
+      --surface-soft: #f6f8ff;
+      --surface-glass: rgba(255, 255, 255, 0.88);
       --text: #0f172a;
-      --muted: #475569;
-      --line: #cbd5e1;
-      --primary: #0b63ce;
-      --danger: #b42318;
-      --ok: #067647;
+      --muted: #51607a;
+      --line: rgba(90, 115, 196, 0.26);
+      --primary: #3566ff;
+      --primary-2: #6f48d8;
+      --danger: #c81e3a;
+      --ok: #117a56;
+      --shadow-xl: 0 24px 60px rgba(15, 23, 42, 0.2);
+      --shadow-md: 0 12px 28px rgba(15, 23, 42, 0.12);
     }
-    * { box-sizing: border-box; }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
-      font-family: Segoe UI, Arial, sans-serif;
-      background: var(--bg);
+      min-height: 100vh;
+      font-family: 'Inter', sans-serif;
       color: var(--text);
+      background:
+        radial-gradient(900px 500px at 92% -12%, rgba(255, 255, 255, 0.3), transparent 62%),
+        radial-gradient(760px 420px at -10% 30%, rgba(255, 255, 255, 0.22), transparent 60%),
+        linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 52%, var(--bg-3) 100%);
     }
-    .wrap {
-      width: min(980px, 94vw);
-      margin: 24px auto;
+
+    .page {
+      width: min(1160px, 94vw);
+      margin: 28px auto;
+      position: relative;
     }
-    h1, h2 { margin: 0 0 10px; }
-    p { margin: 0; }
-    .subtitle {
-      color: var(--muted);
-      margin-bottom: 14px;
-    }
+
     .card {
-      background: #fff;
+      background: var(--surface-glass);
       border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 14px;
+      border-radius: 18px;
+      box-shadow: var(--shadow-xl);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero {
+      padding: 22px 24px;
       margin-bottom: 14px;
     }
-    .hidden { display: none !important; }
-    .grid {
-      display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #2e4aa9;
+      background: rgba(53, 102, 255, 0.1);
+      border: 1px solid rgba(53, 102, 255, 0.25);
+      border-radius: 999px;
+      padding: 7px 12px;
     }
+
+    .hero h1 {
+      margin: 12px 0 8px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: clamp(28px, 4vw, 42px);
+      line-height: 1.05;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .auth-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+
+    .panel {
+      padding: 20px;
+      background: linear-gradient(180deg, var(--surface) 0%, var(--surface-soft) 100%);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: var(--shadow-md);
+    }
+
+    .panel h2 {
+      margin: 0 0 14px;
+      font-family: 'Space Grotesk', sans-serif;
+      letter-spacing: -0.02em;
+      font-size: 31px;
+    }
+
+    .field {
+      margin-bottom: 12px;
+    }
+
     label {
       display: block;
-      margin-bottom: 8px;
-      color: var(--muted);
-      font-size: 14px;
+      margin-bottom: 6px;
+      color: #344563;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
     }
-    input, select, textarea, button {
+
+    input,
+    select,
+    textarea,
+    button {
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px;
+      border-radius: 12px;
+      padding: 12px;
       font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s, filter 0.18s;
     }
+
+    input,
+    select,
+    textarea {
+      background: #ffffff;
+      color: var(--text);
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: rgba(53, 102, 255, 0.55);
+      box-shadow: 0 0 0 4px rgba(53, 102, 255, 0.12);
+      outline: none;
+    }
+
     button {
       cursor: pointer;
-      background: var(--primary);
       color: #fff;
-      border-color: var(--primary);
-      font-weight: 600;
+      font-weight: 700;
+      border-color: rgba(255, 255, 255, 0.42);
+      background: linear-gradient(120deg, var(--primary) 0%, var(--primary-2) 100%);
+      box-shadow: 0 10px 24px rgba(53, 102, 255, 0.28);
     }
+
+    button:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.02);
+    }
+
+    button:active {
+      transform: translateY(0);
+    }
+
     button.ghost {
-      background: #fff;
-      color: var(--text);
-      border-color: var(--line);
+      background: #ffffff;
+      color: #344563;
+      border-color: rgba(77, 98, 163, 0.34);
+      box-shadow: none;
     }
+
     .actions {
       display: flex;
       gap: 8px;
       flex-wrap: wrap;
-      margin-top: 8px;
+      margin-top: 12px;
     }
+
     .actions > * {
-      flex: 1 1 160px;
+      flex: 1 1 180px;
     }
-    .inline {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-items: center;
+
+    .small {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 10px;
     }
-    .inline > input {
-      flex: 1 1 200px;
+
+    #tokenStatus {
+      color: #1f3358;
+      font-weight: 800;
     }
-    .group-item {
+
+    .admin-panel {
+      padding: 20px;
+      background: linear-gradient(180deg, var(--surface) 0%, var(--surface-soft) 100%);
+      margin-bottom: 14px;
+    }
+
+    .admin-panel h2 {
+      margin: 0 0 6px;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 34px;
+      letter-spacing: -0.02em;
+    }
+
+    .admin-layout {
+      margin-top: 14px;
+      display: grid;
+      grid-template-columns: 1.5fr 1fr;
+      gap: 12px;
+      align-items: start;
+    }
+
+    .admin-form,
+    .admin-preview {
       border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px;
-      margin-top: 8px;
-      background: #fff;
+      border-radius: 14px;
+      background: #edf2ff;
+      padding: 14px;
     }
-    .check-list {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 8px;
-      max-height: 240px;
-      overflow: auto;
-      background: #fff;
+
+    .admin-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-    .check-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 6px 0;
-      border-bottom: 1px solid #e2e8f0;
-    }
-    .check-item:last-child {
-      border-bottom: 0;
-    }
-    .check-item input[type='checkbox'] {
-      width: auto;
-      margin: 0;
-    }
+
     .switch-row {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      margin-top: 10px;
+      color: #25395f;
+      font-size: 14px;
+      font-weight: 600;
     }
+
     .switch-row input[type='checkbox'] {
       width: auto;
       margin: 0;
+      transform: scale(1.1);
+      accent-color: var(--primary);
     }
-    .small {
-      color: var(--muted);
-      font-size: 12px;
-    }
-    .status {
-      margin-top: 10px;
-      padding: 10px;
+
+    .check-list {
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 12px;
+      padding: 8px;
+      max-height: 260px;
+      overflow: auto;
       background: #fff;
+    }
+
+    .check-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 6px;
+      border-bottom: 1px solid #dce4f8;
+      color: #1f3358;
+      font-size: 13px;
       font-weight: 600;
     }
-    .delta-pos { color: var(--ok); }
-    .delta-neg { color: var(--danger); }
-    pre {
+
+    .check-item:last-child {
+      border-bottom: 0;
+    }
+
+    .check-item input[type='checkbox'] {
+      width: auto;
+      margin: 0;
+      accent-color: var(--primary);
+    }
+
+    .admin-actions {
+      margin-top: 12px;
+    }
+
+    .group-item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      margin-top: 8px;
+      background: #fff;
+    }
+
+    .admin-output {
+      min-height: 260px;
+      max-height: 440px;
+      overflow: auto;
+      background: #0f172a;
+      border-color: #1e293b;
+    }
+
+    .admin-output pre {
       margin: 0;
       white-space: pre-wrap;
-      max-height: 320px;
-      overflow: auto;
+      color: #cbd5e1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+      font-size: 12px;
+      line-height: 1.5;
     }
-    @media (max-width: 900px) {
-      .grid { grid-template-columns: 1fr; }
+
+    .status {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.92);
+      font-weight: 700;
+      box-shadow: var(--shadow-md);
+    }
+
+    .delta-pos {
+      color: var(--ok);
+    }
+
+    .delta-neg {
+      color: var(--danger);
+    }
+
+    @media (max-width: 980px) {
+      .auth-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .admin-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .admin-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .panel h2,
+      .admin-panel h2 {
+        font-size: 28px;
+      }
     }
   </style>
 </head>
 <body>
-  <main class="wrap">
-    <section class="card">
-      <h1>iMavy SaaS Core</h1>
-      <p class="subtitle">Acesse sua conta para continuar.</p>
+  <main class="page">
+    <section class="card hero">
+      <span class="eyebrow">iMavyAgent Dashboard</span>
+      <h1>DASHBOARD IMAVYAGENT</h1>
+      <p class="subtitle">Ambiente de autenticacao e controle de acesso com padrao visual profissional.</p>
     </section>
 
-    <section class="card grid">
-      <article>
+    <section class="auth-grid">
+      <article class="panel">
         <h2>Registro</h2>
-        <label><span>Nome</span><input id="regNome" type="text" /></label>
-        <label><span>Email</span><input id="regEmail" type="email" /></label>
-        <label><span>Senha</span><input id="regSenha" type="password" /></label>
-        <label>
-          <span>Plano</span>
+        <div class="field">
+          <label for="regNome">Nome</label>
+          <input id="regNome" type="text" />
+        </div>
+        <div class="field">
+          <label for="regEmail">Email</label>
+          <input id="regEmail" type="email" />
+        </div>
+        <div class="field">
+          <label for="regSenha">Senha</label>
+          <input id="regSenha" type="password" />
+        </div>
+        <div class="field">
+          <label for="regPlano">Plano</label>
           <select id="regPlano">
             <option value="free">free</option>
             <option value="pro">pro</option>
             <option value="enterprise">enterprise</option>
           </select>
-        </label>
-        <div class="actions"><button id="btnRegistrar" type="button">Registrar</button></div>
+        </div>
+        <div class="actions">
+          <button id="btnRegistrar" type="button">Registrar</button>
+        </div>
       </article>
 
-      <article>
+      <article class="panel">
         <h2>Login</h2>
-        <label><span>Email</span><input id="logEmail" type="email" /></label>
-        <label><span>Senha</span><input id="logSenha" type="password" /></label>
+        <div class="field">
+          <label for="logEmail">Email</label>
+          <input id="logEmail" type="email" />
+        </div>
+        <div class="field">
+          <label for="logSenha">Senha</label>
+          <input id="logSenha" type="password" />
+        </div>
         <div class="actions">
           <button id="btnLogin" type="button">Entrar</button>
           <button id="btnLogout" type="button" class="ghost">Sair</button>
         </div>
-        <p class="small" style="margin-top:8px;">Token: <strong id="tokenStatus">nao autenticado</strong></p>
+        <p class="small">Token: <strong id="tokenStatus">nao autenticado</strong></p>
       </article>
     </section>
 
-    <section id="gruposCard" class="card hidden">
-      <h2>Grupos do Cliente</h2>
-      <div class="grid">
-        <label><span>ID do Grupo (ex: 123@g.us)</span><input id="grupoId" type="text" /></label>
-        <label><span>Nome do Grupo</span><input id="grupoNome" type="text" /></label>
-      </div>
-      <div class="actions"><button id="btnCriarGrupo" type="button">Criar Grupo</button></div>
-      <div id="gruposLista"></div>
-    </section>
-
-    <section id="rankingCard" class="card hidden">
-      <h2>Ranking do Cliente</h2>
-      <div class="grid">
-        <label><span>Data inicio</span><input id="rkInicio" type="date" /></label>
-        <label><span>Data fim</span><input id="rkFim" type="date" /></label>
-      </div>
-      <label>
-        <span>Grupo (opcional)</span>
-        <select id="rkGrupo"><option value="">Todos os grupos do cliente</option></select>
-      </label>
-      <div class="actions"><button id="btnRanking" type="button">Gerar Ranking</button></div>
-      <div class="group-item"><pre id="rankingOut"></pre></div>
-    </section>
-
-    <section id="adminCard" class="card hidden">
+    <section id="adminCard" class="card hidden admin-panel">
       <h2>Painel Admin (Desenvolvedor)</h2>
-      <p class="subtitle">Defina quais grupos cada usuario pode visualizar e se ele pode ter mais de um grupo.</p>
+      <p class="subtitle">Gerencie quem pode acessar grupos e qual grupo principal fica vinculado ao usuario.</p>
 
-      <div class="grid">
-        <label><span>Email do usuario alvo</span><input id="adminTargetEmail" type="email" placeholder="usuario@email.com" /></label>
-        <label><span>Grupo principal (opcional)</span><select id="adminPrimaryGroup"><option value="">Sem grupo principal</option></select></label>
-      </div>
+      <div class="admin-layout">
+        <div class="admin-form">
+          <div class="admin-grid">
+            <div class="field">
+              <label for="adminTargetEmail">Email do usuario alvo</label>
+              <input id="adminTargetEmail" type="email" placeholder="usuario@email.com" />
+            </div>
+            <div class="field">
+              <label for="adminPrimaryGroup">Grupo principal (opcional)</label>
+              <select id="adminPrimaryGroup">
+                <option value="">Sem grupo principal</option>
+              </select>
+            </div>
+          </div>
 
-      <div class="actions">
-        <button id="btnAdminCarregar" type="button">Carregar usuario</button>
-        <button id="btnAdminSalvar" type="button">Salvar acessos</button>
-        <button id="btnAdminResetar" type="button" class="ghost">Resetar politica</button>
-      </div>
+          <label class="switch-row">
+            <input id="adminAllowMultiple" type="checkbox" checked />
+            <span>Permitir mais de um grupo</span>
+          </label>
 
-      <label class="switch-row" style="margin-top:10px;">
-        <input id="adminAllowMultiple" type="checkbox" checked />
-        <span>Permitir mais de um grupo</span>
-      </label>
+          <div class="field" style="margin-top: 10px;">
+            <label>Grupos permitidos</label>
+            <div id="adminGroupsChecklist" class="check-list"></div>
+          </div>
 
-      <label style="margin-top:10px;">
-        <span>Grupos permitidos</span>
-        <div id="adminGroupsChecklist" class="check-list"></div>
-      </label>
+          <div class="actions admin-actions">
+            <button id="btnAdminCarregar" type="button">Carregar usuario</button>
+            <button id="btnAdminSalvar" type="button">Salvar acessos</button>
+            <button id="btnAdminResetar" type="button" class="ghost">Resetar politica</button>
+          </div>
+        </div>
 
-      <div class="group-item">
-        <pre id="adminAccessOut"></pre>
+        <aside class="admin-preview">
+          <p class="small">Previa da politica aplicada</p>
+          <div class="group-item admin-output">
+            <pre id="adminAccessOut"></pre>
+          </div>
+        </aside>
       </div>
     </section>
 

@@ -218,18 +218,33 @@ async function login() {
 
 function logout() {
   setToken('');
-  byId('gruposLista').innerHTML = '';
-  byId('rkGrupo').innerHTML = '<option value="">Todos os grupos do cliente</option>';
-  byId('rankingOut').textContent = '';
+  const gruposLista = byId('gruposLista');
+  if (gruposLista) {
+    gruposLista.innerHTML = '';
+  }
+
+  const rkGrupo = byId('rkGrupo');
+  if (rkGrupo) {
+    rkGrupo.innerHTML = '<option value="">Todos os grupos do cliente</option>';
+  }
+
+  const rankingOut = byId('rankingOut');
+  if (rankingOut) {
+    rankingOut.textContent = '';
+  }
+
   clearAdminPanelState();
   setStatus('Sessao encerrada.', true);
 }
 
 function renderGrupos(grupos) {
   const list = byId('gruposLista');
-  list.innerHTML = '';
-
   const select = byId('rkGrupo');
+  if (!list || !select) {
+    return;
+  }
+
+  list.innerHTML = '';
   select.innerHTML = '<option value="">Todos os grupos do cliente</option>';
 
   for (const grupo of grupos) {
@@ -465,8 +480,6 @@ function init() {
   byId('btnRegistrar').addEventListener('click', () => registrar().catch((e) => setStatus(normalizeErrorMessage(e), false)));
   byId('btnLogin').addEventListener('click', () => login().catch((e) => setStatus(normalizeErrorMessage(e), false)));
   byId('btnLogout').addEventListener('click', logout);
-  byId('btnCriarGrupo').addEventListener('click', () => criarGrupo().catch((e) => setStatus(normalizeErrorMessage(e), false)));
-  byId('btnRanking').addEventListener('click', () => gerarRanking().catch((e) => setStatus(normalizeErrorMessage(e), false)));
 
   const btnAdminCarregar = byId('btnAdminCarregar');
   if (btnAdminCarregar) {
@@ -483,20 +496,12 @@ function init() {
     btnAdminResetar.addEventListener('click', () => resetarAcessoAdmin().catch((e) => setStatus(normalizeErrorMessage(e), false)));
   }
 
-  const now = new Date();
-  const end = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}`;
-  const startDate = new Date(now.getTime() - (6 * 24 * 60 * 60 * 1000));
-  const start = `${startDate.getUTCFullYear()}-${String(startDate.getUTCMonth() + 1).padStart(2, '0')}-${String(startDate.getUTCDate()).padStart(2, '0')}`;
-
-  byId('rkInicio').value = start;
-  byId('rkFim').value = end;
   setToken(getToken());
 
   if (getNextPath()) {
     renderAdminCardVisibility(Boolean(getToken()), isDashboardAdminToken(getToken()));
   }
 
-  carregarGrupos().catch(() => {});
 }
 
 window.addEventListener('DOMContentLoaded', init);
