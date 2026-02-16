@@ -4,6 +4,7 @@ const path = require('path');
 const ROOT_DIR = path.resolve(__dirname, '..', '..');
 const STRIKES_FILE = path.join(ROOT_DIR, 'strikes.json');
 const LEMBRETES_FILE = path.join(ROOT_DIR, 'lembretes.json');
+const COMANDOS_ACEITOS_FILE = path.join(ROOT_DIR, 'comandos_aceitos.json');
 
 function readJsonFile(filePath, fallbackValue) {
     try {
@@ -64,12 +65,32 @@ function countLembretesAtivos(lembretesData) {
     return interval + daily;
 }
 
+function countComandosAceitos24h(comandosData) {
+    if (!comandosData || typeof comandosData !== 'object' || !Array.isArray(comandosData.eventos)) {
+        return 0;
+    }
+
+    const cutoff = Date.now() - (24 * 60 * 60 * 1000);
+    let total = 0;
+
+    for (const evento of comandosData.eventos) {
+        const ts = Number(evento && evento.timestamp || 0);
+        if (Number.isFinite(ts) && ts >= cutoff) {
+            total += 1;
+        }
+    }
+
+    return total;
+}
+
 function getOpsResumo() {
     const strikesData = readJsonFile(STRIKES_FILE, {});
     const lembretesData = readJsonFile(LEMBRETES_FILE, {});
+    const comandosData = readJsonFile(COMANDOS_ACEITOS_FILE, { eventos: [] });
 
     const linksBloqueados = countLinksBloqueados(strikesData);
     const lembretesAtivos = countLembretesAtivos(lembretesData);
+    const comandosAceitos24h = countComandosAceitos24h(comandosData);
     const ameacasBloqueadas = linksBloqueados > 0 ? linksBloqueados : 0;
 
     const itens = [];
@@ -106,6 +127,7 @@ function getOpsResumo() {
         linksBloqueados,
         ameacasBloqueadas,
         lembretesAtivos,
+        comandosAceitos24h,
         itens
     };
 }

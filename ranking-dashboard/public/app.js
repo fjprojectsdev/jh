@@ -356,17 +356,7 @@ async function carregarPainelGruposVisual() {
         if (response.ok && body && body.ok !== false) {
             linksBloqueados = toInt(body.linksBloqueados);
             lembretesAtivos = toInt(body.lembretesAtivos);
-        }
-    } catch (_) {}
-
-    try {
-        const hoje = new Date();
-        const hojeUtc = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate()));
-        const diaIso = formatDateInput(hojeUtc);
-        const response = await fetchComAuth(`/api/interacoes-texto?dataInicio=${diaIso}&dataFim=${diaIso}`, { method: 'GET' });
-        const body = await response.json();
-        if (response.ok && (!body || body.ok !== false)) {
-            acoes24h = Array.isArray(body.interacoes) ? body.interacoes.length : 0;
+            acoes24h = toInt(body.comandosAceitos24h);
         }
     } catch (_) {}
 

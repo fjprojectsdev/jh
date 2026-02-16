@@ -22,6 +22,7 @@ import { startWatch, stopWatch, stopAllWatches, listWatches, parseIntervalMs } f
 import { isMarketPriceCommand, getMarketQuote } from './crypto/marketPrices.js';
 import { generateImavyCryptoReply } from './crypto/imavyAnalyst.js';
 import { isRestrictedGroupName } from './groupPolicy.js';
+import { registrarComandoAceito } from './commandMetrics.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -661,6 +662,20 @@ export async function handleGroupMessages(sock, message, context = {}) {
     const imavyMentioned = isImavyMentioned({ text, message, sock });
     const isSlashCommand = commandToken.startsWith('/');
 
+    function registrarComandoAceitoAtual(commandOverride) {
+        const token = String(commandOverride || commandToken || '').trim().toLowerCase();
+        if (!token.startsWith('/')) {
+            return;
+        }
+
+        registrarComandoAceito({
+            messageId: message?.key?.id,
+            command: token,
+            groupId,
+            senderId
+        });
+    }
+
     if (!isSlashCommand && !imavyMentioned) {
         return;
     }
@@ -735,6 +750,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
             }
 
             await sendSafeMessage(sock, groupId, { text: reply });
+            registrarComandoAceitoAtual(firstToken);
             return;
         }
     }
@@ -756,6 +772,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 snap
             });
             await sendSafeMessage(sock, groupId, { text: reply });
+            registrarComandoAceitoAtual(firstToken);
             return;
         }
     }
@@ -776,6 +793,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 const reply = buildCryptoText({ label: alias.label || key.toUpperCase(), chain: alias.chain, pairAddress: alias.pair, snap });
                 await sendSafeMessage(sock, groupId, { text: reply });
+                registrarComandoAceitoAtual(firstToken);
                 return;
             }
         }
@@ -793,6 +811,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
             .map(x => `/${x.alias} → ${x.label || ''} (${String(x.chain).toUpperCase()})`)
             .join('\n');
         await sendSafeMessage(sock, groupId, { text: `📋 *ATALHOS CRIPTO*\n\n${msg}` });
+        registrarComandoAceitoAtual('/listpairs');
         return;
     }
 
@@ -836,6 +855,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         const mins = Math.round(intervalMs / 60_000);
         await sendSafeMessage(sock, groupId, { text: `✅ Assinatura ativada: /${aliasKey} a cada ~${mins} min.\nPara parar: /unwatch ${aliasKey}` });
+        registrarComandoAceitoAtual('/watch');
         return;
     }
 
@@ -855,6 +875,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
         if (target === 'all') {
             const res = stopAllWatches(groupId);
             await sendSafeMessage(sock, groupId, { text: `✅ Assinaturas desativadas: ${res.count}` });
+            registrarComandoAceitoAtual('/unwatch');
             return;
         }
 
@@ -864,6 +885,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
             return;
         }
         await sendSafeMessage(sock, groupId, { text: `✅ Assinatura desativada: /${target}` });
+        registrarComandoAceitoAtual('/unwatch');
         return;
     }
 
@@ -878,6 +900,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
             .map(w => `• /${w.aliasKey} — ${Math.round(w.intervalMs / 60_000)} min`)
             .join('\n');
         await sendSafeMessage(sock, groupId, { text: `📡 Assinaturas ativas:\n${msg}` });
+        registrarComandoAceitoAtual('/watchlist');
         return;
     }
 
@@ -899,6 +922,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         if (isGroup) {
             await handleSorteio(sock, message, text);
+            registrarComandoAceitoAtual('/sorteio');
         }
         return;
     }
@@ -950,7 +974,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
         await sendSafeMessage(sock, groupId, {
             text: caption
         });
-
+        registrarComandoAceitoAtual('/grafico');
 
         return;
     }
@@ -965,12 +989,14 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         if (tokenName && PROJECT_TOKENS[tokenName]) {
             await sendSafeMessage(sock, groupId, { text: PROJECT_TOKENS[tokenName].address });
+            registrarComandoAceitoAtual('/ca');
             return;
         }
 
         // Se não achou ou sem argumento, listar opções
         const options = Object.keys(PROJECT_TOKENS).map(k => k.replace('/', '')).join(', ');
         await sendSafeMessage(sock, groupId, { text: `❓ Token não encontrado. Tente: /ca [nome]\nOpções: ${options}` });
+        registrarComandoAceitoAtual('/ca');
         return;
     }
 
@@ -1001,6 +1027,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
         if (!resolved.ok) {
             // Se falhar API, manda só o contrato como fallback
             await sendSafeMessage(sock, groupId, { text: `📄 Contrato ${tokenConfig.label}: ${tokenConfig.address}\n(API Temporariamente indisponível)` });
+            registrarComandoAceitoAtual(cleanCmd);
             return;
         }
 
@@ -1009,6 +1036,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         if (!snap.ok) {
             await sendSafeMessage(sock, groupId, { text: `📄 Contrato ${tokenConfig.label}: ${tokenConfig.address}` });
+            registrarComandoAceitoAtual(cleanCmd);
             return;
         }
 
@@ -1032,6 +1060,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
         await sendSafeMessage(sock, groupId, {
             text: caption
         });
+        registrarComandoAceitoAtual(cleanCmd);
         return;
     }
 
@@ -1062,6 +1091,8 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     return;
                 }
             }
+
+            registrarComandoAceitoAtual(commandToken);
 
             if (normalizedText.startsWith('/descricao')) {
                 try {
