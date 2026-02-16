@@ -1,18 +1,18 @@
 :root {
-    --bg: #f3f7ff;
-    --bg-accent: #e9f0ff;
-    --panel: rgba(255, 255, 255, 0.86);
-    --line: #c5d5f1;
-    --text: #0c1d36;
-    --muted: #486188;
-    --primary: #0d4c92;
-    --primary-2: #1783d2;
-    --success: #17763f;
-    --danger: #a73737;
-    --neutral: #697b9e;
-    --gold-1: #fff2c6;
-    --gold-2: #f5bf3a;
-    --shadow: 0 20px 40px rgba(13, 76, 146, 0.14);
+    --bg: #050c23;
+    --bg-accent: #0a1738;
+    --panel: rgba(10, 20, 50, 0.78);
+    --line: #27437f;
+    --text: #eaf1ff;
+    --muted: #9fb8e6;
+    --primary: #5ea9ff;
+    --primary-2: #5ae6c3;
+    --success: #5ae6c3;
+    --danger: #ff8aa6;
+    --neutral: #8ca6d4;
+    --gold-1: #10214b;
+    --gold-2: #5ea9ff;
+    --shadow: 0 24px 46px rgba(2, 6, 22, 0.5);
 }
 
 * {
@@ -33,9 +33,9 @@ body {
     inset: 0;
     z-index: -1;
     background:
-        radial-gradient(circle at 10% 10%, rgba(23, 131, 210, 0.24), transparent 30%),
-        radial-gradient(circle at 85% 15%, rgba(13, 76, 146, 0.2), transparent 35%),
-        radial-gradient(circle at 50% 85%, rgba(23, 131, 210, 0.18), transparent 35%),
+        radial-gradient(circle at 10% 10%, rgba(94, 169, 255, 0.24), transparent 30%),
+        radial-gradient(circle at 85% 15%, rgba(33, 86, 182, 0.22), transparent 35%),
+        radial-gradient(circle at 50% 85%, rgba(90, 230, 195, 0.14), transparent 35%),
         linear-gradient(135deg, var(--bg), var(--bg-accent));
 }
 
@@ -314,7 +314,7 @@ textarea {
     width: 100%;
     border: 1px solid var(--line);
     border-radius: 10px;
-    background: #fff;
+    background: rgba(6, 13, 35, 0.9);
     padding: 10px;
     color: var(--text);
 }
@@ -335,8 +335,8 @@ textarea {
 }
 
 .chip {
-    border: 1px solid #b8cdf0;
-    background: #ecf4ff;
+    border: 1px solid #2b4f95;
+    background: rgba(18, 33, 77, 0.88);
     color: var(--primary);
     border-radius: 999px;
     padding: 8px 12px;
@@ -362,8 +362,8 @@ textarea {
     justify-content: center;
     text-decoration: none;
     color: var(--primary);
-    background: #ecf4ff;
-    border: 1px solid #b8cdf0;
+    background: rgba(16, 31, 72, 0.92);
+    border: 1px solid #31599e;
     border-radius: 10px;
     padding: 10px 14px;
     font-weight: 700;
@@ -390,8 +390,8 @@ button:hover {
 
 button.ghost {
     color: var(--primary);
-    background: #ecf4ff;
-    border: 1px solid #b8cdf0;
+    background: rgba(16, 31, 72, 0.92);
+    border: 1px solid #31599e;
 }
 
 .status {
@@ -408,8 +408,8 @@ button.ghost {
     display: grid;
     grid-template-columns: 1.4fr 1fr;
     gap: 12px;
-    border: 1px solid #ecd18a;
-    background: linear-gradient(135deg, var(--gold-1), #ffffff);
+    border: 1px solid #2a4d92;
+    background: linear-gradient(135deg, rgba(15, 30, 72, 0.95), rgba(10, 21, 57, 0.92));
 }
 
 .spotlight-tag {
@@ -417,7 +417,7 @@ button.ghost {
     font-size: 0.8rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #8b6a11;
+    color: #7fc8ff;
     font-weight: 700;
 }
 
@@ -428,13 +428,13 @@ button.ghost {
 
 .spotlight-sub {
     margin: 0;
-    color: #725f26;
+    color: #9ab9e6;
 }
 
 .spotlight-metrics {
     align-self: center;
-    background: rgba(255, 255, 255, 0.75);
-    border: 1px solid rgba(139, 106, 17, 0.24);
+    background: rgba(9, 19, 52, 0.84);
+    border: 1px solid rgba(67, 121, 208, 0.34);
     border-radius: 12px;
     padding: 12px;
 }
@@ -491,23 +491,23 @@ thead th {
     text-align: left;
     font-size: 0.84rem;
     color: var(--muted);
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid #2b4f94;
     padding: 10px 8px;
     position: sticky;
     top: 0;
-    background: #f6f9ff;
+    background: rgba(12, 23, 58, 0.98);
     z-index: 2;
 }
 
 tbody td {
-    border-bottom: 1px solid #dde8fb;
+    border-bottom: 1px solid #1f386f;
     padding: 10px 8px;
     font-size: 0.92rem;
     vertical-align: middle;
 }
 
 .risk-row {
-    background: #fff5f5;
+    background: rgba(121, 34, 62, 0.2);
 }
 
 .level-pill {
@@ -516,8 +516,8 @@ tbody td {
     gap: 6px;
     border-radius: 999px;
     padding: 3px 10px;
-    border: 1px solid #c7d8f5;
-    background: #f4f8ff;
+    border: 1px solid #335caa;
+    background: rgba(13, 27, 66, 0.95);
     font-size: 0.82rem;
     white-space: nowrap;
 }
@@ -531,14 +531,14 @@ tbody td {
     width: 100%;
     height: 8px;
     border-radius: 999px;
-    background: #e4ecfb;
+    background: #17346f;
     overflow: hidden;
 }
 
 .bar-fill {
     height: 100%;
     border-radius: inherit;
-    background: linear-gradient(90deg, #2e9bff, #135fc2);
+    background: linear-gradient(90deg, #5ea9ff, #5ae6c3);
     animation: grow-bar 900ms ease-out;
 }
 
