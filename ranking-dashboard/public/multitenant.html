@@ -3,22 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>iMavy SaaS Core</title>
+  <title>DASHBOARD IMAVYAGENT</title>
   <style>
     :root {
-      --bg: #f5f7fb;
+      --bg-start: #667eea;
+      --bg-end: #764ba2;
       --text: #0f172a;
       --muted: #475569;
-      --line: #cbd5e1;
-      --primary: #0b63ce;
+      --line: rgba(102, 126, 234, 0.28);
+      --primary: #667eea;
+      --primary-dark: #5568d3;
+      --panel: #ffffff;
+      --panel-soft: #f6f8ff;
       --danger: #b42318;
       --ok: #067647;
+      --shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: Segoe UI, Arial, sans-serif;
-      background: var(--bg);
+      background:
+        radial-gradient(900px 500px at 90% -10%, rgba(255, 255, 255, 0.18), transparent 62%),
+        radial-gradient(800px 450px at -10% 30%, rgba(255, 255, 255, 0.12), transparent 62%),
+        linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
       color: var(--text);
     }
     .wrap {
@@ -32,11 +40,12 @@
       margin-bottom: 14px;
     }
     .card {
-      background: #fff;
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-soft) 100%);
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 14px;
       margin-bottom: 14px;
+      box-shadow: var(--shadow);
     }
     .hidden { display: none !important; }
     .grid {
@@ -59,15 +68,20 @@
     }
     button {
       cursor: pointer;
-      background: var(--primary);
+      background: linear-gradient(135deg, var(--primary) 0%, var(--bg-end) 100%);
       color: #fff;
-      border-color: var(--primary);
+      border-color: rgba(255, 255, 255, 0.4);
       font-weight: 600;
+      transition: transform .2s, filter .2s;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      filter: brightness(0.98);
     }
     button.ghost {
-      background: #fff;
-      color: var(--text);
-      border-color: var(--line);
+      background: var(--panel);
+      color: var(--primary-dark);
+      border-color: rgba(85, 104, 211, 0.42);
     }
     .actions {
       display: flex;
@@ -92,7 +106,7 @@
       border-radius: 8px;
       padding: 10px;
       margin-top: 8px;
-      background: #fff;
+      background: #edf2ff;
     }
     .check-list {
       border: 1px solid var(--line);
@@ -100,7 +114,7 @@
       padding: 8px;
       max-height: 240px;
       overflow: auto;
-      background: #fff;
+      background: #edf2ff;
     }
     .check-item {
       display: flex;
@@ -134,7 +148,7 @@
       padding: 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fff;
+      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-soft) 100%);
       font-weight: 600;
     }
     .delta-pos { color: var(--ok); }
@@ -153,7 +167,7 @@
 <body>
   <main class="wrap">
     <section class="card">
-      <h1>iMavy SaaS Core</h1>
+      <h1>DASHBOARD IMAVYAGENT</h1>
       <p class="subtitle">Acesse sua conta para continuar.</p>
     </section>
 
