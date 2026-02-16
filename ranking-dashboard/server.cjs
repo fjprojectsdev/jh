@@ -8,6 +8,7 @@ const {
     fetchInteractionsFromSupabase,
     fetchGroupsFromSupabase
 } = require('./realtimeSupabaseSource.cjs');
+const { getOpsResumo } = require('./services/opsResumoService.cjs');
 const { handleAuthRoutes } = require('./routes/authRoutes.js');
 const { handleGrupoRoutes } = require('./routes/grupoRoutes.js');
 const { handleDashboardRoutes } = require('./routes/dashboardRoutes.js');
@@ -191,6 +192,24 @@ async function handleApi(req, res, parsedUrl) {
             sendJson(res, 400, {
                 ok: false,
                 error: error.message || 'Erro ao listar interacoes.'
+            });
+            return;
+        }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/ops-resumo') {
+        if (!(await verificarToken(req, res, authHelpers))) {
+            return;
+        }
+
+        try {
+            const resumo = getOpsResumo();
+            sendJson(res, 200, { ok: true, ...resumo });
+            return;
+        } catch (error) {
+            sendJson(res, 500, {
+                ok: false,
+                error: error.message || 'Erro ao carregar resumo operacional.'
             });
             return;
         }

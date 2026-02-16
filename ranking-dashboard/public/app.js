@@ -7,7 +7,8 @@ const state = {
     realtimeClient: null,
     realtimeChannel: null,
     realtimeDebounceTimer: null,
-    autoRefreshTimer: null
+    autoRefreshTimer: null,
+    opsResumoTimer: null
 };
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
@@ -161,32 +162,82 @@ function setLiveBadge(text, statusType) {
     } else {
         el.classList.add('delta-zero');
     }
-
-    syncOpsOnlineBadge(statusType);
 }
 
-function syncOpsOnlineBadge(statusType) {
-    const el = byId('opsOnlineBadge');
-    if (!el) {
+function formatDateTimePtBr(value) {
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) {
+        return '';
+    }
+
+    return dt.toLocaleString('pt-BR');
+}
+
+function renderOpsResumo(payload) {
+    const listEl = byId('opsResumoList');
+    const metaEl = byId('opsResumoMeta');
+
+    if (!listEl || !metaEl) {
         return;
     }
 
-    el.classList.remove('is-ok', 'is-info', 'is-error');
+    listEl.innerHTML = '';
 
-    if (statusType === 'ok') {
-        el.textContent = 'Online agora';
-        el.classList.add('is-ok');
+    const itens = Array.isArray(payload && payload.itens) ? payload.itens : [];
+
+    if (itens.length === 0) {
+        const li = document.createElement('li');
+        li.textContent = 'Sem eventos operacionais ativos no momento.';
+        listEl.appendChild(li);
+    } else {
+        for (const item of itens) {
+            const li = document.createElement('li');
+            li.textContent = `${item.label}: ${item.valor}`;
+            listEl.appendChild(li);
+        }
+    }
+
+    const atualizadoEm = formatDateTimePtBr(payload && payload.atualizacao);
+    metaEl.textContent = atualizadoEm
+        ? `Dados reais atualizados em ${atualizadoEm}.`
+        : 'Dados reais atualizados.';
+    metaEl.classList.remove('delta-neg');
+    metaEl.classList.add('delta-zero');
+}
+
+async function carregarResumoOperacao(options = {}) {
+    const metaEl = byId('opsResumoMeta');
+    const listEl = byId('opsResumoList');
+
+    if (!metaEl || !listEl) {
         return;
     }
 
-    if (statusType === 'error') {
-        el.textContent = 'Instavel';
-        el.classList.add('is-error');
-        return;
+    if (!options.silent) {
+        metaEl.textContent = 'Carregando dados reais...';
+        metaEl.classList.remove('delta-neg', 'delta-pos', 'delta-zero');
+        metaEl.classList.add('delta-zero');
     }
 
-    el.textContent = 'Online 24h';
-    el.classList.add('is-info');
+    try {
+        const response = await fetchComAuth('/api/ops-resumo', { method: 'GET' });
+        const body = await response.json();
+
+        if (!response.ok || (body && body.ok === false)) {
+            throw new Error(body.error || 'Erro ao carregar resumo operacional.');
+        }
+
+        renderOpsResumo(body);
+    } catch (error) {
+        listEl.innerHTML = '';
+        const li = document.createElement('li');
+        li.textContent = 'Falha ao carregar resumo operacional.';
+        listEl.appendChild(li);
+
+        metaEl.textContent = error.message || 'Erro ao carregar dados reais.';
+        metaEl.classList.remove('delta-pos', 'delta-zero');
+        metaEl.classList.add('delta-neg');
+    }
 }
 
 function isSupabaseRealtimeReady() {
@@ -639,6 +690,7 @@ function renderResultado(resultado, rankingEnriquecido, premiumMeta) {
     renderTable('rankingBody', rankingEnriquecido, maxTotal);
 
     byId('resultados').classList.remove('hidden');
+    carregarResumoOperacao({ silent: true }).catch(() => {});
 }
 
 function shouldUseSupabaseSource(options) {
@@ -1059,6 +1111,12 @@ function init() {
 
     byId('dataInicio').value = isoHoje;
     byId('dataFim').value = isoHoje;
+    carregarResumoOperacao().catch(() => {});
+    if (!state.opsResumoTimer) {
+        state.opsResumoTimer = setInterval(() => {
+            carregarResumoOperacao({ silent: true }).catch(() => {});
+        }, 15000);
+    }
 
     if (isSupabaseRealtimeReady()) {
         setFonteDados('Supabase Realtime');

@@ -24,39 +24,10 @@
             <p id="sessaoInfo" class="subtitle"></p>
         </header>
 
-        <section class="ops-overview">
-            <div class="ops-shell">
-                <div class="ops-header">
-                    <div class="ops-title">
-                        <p class="ops-eyebrow">DASHBOARD IMAVYAGENT</p>
-                        <h2>Visao Geral da Operacao</h2>
-                    </div>
-                    <span id="opsOnlineBadge" class="ops-online is-ok">Online 24h</span>
-                </div>
-
-                <div class="ops-metrics">
-                    <article class="ops-metric">
-                        <p>Ameacas bloqueadas</p>
-                        <strong id="opsAmeacasBloqueadas">138</strong>
-                    </article>
-                    <article class="ops-metric">
-                        <p>Lembretes enviados</p>
-                        <strong id="opsLembretesEnviados">52</strong>
-                    </article>
-                </div>
-
-                <div class="ops-alerts">
-                    <p class="ops-alerts-title">Alertas recentes</p>
-                    <div class="ops-alert-item">
-                        <span id="opsAlertaPrincipalTexto">Link falso removido</span>
-                        <strong id="opsAlertaPrincipalStatus" class="ops-alert-status is-ok">Resolvido</strong>
-                    </div>
-                    <div class="ops-alert-item">
-                        <span id="opsAlertaSecundarioTexto">Preco BTC consultado</span>
-                        <strong id="opsAlertaSecundarioStatus" class="ops-alert-status is-info">Comando /btc</strong>
-                    </div>
-                </div>
-            </div>
+        <section class="panel ops-summary-panel">
+            <h2>Visao Geral da Operacao</h2>
+            <p id="opsResumoMeta" class="status">Carregando dados reais...</p>
+            <ul id="opsResumoList" class="insights"></ul>
         </section>
 
         <section class="panel input-panel">
