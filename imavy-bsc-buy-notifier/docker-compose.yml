@@ -1,0 +1,10 @@
+services:
+  notifier:
+    build: .
+    container_name: imavy-bsc-buy-notifier
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./wa-session:/app/wa-session
+    command: npm start

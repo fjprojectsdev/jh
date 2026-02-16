@@ -1,0 +1,19 @@
+{
+  "name": "imavy-bsc-buy-notifier",
+  "version": "1.0.0",
+  "description": "Monitor de compras BUY na BSC (PancakeSwap V2) com envio para grupo WhatsApp TESTE IMAVY via Baileys.",
+  "main": "src/main/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/main/index.js",
+    "dev": "node --watch src/main/index.js",
+    "check": "node --check src/main/index.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.13.2",
+    "pino": "^9.3.2",
+    "ws": "^8.18.0"
+  }
+}
