@@ -14,6 +14,11 @@ const state = {
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
 const AUTH_STORAGE_KEY = 'imavy_multitenant_token';
+const DASHBOARD_GROUPS_PERMITIDOS = new Set([
+    'criptonopix e vellora (1)',
+    'criptonopix e vellora (2)',
+    'squad web3 | @alexcpo_'
+]);
 
 const SAMPLE_DATA = [
     { nome: 'Joao', data: '2026-02-01', grupo: 'Vendas' },
@@ -32,6 +37,18 @@ const SAMPLE_DATA = [
     { nome: 'Lia', data: '2026-01-31', grupo: 'Marketing' },
     { nome: 'Paulo', data: '2026-01-31', grupo: 'Suporte' }
 ];
+
+function normalizeGroupName(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function isGrupoPermitidoNoDashboard(groupName) {
+    return DASHBOARD_GROUPS_PERMITIDOS.has(normalizeGroupName(groupName));
+}
 
 function getAuthToken() {
     try {
@@ -313,7 +330,7 @@ async function carregarPainelGruposVisual() {
         if (response.ok && (!body || body.ok !== false)) {
             for (const grupo of body.grupos || []) {
                 const nome = grupo && typeof grupo.nome === 'string' ? grupo.nome.trim() : '';
-                if (nome) {
+                if (nome && isGrupoPermitidoNoDashboard(nome)) {
                     grupos.add(nome);
                 }
             }
@@ -326,7 +343,7 @@ async function carregarPainelGruposVisual() {
         if (response.ok && (!body || body.ok !== false)) {
             for (const grupo of body.grupos || []) {
                 const nome = typeof grupo === 'string' ? grupo.trim() : '';
-                if (nome) {
+                if (nome && isGrupoPermitidoNoDashboard(nome)) {
                     grupos.add(nome);
                 }
             }
@@ -426,7 +443,7 @@ function extrairGrupos(interacoes) {
         }
 
         const nomeGrupo = item.grupo.trim();
-        if (nomeGrupo) {
+        if (nomeGrupo && isGrupoPermitidoNoDashboard(nomeGrupo)) {
             grupos.add(nomeGrupo);
         }
     }
@@ -853,7 +870,7 @@ async function carregarGruposDoSupabase() {
                 continue;
             }
             const nome = grupo.nome.trim();
-            if (nome) {
+            if (nome && isGrupoPermitidoNoDashboard(nome)) {
                 grupos.add(nome);
             }
         }
@@ -872,7 +889,7 @@ async function carregarGruposDoSupabase() {
                     continue;
                 }
                 const nome = grupo.trim();
-                if (nome) {
+                if (nome && isGrupoPermitidoNoDashboard(nome)) {
                     grupos.add(nome);
                 }
             }
