@@ -16,7 +16,11 @@ const { MevFilter } = require('../imavy-bsc-buy-notifier/src/filters/mev/index.j
 const { BnbUsdPriceService } = require('../imavy-bsc-buy-notifier/src/pricing/bnbUsd/index.js');
 const { TOKENS, WBNB } = require('../imavy-bsc-buy-notifier/src/config/tokens.js');
 
-export const BUY_ALERT_GROUP = '120363420942677345@g.us';
+export const BUY_ALERT_GROUPS = [
+    '120363394030123512@g.us',
+    '120363418891665714@g.us',
+    '120363420965136323@g.us'
+];
 
 let runtime = null;
 
@@ -114,11 +118,31 @@ function buildConfig() {
 }
 
 async function sendBuyAlert(sock, text) {
-    try {
-        await sock.sendMessage(BUY_ALERT_GROUP, { text });
-        logger.info('✅ BUY ALERT enviado para TESTE IMAVY');
-    } catch (err) {
-        logger.error('❌ Erro ao enviar BUY ALERT', { error: err.message || String(err) });
+    const results = await Promise.allSettled(
+        BUY_ALERT_GROUPS.map((groupId) => sock.sendMessage(groupId, { text }))
+    );
+
+    const delivered = [];
+    const failed = [];
+
+    results.forEach((result, index) => {
+        const groupId = BUY_ALERT_GROUPS[index];
+        if (result.status === 'fulfilled') {
+            delivered.push(groupId);
+        } else {
+            failed.push({
+                groupId,
+                error: result.reason?.message || String(result.reason)
+            });
+        }
+    });
+
+    if (delivered.length > 0) {
+        logger.info('BUY ALERT enviado para grupos Vellora', { delivered });
+    }
+
+    if (failed.length > 0) {
+        logger.error('Erro ao enviar BUY ALERT para alguns grupos', { failed });
     }
 }
 
@@ -158,16 +182,20 @@ export async function stopBuyAlertNotifier() {
     await stopRuntime();
 }
 
-export async function startBuyAlertNotifier(sock) {
+export async function startBuyAlertNotifier(sock, options = {}) {
     if (!sock) {
         throw new Error('Socket Baileys nao fornecido para startBuyAlertNotifier.');
     }
+
+    const onBuyProcessed = typeof options.onBuyProcessed === 'function'
+        ? options.onBuyProcessed
+        : null;
 
     await stopRuntime();
 
     const config = buildConfig();
     logger.info('Iniciando BUY ALERT integrado ao bot principal', {
-        group: BUY_ALERT_GROUP,
+        groups: BUY_ALERT_GROUPS,
         tokens: TOKENS.map((token) => token.symbol)
     });
 
@@ -286,6 +314,24 @@ export async function startBuyAlertNotifier(sock) {
             });
 
             await sendBuyAlert(sock, message);
+            if (onBuyProcessed) {
+                try {
+                    await onBuyProcessed({
+                        symbol: buyEvent.symbol,
+                        txHash: buyEvent.txHash,
+                        tokenOut: buyEvent.tokenOut,
+                        bnbIn: buyEvent.bnbIn,
+                        usdValue,
+                        timestamp: Date.now()
+                    });
+                } catch (callbackError) {
+                    logger.warn('Falha no callback onBuyProcessed do BUY ALERT', {
+                        symbol: buyEvent.symbol,
+                        txHash: buyEvent.txHash,
+                        error: callbackError.message || String(callbackError)
+                    });
+                }
+            }
             logger.info('BUY processado com sucesso', {
                 txHash: buyEvent.txHash,
                 symbol: buyEvent.symbol,

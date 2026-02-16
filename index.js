@@ -11,7 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendSafeMessage } from './functions/messageHandler.js';
 import { attachOutgoingGuard } from './functions/outgoingGuard.js';
-import { checkViolation, getText, notifyAdmins, addStrike, getStrikes, applyPunishment } from './functions/antiSpam.js';
+import { checkViolation, getText, notifyAdmins, addStrike, getStrikes, applyPunishment, syncGroupRules } from './functions/antiSpam.js';
 import { handleWelcomeEvent } from './functions/welcomeMessage.js';
 import { getGroupStatus } from './functions/groupStats.js';
 
@@ -37,14 +37,96 @@ import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from 
 import { isRestrictedGroupName } from './functions/groupPolicy.js';
 import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js';
 import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
+import { createIntelEngine, getIntelEventBuffer, storeIntelEvent } from './src/intelligence/intelEngine.js';
 
 console.log('Ã°Å¸Â¤â€“ IA de ModeraÃƒÂ§ÃƒÂ£o:', isAIEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
 console.log('Ã°Å¸â€™Â¼ IA de Vendas:', isAISalesEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
 
+const DEFAULT_INTEL_GROUPS = [
+    "120363394030123512@g.us",
+    "120363418891665714@g.us",
+    "120363420965136323@g.us"
+];
+const INTEL_GROUPS = String(process.env.INTEL_GROUPS || DEFAULT_INTEL_GROUPS.join(','))
+    .split(',')
+    .map((groupId) => groupId.trim())
+    .filter(Boolean);
+const INTEL_GROUP_NAMES = {
+    "120363394030123512@g.us": "CriptoNoPix \u00E9 Vellora (1)",
+    "120363418891665714@g.us": "CriptoNoPix \u00E9 Vellora (2)",
+    "120363420965136323@g.us": "CriptoNoPix \u00E9 Vellora (3)"
+};
+const INTEL_MONITORED_TOKENS = String(process.env.INTEL_MONITORED_TOKENS || 'NIX,SNAP')
+    .split(',')
+    .map((token) => token.trim().toUpperCase())
+    .filter(Boolean);
+const intelEngine = createIntelEngine({
+    groupNames: INTEL_GROUP_NAMES,
+    monitoredTokens: INTEL_MONITORED_TOKENS,
+    trackedEmojis: ['🚀', '🔥', '💎']
+});
+
+function hasDashboardWebhookConfigured() {
+    return String(process.env.DASHBOARD_WEBHOOK_URL || '').trim() !== '';
+}
+
+async function readJsonBody(req, maxBytes = 64 * 1024) {
+    let body = '';
+    for await (const chunk of req) {
+        body += chunk;
+        if (body.length > maxBytes) {
+            throw new Error('Payload muito grande para /intel-event');
+        }
+    }
+
+    if (!body.trim()) {
+        return {};
+    }
+
+    return JSON.parse(body);
+}
+
 // Servidor HTTP para Railway/Render
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-    if (req.url === '/qr' && qrCodeData) {
+http.createServer(async (req, res) => {
+    const requestUrl = req.url || '/';
+
+    if (!hasDashboardWebhookConfigured() && requestUrl.startsWith('/intel-event')) {
+        if (req.method === 'GET') {
+            const payload = JSON.stringify({
+                ok: true,
+                bufferedEvents: getIntelEventBuffer()
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(payload);
+            return;
+        }
+
+        if (req.method === 'POST') {
+            try {
+                const payload = await readJsonBody(req);
+                const enriched = {
+                    ...payload,
+                    receivedAt: Date.now(),
+                    source: payload.source || 'internal-intel-endpoint'
+                };
+                storeIntelEvent(enriched);
+                console.log('INTEL EVENT RECEIVED (/intel-event):', enriched);
+                res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ ok: true }));
+            } catch (error) {
+                res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ ok: false, error: error.message }));
+            }
+            return;
+        }
+
+        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'Metodo nao permitido.' }));
+        return;
+    }
+
+    if (requestUrl === '/qr' && qrCodeData) {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(`<html><body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#000"><img src="${qrCodeData}" style="max-width:90%;max-height:90%"></body></html>`);
     } else {
@@ -312,7 +394,11 @@ async function startBot() {
                 startAutoPromo(sock);
                 startHealthMonitor();
                 startSessionBackup();
-                await startBuyAlertNotifier(sock);
+                await startBuyAlertNotifier(sock, {
+                    onBuyProcessed: async (buyEvent) => {
+                        await intelEngine.registerOnchainBuy(buyEvent);
+                    }
+                });
                 console.log('Ã¢Å“â€¦ Todos os serviÃƒÂ§os iniciados com sucesso');
             } catch (e) {
                 console.error('Ã¢ÂÅ’ Erro ao iniciar serviÃƒÂ§os:', e.message);
@@ -366,6 +452,14 @@ async function startBot() {
             const senderId = message.key.participant || message.key.remoteJid;
             const chatId = message.key.remoteJid;
 
+            if (isGroup && INTEL_GROUPS.includes(chatId)) {
+                try {
+                    await intelEngine.processMessage(message, chatId);
+                } catch (error) {
+                    console.warn('[INTEL] Falha ao processar mensagem social:', error.message || String(error));
+                }
+            }
+
             // Extrair texto usando getText()
             const messageText = getText(message);
             if (!messageText) continue;
@@ -409,9 +503,12 @@ async function startBot() {
             }
 
             let groupSubject = null;
+            let groupDescription = '';
+            let groupMetadata = null;
             try {
-                const groupMetadata = await sock.groupMetadata(chatId);
+                groupMetadata = await sock.groupMetadata(chatId);
                 groupSubject = groupMetadata.subject || '';
+                groupDescription = String(groupMetadata.desc || '').trim();
                 console.log(`Ã°Å¸â€Â DEBUG: Nome do grupo obtido: "${groupSubject}"`);
             } catch (e) {
                 console.warn('Ã¢Å¡Â Ã¯Â¸Â Falha ao obter metadata do grupo:', e.message);
@@ -438,6 +535,7 @@ async function startBot() {
             }
 
             console.log('Ã¢Å“â€¦ Grupo autorizado:', groupSubject);
+            syncGroupRules(chatId, groupSubject, groupDescription);
             const isRestrictedGroup = isRestrictedGroupName(groupSubject);
             if (isRestrictedGroup) {
                 console.log(`Ã°Å¸â€â€™ Modo restrito ativo para o grupo: "${groupSubject}"`);
@@ -478,8 +576,8 @@ async function startBot() {
             let isUserAdmin = false;
             try {
                 const isBotAdmin = await isAuthorized(senderId);
-                const groupMetadata = await sock.groupMetadata(chatId);
-                const participant = groupMetadata.participants.find(p => p.id === senderId);
+                const metadataForAdmin = groupMetadata || await sock.groupMetadata(chatId);
+                const participant = metadataForAdmin.participants.find(p => p.id === senderId);
                 const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
                 isUserAdmin = isBotAdmin || isGroupAdmin;
             } catch (e) {
@@ -507,9 +605,16 @@ async function startBot() {
                 console.log(`Ã¢Å¡Â Ã¯Â¸Â Strike aplicado: ${strikeCount}/3`);
 
                 // Aviso no grupo
-                const warning = violation.rule === 'REPEAT'
-                    ? `Ã¢Å¡Â Ã¯Â¸Â Evite repetir mensagens. (Strike ${strikeCount}/3)`
-                    : `Ã°Å¸Å¡Â« Links nÃƒÂ£o sÃƒÂ£o permitidos. (Strike ${strikeCount}/3)`;
+                let warning = `⚠️ Violacao das regras do grupo. (Strike ${strikeCount}/3)`;
+                if (violation.rule === 'LINK') {
+                    warning = `🚫 Links nao sao permitidos. (Strike ${strikeCount}/3)`;
+                } else if (violation.rule === 'FLOOD_REPEAT') {
+                    warning = `⚠️ Flood detectado: 3 mensagens iguais em menos de 1 minuto. (Strike ${strikeCount}/3)`;
+                } else if (violation.rule === 'FLOOD_VOLUME') {
+                    warning = `⚠️ Flood detectado: 10 mensagens em menos de 1 minuto. (Strike ${strikeCount}/3)`;
+                } else if (violation.rule?.startsWith('DESC_')) {
+                    warning = `⚠️ Mensagem viola regras da descricao deste grupo. (Strike ${strikeCount}/3)`;
+                }
 
                 try {
                     await sendSafeMessage(sock, chatId, { text: warning });

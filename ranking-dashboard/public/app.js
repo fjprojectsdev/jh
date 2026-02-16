@@ -9,7 +9,8 @@ const state = {
     realtimeDebounceTimer: null,
     autoRefreshTimer: null,
     opsResumoTimer: null,
-    groupVisualTimer: null
+    groupVisualTimer: null,
+    intelEventsTimer: null
 };
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
@@ -248,6 +249,150 @@ async function carregarResumoOperacao(options = {}) {
         listEl.appendChild(li);
 
         metaEl.textContent = error.message || 'Erro ao carregar dados reais.';
+        metaEl.classList.remove('delta-pos', 'delta-zero');
+        metaEl.classList.add('delta-neg');
+    }
+}
+
+function formatIntelType(type) {
+    if (type === 'SOCIAL_SPIKE') {
+        return 'Social Spike';
+    }
+
+    if (type === 'TOKEN_DOMINANCE') {
+        return 'Token Dominance';
+    }
+
+    if (type === 'SOCIAL_ONCHAIN_CONFIRM') {
+        return 'Social + Onchain';
+    }
+
+    return String(type || '-');
+}
+
+function formatIntelSignal(evento) {
+    const type = String(evento && evento.type || '');
+    if (type === 'SOCIAL_SPIKE') {
+        return `Msgs/min ${toInt(evento.messageRate)} | baseline ${Number(evento.baselineRate || 0).toFixed(2)} | ${toInt(evento.emojiCount)} emojis`;
+    }
+
+    if (type === 'TOKEN_DOMINANCE') {
+        return `Ratio ${Number(evento.ratio || 0).toFixed(2)}x | token ${toInt(evento.tokenCount)} | outros ${toInt(evento.othersCount)}`;
+    }
+
+    if (type === 'SOCIAL_ONCHAIN_CONFIRM') {
+        return `Social +${Number(evento.socialIncrease || 0).toFixed(0)}% | Buy +${Number(evento.buyIncrease || 0).toFixed(0)}%`;
+    }
+
+    return '-';
+}
+
+function renderIntelResumo(summary) {
+    const listEl = byId('intelResumoList');
+    const metaEl = byId('intelResumoMeta');
+
+    if (!listEl || !metaEl) {
+        return;
+    }
+
+    const socialSpike24h = toInt(summary && summary.socialSpike24h);
+    const tokenDominance24h = toInt(summary && summary.tokenDominance24h);
+    const socialOnchainConfirm24h = toInt(summary && summary.socialOnchainConfirm24h);
+    const totalIntel24h = toInt(summary && summary.totalIntel24h);
+
+    listEl.innerHTML = '';
+    const lines = [];
+
+    if (totalIntel24h <= 0) {
+        lines.push('Aguardando eventos inteligentes dos 3 grupos cripto.');
+    } else {
+        lines.push(`Total de eventos inteligentes (24h): ${totalIntel24h}`);
+        if (socialSpike24h > 0) {
+            lines.push(`SOCIAL_SPIKE (24h): ${socialSpike24h}`);
+        }
+        if (tokenDominance24h > 0) {
+            lines.push(`TOKEN_DOMINANCE (24h): ${tokenDominance24h}`);
+        }
+        if (socialOnchainConfirm24h > 0) {
+            lines.push(`SOCIAL_ONCHAIN_CONFIRM (24h): ${socialOnchainConfirm24h}`);
+        }
+    }
+
+    for (const text of lines) {
+        const li = document.createElement('li');
+        li.textContent = text;
+        listEl.appendChild(li);
+    }
+
+    metaEl.textContent = `Eventos atualizados em ${formatDateTimePtBr(Date.now())} (tempo real).`;
+    metaEl.classList.remove('delta-neg');
+    metaEl.classList.add('delta-zero');
+}
+
+function renderIntelEventsTable(events) {
+    const tbody = byId('intelEventsBody');
+    if (!tbody) {
+        return;
+    }
+
+    tbody.innerHTML = '';
+
+    const safeEvents = Array.isArray(events) ? events : [];
+    if (safeEvents.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="5">Sem eventos inteligentes recentes.</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+
+    for (const evento of safeEvents) {
+        const tr = document.createElement('tr');
+        const token = String(evento.token || evento.topToken || '-').trim() || '-';
+        const group = String(evento.group || evento.groupJid || '-').trim() || '-';
+        tr.innerHTML = `
+            <td>${formatDateTimePtBr(evento.timestamp)}</td>
+            <td>${formatIntelType(evento.type)}</td>
+            <td>${group}</td>
+            <td>${token}</td>
+            <td>${formatIntelSignal(evento)}</td>
+        `;
+        tbody.appendChild(tr);
+    }
+}
+
+async function carregarIntelEventos(options = {}) {
+    const metaEl = byId('intelResumoMeta');
+    const listEl = byId('intelResumoList');
+    const tbody = byId('intelEventsBody');
+
+    if (!metaEl || !listEl || !tbody) {
+        return;
+    }
+
+    if (!options.silent) {
+        metaEl.textContent = 'Carregando eventos inteligentes...';
+        metaEl.classList.remove('delta-neg', 'delta-pos', 'delta-zero');
+        metaEl.classList.add('delta-zero');
+    }
+
+    try {
+        const response = await fetchComAuth('/api/dashboard/intel-events?limit=20', { method: 'GET' });
+        const body = await response.json();
+
+        if (!response.ok || (body && body.ok === false)) {
+            throw new Error(body.error || 'Erro ao carregar eventos inteligentes.');
+        }
+
+        renderIntelResumo(body.summary || {});
+        renderIntelEventsTable(body.events || []);
+    } catch (error) {
+        listEl.innerHTML = '';
+        const li = document.createElement('li');
+        li.textContent = 'Falha ao carregar eventos inteligentes.';
+        listEl.appendChild(li);
+
+        tbody.innerHTML = '<tr><td colspan="5">Falha ao carregar eventos.</td></tr>';
+        metaEl.textContent = error.message || 'Erro ao carregar dados de inteligencia.';
         metaEl.classList.remove('delta-pos', 'delta-zero');
         metaEl.classList.add('delta-neg');
     }
@@ -825,6 +970,7 @@ function renderResultado(resultado, rankingEnriquecido, premiumMeta) {
     byId('resultados').classList.remove('hidden');
     carregarResumoOperacao({ silent: true }).catch(() => {});
     carregarPainelGruposVisual().catch(() => {});
+    carregarIntelEventos({ silent: true }).catch(() => {});
 }
 
 function shouldUseSupabaseSource(options) {
@@ -1250,6 +1396,7 @@ function init() {
     byId('dataFim').value = isoHoje;
     carregarResumoOperacao().catch(() => {});
     carregarPainelGruposVisual().catch(() => {});
+    carregarIntelEventos().catch(() => {});
     if (!state.opsResumoTimer) {
         state.opsResumoTimer = setInterval(() => {
             carregarResumoOperacao({ silent: true }).catch(() => {});
@@ -1259,6 +1406,11 @@ function init() {
         state.groupVisualTimer = setInterval(() => {
             carregarPainelGruposVisual().catch(() => {});
         }, 20000);
+    }
+    if (!state.intelEventsTimer) {
+        state.intelEventsTimer = setInterval(() => {
+            carregarIntelEventos({ silent: true }).catch(() => {});
+        }, 3000);
     }
 
     if (isSupabaseRealtimeReady()) {

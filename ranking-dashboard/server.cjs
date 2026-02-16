@@ -2,6 +2,11 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+const dotenv = require('dotenv');
+
+// Carrega variaveis locais do dashboard e tambem o .env da raiz do bot.
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 const gerarRankingParticipantesTexto = require('../functions/rankingParticipantesTextos.cjs');
 const {
@@ -20,6 +25,18 @@ const HOST = process.env.RANKING_DASHBOARD_HOST || '0.0.0.0';
 const PORT = Number(process.env.RANKING_DASHBOARD_PORT || 3010);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_BODY_BYTES = 5 * 1024 * 1024;
+const HAS_SUPABASE_ENV = Boolean(
+    (process.env.IMAVY_SUPABASE_URL || process.env.SUPABASE_URL) &&
+    (
+        process.env.IMAVY_SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.IMAVY_SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        process.env.IMAVY_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.SUPABASE_PUBLISHABLE_KEY ||
+        process.env.SUPABASE_KEY
+    )
+);
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -352,5 +369,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
     console.log(`Ranking Dashboard ativo em http://localhost:${PORT}`);
     console.log(`API health: http://localhost:${PORT}/api/health`);
+    if (!HAS_SUPABASE_ENV) {
+        console.warn('Aviso: variaveis Supabase nao encontradas no processo do dashboard. O ranking pode nao carregar dados.');
+    }
 });
 

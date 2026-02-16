@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { getIntelOpsSummary } = require('./intelEventsService.js');
 
 const ROOT_DIR = path.resolve(__dirname, '..', '..');
 const STRIKES_FILE = path.join(ROOT_DIR, 'strikes.json');
@@ -92,6 +93,11 @@ function getOpsResumo() {
     const lembretesAtivos = countLembretesAtivos(lembretesData);
     const comandosAceitos24h = countComandosAceitos24h(comandosData);
     const ameacasBloqueadas = linksBloqueados > 0 ? linksBloqueados : 0;
+    const intelSummary = getIntelOpsSummary();
+    const socialSpike24h = Number(intelSummary.socialSpike24h || 0);
+    const tokenDominance24h = Number(intelSummary.tokenDominance24h || 0);
+    const socialOnchainConfirm24h = Number(intelSummary.socialOnchainConfirm24h || 0);
+    const totalIntel24h = Number(intelSummary.totalIntel24h || 0);
 
     const itens = [];
 
@@ -122,12 +128,32 @@ function getOpsResumo() {
         });
     }
 
+    if (totalIntel24h > 0) {
+        itens.push({
+            id: 'intel_eventos_24h',
+            label: 'Eventos inteligentes (24h)',
+            valor: totalIntel24h
+        });
+    }
+
+    if (socialOnchainConfirm24h > 0) {
+        itens.push({
+            id: 'social_onchain_confirm_24h',
+            label: 'Confirmacoes social/onchain (24h)',
+            valor: socialOnchainConfirm24h
+        });
+    }
+
     return {
         atualizacao: new Date().toISOString(),
         linksBloqueados,
         ameacasBloqueadas,
         lembretesAtivos,
         comandosAceitos24h,
+        socialSpike24h,
+        tokenDominance24h,
+        socialOnchainConfirm24h,
+        totalIntel24h,
         itens
     };
 }

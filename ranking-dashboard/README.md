@@ -17,6 +17,8 @@ node ranking-dashboard/server.cjs
 - API ranking: `POST http://localhost:3010/api/ranking-texto`
 - API grupos (Supabase): `GET http://localhost:3010/api/grupos-texto`
 - API interacoes (Supabase): `GET http://localhost:3010/api/interacoes-texto?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD`
+- API inteligencia (consulta): `GET http://localhost:3010/api/dashboard/intel-events?limit=20`
+- API inteligencia (ingestao webhook): `POST http://localhost:3010/api/dashboard/intel-events`
 
 ## Modo Manual (JSON)
 
@@ -86,6 +88,19 @@ JWT payload:
 ### Dashboard por cliente (protegido)
 
 - `GET /api/dashboard/ranking?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD&grupoId=opcional`
+- `GET /api/dashboard/intel-events?limit=20&type=SOCIAL_SPIKE|TOKEN_DOMINANCE|SOCIAL_ONCHAIN_CONFIRM`
+- `POST /api/dashboard/intel-events` (webhook do bot, sem JWT; pode usar segredo)
+
+### Intelligence Mode (bot -> dashboard)
+
+No bot (`.env`):
+
+- `DASHBOARD_WEBHOOK_URL=http://localhost:3010/api/dashboard/intel-events`
+- `INTEL_WEBHOOK_SECRET=seu-segredo-forte` (opcional, recomendado)
+
+No dashboard (`.env`/ambiente):
+
+- `INTEL_WEBHOOK_SECRET=seu-segredo-forte` (mesmo valor do bot)
 
 ### Ingestao do bot para multi-cliente
 

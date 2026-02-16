@@ -3,6 +3,12 @@ const { gerarRankingPorCliente } = require('../services/rankingService.js');
 const { createInteracao, normalizeDate } = require('../models/interacao.js');
 const { sanitizeText } = require('../services/supabaseTenantClient.js');
 const { validarLimitePlano } = require('../services/grupoService.js');
+const {
+    ingestIntelEvent,
+    listIntelEvents,
+    getIntelOpsSummary,
+    isIntelWebhookAuthorized
+} = require('../services/intelEventsService.js');
 
 function isPath(pathname, candidates) {
     return candidates.includes(pathname);
@@ -13,12 +19,68 @@ async function handleDashboardRoutes(req, res, parsedUrl, helpers) {
 
     const isRankingPath = isPath(pathname, ['/dashboard/ranking', '/api/dashboard/ranking']);
     const isInteracaoPath = isPath(pathname, ['/dashboard/interacoes', '/api/dashboard/interacoes']);
+    const isIntelPath = isPath(pathname, ['/dashboard/intel-events', '/api/dashboard/intel-events']);
 
-    if (!isRankingPath && !isInteracaoPath) {
+    if (!isRankingPath && !isInteracaoPath && !isIntelPath) {
         return false;
     }
 
+    if (isIntelPath && req.method === 'POST') {
+        try {
+            if (!isIntelWebhookAuthorized(req)) {
+                helpers.sendJson(res, 403, {
+                    ok: false,
+                    error: 'Webhook de inteligencia nao autorizado.'
+                });
+                return true;
+            }
+
+            const body = await helpers.readJsonBody(req);
+            const saved = ingestIntelEvent(body);
+            helpers.sendJson(res, 202, {
+                ok: true,
+                eventId: saved.id
+            });
+        } catch (error) {
+            helpers.sendJson(res, error.statusCode || 500, {
+                ok: false,
+                error: error.message || 'Erro ao registrar evento de inteligencia.'
+            });
+        }
+
+        return true;
+    }
+
     if (!(await verificarToken(req, res, helpers))) {
+        return true;
+    }
+
+    if (isIntelPath && req.method === 'GET') {
+        try {
+            const limit = sanitizeText(parsedUrl.searchParams.get('limit') || '', 10);
+            const type = sanitizeText(parsedUrl.searchParams.get('type') || '', 64);
+            const token = sanitizeText(parsedUrl.searchParams.get('token') || '', 40);
+            const group = sanitizeText(parsedUrl.searchParams.get('group') || '', 180);
+            const events = listIntelEvents({
+                limit,
+                type,
+                token,
+                group
+            });
+            const summary = getIntelOpsSummary();
+
+            helpers.sendJson(res, 200, {
+                ok: true,
+                events,
+                summary
+            });
+        } catch (error) {
+            helpers.sendJson(res, error.statusCode || 500, {
+                ok: false,
+                error: error.message || 'Erro ao listar eventos de inteligencia.'
+            });
+        }
+
         return true;
     }
 
