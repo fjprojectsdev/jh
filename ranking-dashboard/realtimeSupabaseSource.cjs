@@ -40,9 +40,36 @@ function normalizeGroupFilter(grupoSelecionado) {
     return String(grupoSelecionado).trim();
 }
 
+function normalizeGroupsFilter(grupos) {
+    const out = [];
+    const seen = new Set();
+
+    for (const groupName of Array.isArray(grupos) ? grupos : []) {
+        const safeName = String(groupName || '').trim();
+        if (!safeName || seen.has(safeName)) {
+            continue;
+        }
+        seen.add(safeName);
+        out.push(safeName);
+    }
+
+    return out;
+}
+
+function buildInFilterFromGroups(grupos) {
+    const names = normalizeGroupsFilter(grupos);
+    if (names.length === 0) {
+        return null;
+    }
+
+    const encodedValues = names.map((name) => `"${name.replace(/"/g, '\\"')}"`);
+    return `(${encodedValues.join(',')})`;
+}
+
 async function fetchInteractionsFromSupabase(params) {
     const { dataInicio, dataFim } = params || {};
     const grupoSelecionado = normalizeGroupFilter(params && params.grupoSelecionado);
+    const gruposPermitidos = normalizeGroupsFilter(params && params.gruposPermitidos);
     const limit = Number((params && params.limit) || 50000);
 
     if (!dataInicio || !dataFim) {
@@ -54,13 +81,18 @@ async function fetchInteractionsFromSupabase(params) {
     const endpoint = new URL(`${url}/rest/v1/${tableName}`);
 
     endpoint.searchParams.set('select', 'nome,data,grupo');
-    endpoint.searchParams.set('data', `gte.${dataInicio}`);
-    endpoint.searchParams.set('data', `lte.${dataFim}`);
+    endpoint.searchParams.append('data', `gte.${dataInicio}`);
+    endpoint.searchParams.append('data', `lte.${dataFim}`);
     endpoint.searchParams.set('order', 'data.asc,created_at.asc');
     endpoint.searchParams.set('limit', String(limit));
 
     if (grupoSelecionado) {
         endpoint.searchParams.set('grupo', `eq.${grupoSelecionado}`);
+    } else {
+        const inFilter = buildInFilterFromGroups(gruposPermitidos);
+        if (inFilter) {
+            endpoint.searchParams.set('grupo', `in.${inFilter}`);
+        }
     }
 
     const response = await fetch(endpoint.toString(), {

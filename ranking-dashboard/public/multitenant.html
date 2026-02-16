@@ -94,6 +94,37 @@
       margin-top: 8px;
       background: #fff;
     }
+    .check-list {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      max-height: 240px;
+      overflow: auto;
+      background: #fff;
+    }
+    .check-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .check-item:last-child {
+      border-bottom: 0;
+    }
+    .check-item input[type='checkbox'] {
+      width: auto;
+      margin: 0;
+    }
+    .switch-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .switch-row input[type='checkbox'] {
+      width: auto;
+      margin: 0;
+    }
     .small {
       color: var(--muted);
       font-size: 12px;
@@ -177,6 +208,36 @@
       </label>
       <div class="actions"><button id="btnRanking" type="button">Gerar Ranking</button></div>
       <div class="group-item"><pre id="rankingOut"></pre></div>
+    </section>
+
+    <section id="adminCard" class="card hidden">
+      <h2>Painel Admin (Desenvolvedor)</h2>
+      <p class="subtitle">Defina quais grupos cada usuario pode visualizar e se ele pode ter mais de um grupo.</p>
+
+      <div class="grid">
+        <label><span>Email do usuario alvo</span><input id="adminTargetEmail" type="email" placeholder="usuario@email.com" /></label>
+        <label><span>Grupo principal (opcional)</span><select id="adminPrimaryGroup"><option value="">Sem grupo principal</option></select></label>
+      </div>
+
+      <div class="actions">
+        <button id="btnAdminCarregar" type="button">Carregar usuario</button>
+        <button id="btnAdminSalvar" type="button">Salvar acessos</button>
+        <button id="btnAdminResetar" type="button" class="ghost">Resetar politica</button>
+      </div>
+
+      <label class="switch-row" style="margin-top:10px;">
+        <input id="adminAllowMultiple" type="checkbox" checked />
+        <span>Permitir mais de um grupo</span>
+      </label>
+
+      <label style="margin-top:10px;">
+        <span>Grupos permitidos</span>
+        <div id="adminGroupsChecklist" class="check-list"></div>
+      </label>
+
+      <div class="group-item">
+        <pre id="adminAccessOut"></pre>
+      </div>
     </section>
 
     <p id="mtStatus" class="status">Pronto.</p>

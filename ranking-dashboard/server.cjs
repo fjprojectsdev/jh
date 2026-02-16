@@ -11,8 +11,10 @@ const {
 const { getOpsResumo } = require('./services/opsResumoService.cjs');
 const { handleAuthRoutes } = require('./routes/authRoutes.js');
 const { handleGrupoRoutes } = require('./routes/grupoRoutes.js');
+const { handleAdminRoutes } = require('./routes/adminRoutes.js');
 const { handleDashboardRoutes } = require('./routes/dashboardRoutes.js');
 const { verificarToken } = require('./auth/authMiddleware.js');
+const { resolveDashboardAccessForCliente, normalizeGroupName } = require('./services/dashboardAccessControlService.js');
 
 const HOST = process.env.RANKING_DASHBOARD_HOST || '0.0.0.0';
 const PORT = Number(process.env.RANKING_DASHBOARD_PORT || 3010);
@@ -114,6 +116,43 @@ function serveStaticFile(req, res, urlPath) {
     });
 }
 
+function uniqueGroupNames(groups) {
+    const out = [];
+    const seen = new Set();
+
+    for (const value of Array.isArray(groups) ? groups : []) {
+        const safe = String(value || '').trim();
+        const normalized = normalizeGroupName(safe);
+        if (!safe || !normalized || seen.has(normalized)) {
+            continue;
+        }
+        seen.add(normalized);
+        out.push(safe);
+    }
+
+    return out;
+}
+
+async function resolvePermittedGroupNamesFromAuth(auth) {
+    if (!auth || !auth.clienteId) {
+        return [];
+    }
+
+    const access = await resolveDashboardAccessForCliente(auth.clienteId);
+    return uniqueGroupNames(access.permittedGroupNames);
+}
+
+function isGroupNamePermitted(grupoNome, permittedGroups) {
+    const normalizedTarget = normalizeGroupName(grupoNome);
+    if (!normalizedTarget) {
+        return false;
+    }
+
+    return uniqueGroupNames(permittedGroups)
+        .map((name) => normalizeGroupName(name))
+        .includes(normalizedTarget);
+}
+
 async function handleApi(req, res, parsedUrl) {
     const pathname = parsedUrl.pathname;
     const authHelpers = { sendJson };
@@ -133,6 +172,7 @@ async function handleApi(req, res, parsedUrl) {
         }
 
         try {
+            const permittedGroupNames = await resolvePermittedGroupNamesFromAuth(req.auth);
             const payload = await readJsonBody(req);
             const {
                 interacoes,
@@ -143,10 +183,33 @@ async function handleApi(req, res, parsedUrl) {
             } = payload || {};
 
             const fonteSupabase = Boolean(usarSupabase) || !Array.isArray(interacoes);
+            const grupoSelecionadoSafe = String(grupoSelecionado || '').trim();
+
+            if (grupoSelecionadoSafe && !isGroupNamePermitted(grupoSelecionadoSafe, permittedGroupNames)) {
+                sendJson(res, 403, {
+                    ok: false,
+                    error: 'Grupo fora do escopo permitido para este usuario.'
+                });
+                return;
+            }
+
+            if (fonteSupabase && !grupoSelecionadoSafe && permittedGroupNames.length === 0) {
+                const resultado = gerarRankingParticipantesTexto([], dataInicio, dataFim, grupoSelecionadoSafe);
+                sendJson(res, 200, resultado);
+                return;
+            }
+
             const baseInteracoes = fonteSupabase
-                ? await fetchInteractionsFromSupabase({ dataInicio, dataFim, grupoSelecionado })
-                : interacoes;
-            const resultado = gerarRankingParticipantesTexto(baseInteracoes, dataInicio, dataFim, grupoSelecionado);
+                ? await fetchInteractionsFromSupabase({
+                    dataInicio,
+                    dataFim,
+                    grupoSelecionado: grupoSelecionadoSafe,
+                    gruposPermitidos: permittedGroupNames
+                })
+                : (Array.isArray(interacoes)
+                    ? interacoes.filter((item) => isGroupNamePermitted(item && item.grupo, permittedGroupNames))
+                    : []);
+            const resultado = gerarRankingParticipantesTexto(baseInteracoes, dataInicio, dataFim, grupoSelecionadoSafe);
             sendJson(res, 200, resultado);
             return;
         } catch (error) {
@@ -164,7 +227,10 @@ async function handleApi(req, res, parsedUrl) {
         }
 
         try {
-            const grupos = await fetchGroupsFromSupabase();
+            const permittedGroupNames = await resolvePermittedGroupNamesFromAuth(req.auth);
+            const gruposSupabase = await fetchGroupsFromSupabase();
+            const permittedSet = new Set(permittedGroupNames.map((name) => normalizeGroupName(name)));
+            const grupos = (gruposSupabase || []).filter((name) => permittedSet.has(normalizeGroupName(name)));
             sendJson(res, 200, { grupos });
             return;
         } catch (error) {
@@ -182,10 +248,30 @@ async function handleApi(req, res, parsedUrl) {
         }
 
         try {
+            const permittedGroupNames = await resolvePermittedGroupNamesFromAuth(req.auth);
             const dataInicio = parsedUrl.searchParams.get('dataInicio');
             const dataFim = parsedUrl.searchParams.get('dataFim');
-            const grupoSelecionado = parsedUrl.searchParams.get('grupoSelecionado') || '';
-            const interacoes = await fetchInteractionsFromSupabase({ dataInicio, dataFim, grupoSelecionado });
+            const grupoSelecionado = String(parsedUrl.searchParams.get('grupoSelecionado') || '').trim();
+
+            if (grupoSelecionado && !isGroupNamePermitted(grupoSelecionado, permittedGroupNames)) {
+                sendJson(res, 403, {
+                    ok: false,
+                    error: 'Grupo fora do escopo permitido para este usuario.'
+                });
+                return;
+            }
+
+            if (!grupoSelecionado && permittedGroupNames.length === 0) {
+                sendJson(res, 200, { interacoes: [] });
+                return;
+            }
+
+            const interacoes = await fetchInteractionsFromSupabase({
+                dataInicio,
+                dataFim,
+                grupoSelecionado,
+                gruposPermitidos: permittedGroupNames
+            });
             sendJson(res, 200, { interacoes });
             return;
         } catch (error) {
@@ -240,6 +326,10 @@ const server = http.createServer(async (req, res) => {
 
     // Rotas multi-cliente adicionadas de forma isolada.
     if (await handleAuthRoutes(req, res, parsedUrl, helpers)) {
+        return;
+    }
+
+    if (await handleAdminRoutes(req, res, parsedUrl, helpers)) {
         return;
     }
 

@@ -3,10 +3,10 @@ const {
     criarGrupoParaCliente,
     editarGrupoDoCliente,
     removerGrupoDoCliente,
-    listGruposByCliente,
     validarLimitePlano
 } = require('../services/grupoService.js');
 const { sanitizeText } = require('../services/supabaseTenantClient.js');
+const { resolveDashboardAccessForCliente } = require('../services/dashboardAccessControlService.js');
 
 function isPath(pathname, candidates) {
     return candidates.includes(pathname);
@@ -36,9 +36,14 @@ async function handleGrupoRoutes(req, res, parsedUrl, helpers) {
 
     if (req.method === 'GET' && isPath(pathname, ['/grupos', '/api/grupos'])) {
         try {
-            const grupos = await listGruposByCliente(req.auth.clienteId);
+            const acesso = await resolveDashboardAccessForCliente(req.auth.clienteId);
             const plano = await validarLimitePlano(req.auth.clienteId);
-            helpers.sendJson(res, 200, { ok: true, grupos, plano });
+            helpers.sendJson(res, 200, {
+                ok: true,
+                grupos: acesso.gruposVisiveis,
+                acesso: acesso.policy,
+                plano
+            });
         } catch (error) {
             helpers.sendJson(res, error.statusCode || 500, { ok: false, error: error.message || 'Erro ao listar grupos.' });
         }

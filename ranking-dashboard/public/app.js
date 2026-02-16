@@ -14,11 +14,6 @@ const state = {
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
 const AUTH_STORAGE_KEY = 'imavy_multitenant_token';
-const DASHBOARD_GROUPS_PERMITIDOS = new Set([
-    'criptonopix e vellora (1)',
-    'criptonopix e vellora (2)',
-    'squad web3 | @alexcpo_'
-]);
 
 const SAMPLE_DATA = [
     { nome: 'Joao', data: '2026-02-01', grupo: 'Vendas' },
@@ -47,7 +42,7 @@ function normalizeGroupName(value) {
 }
 
 function isGrupoPermitidoNoDashboard(groupName) {
-    return DASHBOARD_GROUPS_PERMITIDOS.has(normalizeGroupName(groupName));
+    return Boolean(normalizeGroupName(groupName));
 }
 
 function getAuthToken() {

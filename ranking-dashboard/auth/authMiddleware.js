@@ -1,6 +1,8 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { findGrupoById } = require('../models/grupo.js');
+const { sanitizeEmail } = require('../services/supabaseTenantClient.js');
+const { isDashboardDeveloperAdminEmail, resolveDashboardAccessForCliente } = require('../services/dashboardAccessControlService.js');
 
 function buildFallbackJwtSecret() {
     const source =
@@ -50,10 +52,17 @@ async function verificarToken(req, res, helpers) {
     try {
         const jwtSecret = getJwtSecret();
         const decoded = jwt.verify(token, jwtSecret);
+        const email = sanitizeEmail(decoded.email);
+        const dashboardRole = decoded.dashboardRole || (isDashboardDeveloperAdminEmail(email) ? 'developer_admin' : 'cliente');
+        const isDashboardAdmin = Boolean(decoded.isDashboardAdmin) || dashboardRole === 'developer_admin' || isDashboardDeveloperAdminEmail(email);
+
         req.auth = {
             clienteId: decoded.clienteId,
             plano: decoded.plano,
-            exp: decoded.exp
+            exp: decoded.exp,
+            email,
+            dashboardRole,
+            isDashboardAdmin
         };
 
         return true;
@@ -64,24 +73,50 @@ async function verificarToken(req, res, helpers) {
 }
 
 async function verificarGrupoDoCliente(req, res, helpers, grupoId) {
-    const grupo = await findGrupoById(grupoId);
+    try {
+        const grupo = await findGrupoById(grupoId);
 
-    if (!grupo) {
-        helpers.sendJson(res, 404, { ok: false, error: 'Grupo nao encontrado.' });
+        if (!grupo) {
+            helpers.sendJson(res, 404, { ok: false, error: 'Grupo nao encontrado.' });
+            return false;
+        }
+
+        if (!req.auth || grupo.clienteId !== req.auth.clienteId) {
+            helpers.sendJson(res, 403, { ok: false, error: 'Acesso negado ao grupo informado.' });
+            return false;
+        }
+
+        const access = await resolveDashboardAccessForCliente(req.auth.clienteId);
+        const visibleIds = new Set((access.gruposVisiveis || []).map((item) => item.id));
+
+        if (!visibleIds.has(grupo.id)) {
+            helpers.sendJson(res, 403, { ok: false, error: 'Grupo fora do escopo permitido para este usuario.' });
+            return false;
+        }
+
+        req.grupo = grupo;
+        return true;
+    } catch (error) {
+        helpers.sendJson(res, error.statusCode || 500, {
+            ok: false,
+            error: error.message || 'Erro ao validar acesso ao grupo.'
+        });
+        return false;
+    }
+}
+
+async function verificarAdminDashboard(req, res, helpers) {
+    if (!req.auth || !req.auth.isDashboardAdmin) {
+        helpers.sendJson(res, 403, { ok: false, error: 'Acesso restrito ao admin desenvolvedor do dashboard.' });
         return false;
     }
 
-    if (!req.auth || grupo.clienteId !== req.auth.clienteId) {
-        helpers.sendJson(res, 403, { ok: false, error: 'Acesso negado ao grupo informado.' });
-        return false;
-    }
-
-    req.grupo = grupo;
     return true;
 }
 
 module.exports = {
     getJwtSecret,
     verificarToken,
-    verificarGrupoDoCliente
+    verificarGrupoDoCliente,
+    verificarAdminDashboard
 };

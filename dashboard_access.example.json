@@ -1,0 +1,19 @@
+{
+  "updatedAt": "2026-02-16T00:00:00.000Z",
+  "policies": {
+    "cliente-uuid-exemplo": {
+      "clienteId": "cliente-uuid-exemplo",
+      "allowMultipleGroups": false,
+      "maxGroups": 1,
+      "primaryGroupId": "grupo-id-1",
+      "allowedGroupIds": [
+        "grupo-id-1"
+      ],
+      "allowedGroupNames": [
+        "CriptoNoPix e Vellora (1)"
+      ],
+      "updatedAt": "2026-02-16T00:00:00.000Z",
+      "updatedBy": "flaviojhonatan2020@gmail.com"
+    }
+  }
+}

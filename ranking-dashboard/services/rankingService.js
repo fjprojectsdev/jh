@@ -1,12 +1,12 @@
 const gerarRankingParticipantesTexto = require('../../functions/rankingParticipantesTextos.cjs');
 const {
-    listGruposByCliente,
     findGrupoById
 } = require('../models/grupo.js');
 const {
     listInteracoesByGrupoIds,
     normalizeDate
 } = require('../models/interacao.js');
+const { resolveDashboardAccessForCliente } = require('./dashboardAccessControlService.js');
 
 function mapInteracoesToRankingInput(interacoes) {
     return (interacoes || []).map((item) => ({
@@ -17,13 +17,15 @@ function mapInteracoesToRankingInput(interacoes) {
 }
 
 async function resolveGrupoIds(clienteId, grupoIdOpcional) {
-    const gruposCliente = await listGruposByCliente(clienteId);
-    const ids = gruposCliente.map((g) => g.id);
+    const access = await resolveDashboardAccessForCliente(clienteId);
+    const gruposVisiveis = access.gruposVisiveis || [];
+    const ids = gruposVisiveis.map((g) => g.id);
 
     if (!grupoIdOpcional) {
         return {
             grupoIds: ids,
-            gruposConsiderados: gruposCliente
+            gruposConsiderados: gruposVisiveis,
+            policy: access.policy
         };
     }
 
@@ -34,7 +36,7 @@ async function resolveGrupoIds(clienteId, grupoIdOpcional) {
         throw erro;
     }
 
-    if (grupo.clienteId !== clienteId) {
+    if (grupo.clienteId !== clienteId || !ids.includes(grupo.id)) {
         const erro = new Error('Acesso negado ao grupo informado.');
         erro.statusCode = 403;
         throw erro;
@@ -42,7 +44,8 @@ async function resolveGrupoIds(clienteId, grupoIdOpcional) {
 
     return {
         grupoIds: [grupo.id],
-        gruposConsiderados: [grupo]
+        gruposConsiderados: [grupo],
+        policy: access.policy
     };
 }
 
@@ -58,7 +61,7 @@ async function gerarRankingPorCliente(payload) {
         throw erro;
     }
 
-    const { grupoIds, gruposConsiderados } = await resolveGrupoIds(clienteId, grupoId);
+    const { grupoIds, gruposConsiderados, policy } = await resolveGrupoIds(clienteId, grupoId);
     const interacoes = await listInteracoesByGrupoIds(grupoIds, dataInicio, dataFim, 100000);
 
     const rankingInput = mapInteracoesToRankingInput(interacoes);
@@ -71,7 +74,8 @@ async function gerarRankingPorCliente(payload) {
             dataInicio,
             dataFim,
             totalGruposConsiderados: gruposConsiderados.length,
-            gruposConsiderados
+            gruposConsiderados,
+            policy
         }
     };
 }

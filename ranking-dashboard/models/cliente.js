@@ -94,10 +94,19 @@ async function countClientes() {
     return requestCount(query);
 }
 
+async function listClientes(limit = 200) {
+    const cappedLimit = Math.max(1, Math.min(2000, Number(limit) || 200));
+    const selectFields = 'id,nome,email,plano,criado_em';
+    const query = `${TABLE}?select=${encodeURIComponent(selectFields)}&order=criado_em.asc&limit=${cappedLimit}`;
+    const rows = await requestJson('GET', query);
+    return (rows || []).map((row) => mapClienteRow(row, false));
+}
+
 module.exports = {
     normalizePlano,
     findClienteByEmail,
     findClienteById,
     createCliente,
-    countClientes
+    countClientes,
+    listClientes
 };
