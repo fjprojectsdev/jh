@@ -8,7 +8,8 @@ const state = {
     realtimeChannel: null,
     realtimeDebounceTimer: null,
     autoRefreshTimer: null,
-    opsResumoTimer: null
+    opsResumoTimer: null,
+    groupVisualTimer: null
 };
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
@@ -238,6 +239,136 @@ async function carregarResumoOperacao(options = {}) {
         metaEl.classList.remove('delta-pos', 'delta-zero');
         metaEl.classList.add('delta-neg');
     }
+}
+
+function toInt(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+        return 0;
+    }
+    return Math.floor(n);
+}
+
+function setGroupVisualBadge() {
+    const badge = byId('gvStatusBadge');
+    if (!badge) {
+        return;
+    }
+
+    badge.classList.remove('is-warn');
+
+    if (state.realtimeEnabled) {
+        badge.textContent = 'Dashboard ativo';
+        return;
+    }
+
+    badge.textContent = 'Monitorando';
+    badge.classList.add('is-warn');
+}
+
+function renderGroupVisualRows(rows) {
+    const listEl = byId('gvListaGrupos');
+    if (!listEl) {
+        return;
+    }
+
+    listEl.innerHTML = '';
+
+    const safeRows = rows.length > 0
+        ? rows
+        : [{ nome: 'Nenhum grupo conectado', status: 'Ajuste recomendado', tone: 'is-warn' }];
+
+    for (const row of safeRows) {
+        const item = document.createElement('div');
+        item.className = 'groups-row';
+        const nome = document.createElement('strong');
+        nome.textContent = row.nome;
+
+        const status = document.createElement('em');
+        status.className = row.tone;
+        status.textContent = row.status;
+
+        item.appendChild(nome);
+        item.appendChild(status);
+        listEl.appendChild(item);
+    }
+}
+
+async function carregarPainelGruposVisual() {
+    const totalEl = byId('gvTotalGrupos');
+    const filtrosEl = byId('gvFiltrosAtivos');
+    const acoesEl = byId('gvAcoes24h');
+    if (!totalEl || !filtrosEl || !acoesEl) {
+        return;
+    }
+
+    const grupos = new Set();
+    let linksBloqueados = 0;
+    let lembretesAtivos = 0;
+    let acoes24h = 0;
+
+    try {
+        const response = await fetchComAuth('/api/grupos', { method: 'GET' });
+        const body = await response.json();
+        if (response.ok && (!body || body.ok !== false)) {
+            for (const grupo of body.grupos || []) {
+                const nome = grupo && typeof grupo.nome === 'string' ? grupo.nome.trim() : '';
+                if (nome) {
+                    grupos.add(nome);
+                }
+            }
+        }
+    } catch (_) {}
+
+    try {
+        const response = await fetchComAuth('/api/grupos-texto', { method: 'GET' });
+        const body = await response.json();
+        if (response.ok && (!body || body.ok !== false)) {
+            for (const grupo of body.grupos || []) {
+                const nome = typeof grupo === 'string' ? grupo.trim() : '';
+                if (nome) {
+                    grupos.add(nome);
+                }
+            }
+        }
+    } catch (_) {}
+
+    try {
+        const response = await fetchComAuth('/api/ops-resumo', { method: 'GET' });
+        const body = await response.json();
+        if (response.ok && body && body.ok !== false) {
+            linksBloqueados = toInt(body.linksBloqueados);
+            lembretesAtivos = toInt(body.lembretesAtivos);
+        }
+    } catch (_) {}
+
+    try {
+        const hoje = new Date();
+        const hojeUtc = new Date(Date.UTC(hoje.getUTCFullYear(), hoje.getUTCMonth(), hoje.getUTCDate()));
+        const diaIso = formatDateInput(hojeUtc);
+        const response = await fetchComAuth(`/api/interacoes-texto?dataInicio=${diaIso}&dataFim=${diaIso}`, { method: 'GET' });
+        const body = await response.json();
+        if (response.ok && (!body || body.ok !== false)) {
+            acoes24h = Array.isArray(body.interacoes) ? body.interacoes.length : 0;
+        }
+    } catch (_) {}
+
+    const totalGrupos = grupos.size;
+    const filtrosAtivos = linksBloqueados + lembretesAtivos;
+
+    totalEl.textContent = String(totalGrupos);
+    filtrosEl.textContent = String(filtrosAtivos);
+    acoesEl.textContent = String(acoes24h);
+    setGroupVisualBadge();
+
+    const nomes = Array.from(grupos)
+        .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }))
+        .slice(0, 3);
+
+    const tone = filtrosAtivos > 0 ? 'is-ok' : (acoes24h > 0 ? 'is-info' : 'is-warn');
+    const status = filtrosAtivos > 0 ? 'Protegido' : (acoes24h > 0 ? 'Monitorando' : 'Ajuste recomendado');
+    const rows = nomes.map((nome) => ({ nome, status, tone }));
+    renderGroupVisualRows(rows);
 }
 
 function isSupabaseRealtimeReady() {
@@ -691,6 +822,7 @@ function renderResultado(resultado, rankingEnriquecido, premiumMeta) {
 
     byId('resultados').classList.remove('hidden');
     carregarResumoOperacao({ silent: true }).catch(() => {});
+    carregarPainelGruposVisual().catch(() => {});
 }
 
 function shouldUseSupabaseSource(options) {
@@ -818,6 +950,7 @@ async function conectarTempoReal() {
         state.realtimeEnabled = true;
         setFonteDados('Supabase Realtime');
         setLiveBadge('Conectando...', 'loading');
+        setGroupVisualBadge();
 
         state.realtimeChannel = client
             .channel('imavy-ranking-live')
@@ -844,6 +977,7 @@ async function conectarTempoReal() {
         state.realtimeEnabled = false;
         setFonteDados('Manual (JSON)');
         setLiveBadge('Offline', 'error');
+        setGroupVisualBadge();
         setStatus(error.message || 'Falha ao conectar em tempo real.', 'error');
     }
 }
@@ -865,6 +999,7 @@ function desconectarTempoReal() {
     state.realtimeChannel = null;
     setFonteDados('Manual (JSON)');
     setLiveBadge('Offline', 'loading');
+    setGroupVisualBadge();
     setStatus('Tempo real desconectado. Modo manual ativo.', 'ok');
 }
 
@@ -1112,10 +1247,16 @@ function init() {
     byId('dataInicio').value = isoHoje;
     byId('dataFim').value = isoHoje;
     carregarResumoOperacao().catch(() => {});
+    carregarPainelGruposVisual().catch(() => {});
     if (!state.opsResumoTimer) {
         state.opsResumoTimer = setInterval(() => {
             carregarResumoOperacao({ silent: true }).catch(() => {});
         }, 15000);
+    }
+    if (!state.groupVisualTimer) {
+        state.groupVisualTimer = setInterval(() => {
+            carregarPainelGruposVisual().catch(() => {});
+        }, 20000);
     }
 
     if (isSupabaseRealtimeReady()) {
