@@ -6,7 +6,8 @@ const state = {
     realtimeEnabled: false,
     realtimeClient: null,
     realtimeChannel: null,
-    realtimeDebounceTimer: null
+    realtimeDebounceTimer: null,
+    autoRefreshTimer: null
 };
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
@@ -160,6 +161,32 @@ function setLiveBadge(text, statusType) {
     } else {
         el.classList.add('delta-zero');
     }
+
+    syncOpsOnlineBadge(statusType);
+}
+
+function syncOpsOnlineBadge(statusType) {
+    const el = byId('opsOnlineBadge');
+    if (!el) {
+        return;
+    }
+
+    el.classList.remove('is-ok', 'is-info', 'is-error');
+
+    if (statusType === 'ok') {
+        el.textContent = 'Online agora';
+        el.classList.add('is-ok');
+        return;
+    }
+
+    if (statusType === 'error') {
+        el.textContent = 'Instavel';
+        el.classList.add('is-error');
+        return;
+    }
+
+    el.textContent = 'Online 24h';
+    el.classList.add('is-info');
 }
 
 function isSupabaseRealtimeReady() {
@@ -409,6 +436,7 @@ function aplicarFiltroRapido(range) {
             byId('dataFim').value = prev.dataFim;
             setActiveQuickRange(range);
             setStatus('Ciclo anterior aplicado.', 'ok');
+            agendarGeracaoAutomatica();
             return;
         }
 
@@ -424,6 +452,7 @@ function aplicarFiltroRapido(range) {
     byId('dataFim').value = formatDateInput(fim);
     setActiveQuickRange(range);
     setStatus('Filtro rapido aplicado.', 'ok');
+    agendarGeracaoAutomatica();
 }
 
 function growthIcon(crescimentoPercentual) {
@@ -621,34 +650,73 @@ function shouldUseSupabaseSource(options) {
 }
 
 async function carregarGruposDoSupabase() {
-    const response = await fetchComAuth('/api/grupos-texto', { method: 'GET' });
-    const body = await response.json();
-
-    if (!response.ok || (body && body.ok === false)) {
-        throw new Error(body.error || 'Erro ao listar grupos do Supabase.');
-    }
-
-    if (!body || !Array.isArray(body.grupos)) {
-        return;
-    }
-
     const select = byId('grupoSelecionado');
     const atual = select.value;
-    const existentes = new Set(Array.from(select.options).map((opt) => opt.value));
+    const grupos = new Set();
+    let erroPrincipal = null;
 
-    for (const grupo of body.grupos) {
-        if (!grupo || existentes.has(grupo)) {
-            continue;
+    // 1) Fonte principal: grupos vinculados ao cliente autenticado.
+    try {
+        const responseCliente = await fetchComAuth('/api/grupos', { method: 'GET' });
+        const bodyCliente = await responseCliente.json();
+
+        if (!responseCliente.ok || (bodyCliente && bodyCliente.ok === false)) {
+            throw new Error(bodyCliente.error || 'Erro ao listar grupos do cliente.');
         }
 
+        for (const grupo of bodyCliente.grupos || []) {
+            if (!grupo || typeof grupo.nome !== 'string') {
+                continue;
+            }
+            const nome = grupo.nome.trim();
+            if (nome) {
+                grupos.add(nome);
+            }
+        }
+    } catch (error) {
+        erroPrincipal = error;
+    }
+
+    // 2) Complemento: grupos observados na tabela de interacoes de texto.
+    try {
+        const responseTexto = await fetchComAuth('/api/grupos-texto', { method: 'GET' });
+        const bodyTexto = await responseTexto.json();
+
+        if (responseTexto.ok && (!bodyTexto || bodyTexto.ok !== false)) {
+            for (const grupo of bodyTexto.grupos || []) {
+                if (typeof grupo !== 'string') {
+                    continue;
+                }
+                const nome = grupo.trim();
+                if (nome) {
+                    grupos.add(nome);
+                }
+            }
+        }
+    } catch (_) {
+        // Complemento opcional: ignorado em caso de falha.
+    }
+
+    if (grupos.size === 0 && erroPrincipal) {
+        throw erroPrincipal;
+    }
+
+    const ordenados = Array.from(grupos).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+    select.innerHTML = '';
+
+    const todos = document.createElement('option');
+    todos.value = '';
+    todos.textContent = 'Todos os grupos';
+    select.appendChild(todos);
+
+    for (const grupo of ordenados) {
         const option = document.createElement('option');
         option.value = grupo;
         option.textContent = grupo;
         select.appendChild(option);
-        existentes.add(grupo);
     }
 
-    if (atual && existentes.has(atual)) {
+    if (atual && ordenados.includes(atual)) {
         select.value = atual;
     }
 }
@@ -667,6 +735,20 @@ function agendarAtualizacaoRealtime() {
             // status tratado na pr??pria fun????o.
         });
     }, 700);
+}
+
+function agendarGeracaoAutomatica(options = {}) {
+    if (state.autoRefreshTimer) {
+        clearTimeout(state.autoRefreshTimer);
+    }
+
+    state.autoRefreshTimer = setTimeout(() => {
+        gerarDashboard({
+            silentStatus: options.silentStatus !== false
+        }).catch(() => {
+            // status tratado na propria funcao.
+        });
+    }, options.delayMs || 450);
 }
 
 async function conectarTempoReal() {
@@ -838,6 +920,7 @@ function onInteracoesChange() {
     try {
         const interacoes = parseInputJson();
         atualizarSeletorGrupos(interacoes);
+        agendarGeracaoAutomatica();
     } catch (_) {
         // Ignora erro durante digitacao parcial.
     }
@@ -944,15 +1027,29 @@ function init() {
 
     preencherSessaoInfo(authPayload);
 
-    byId('gerarBtn').addEventListener('click', gerarDashboard);
-    byId('exemploBtn').addEventListener('click', carregarExemplo);
-    byId('exportCsvBtn').addEventListener('click', exportarCsv);
-    byId('exportJsonBtn').addEventListener('click', exportarJson);
-    byId('copiarBtn').addEventListener('click', copiarRanking);
-    byId('conectarTempoRealBtn').addEventListener('click', conectarTempoReal);
-    byId('desconectarTempoRealBtn').addEventListener('click', desconectarTempoReal);
-    byId('logoutMainBtn').addEventListener('click', logoutPrincipal);
-    byId('interacoesJson').addEventListener('input', onInteracoesChange);
+    const logoutBtn = byId('logoutMainBtn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', logoutPrincipal);
+    }
+
+    const interacoesInput = byId('interacoesJson');
+    if (interacoesInput) {
+        interacoesInput.addEventListener('input', onInteracoesChange);
+    }
+
+    byId('dataInicio').addEventListener('change', () => {
+        setActiveQuickRange('');
+        agendarGeracaoAutomatica();
+    });
+
+    byId('dataFim').addEventListener('change', () => {
+        setActiveQuickRange('');
+        agendarGeracaoAutomatica();
+    });
+
+    byId('grupoSelecionado').addEventListener('change', () => {
+        agendarGeracaoAutomatica();
+    });
 
     initQuickFilters();
 
@@ -962,10 +1059,18 @@ function init() {
 
     byId('dataInicio').value = isoHoje;
     byId('dataFim').value = isoHoje;
-    setFonteDados('Manual (JSON)');
-    setLiveBadge('Offline', 'loading');
-    setStatus('Pronto. Para dados reais, conecte em tempo real. Para teste, use "Carregar Exemplo".', 'ok');
-    carregarGruposDoSupabase().catch(() => {});
+
+    if (isSupabaseRealtimeReady()) {
+        setFonteDados('Supabase Realtime');
+        setLiveBadge('Conectando...', 'loading');
+        setStatus('Conectando automaticamente ao tempo real...', 'ok');
+        conectarTempoReal();
+    } else {
+        setFonteDados('Manual (JSON)');
+        setLiveBadge('Offline', 'loading');
+        setStatus('Realtime indisponivel. Modo manual com atualizacao automatica habilitado.', 'error');
+        carregarGruposDoSupabase().catch(() => {});
+    }
 }
 
 window.addEventListener('DOMContentLoaded', init);
