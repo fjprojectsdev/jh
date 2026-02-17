@@ -38,6 +38,7 @@ import { isRestrictedGroupName } from './functions/groupPolicy.js';
 import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js';
 import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
 import { createIntelEngine, getIntelEventBuffer, storeIntelEvent } from './src/intelligence/intelEngine.js';
+import { createLeadEngine } from './src/intelligence/leadEngine.js';
 
 console.log('Ã°Å¸Â¤â€“ IA de ModeraÃƒÂ§ÃƒÂ£o:', isAIEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
 console.log('Ã°Å¸â€™Â¼ IA de Vendas:', isAISalesEnabled() ? 'Ã¢Å“â€¦ ATIVA (Groq)' : 'Ã¢ÂÅ’ Desabilitada');
@@ -60,6 +61,10 @@ const INTEL_MONITORED_TOKENS = String(process.env.INTEL_MONITORED_TOKENS || 'NIX
     .filter(Boolean);
 const intelEngine = createIntelEngine({
     groupNames: INTEL_GROUP_NAMES,
+    monitoredTokens: INTEL_MONITORED_TOKENS,
+    trackedEmojis: ['🚀', '🔥', '💎']
+});
+const leadEngine = createLeadEngine({
     monitoredTokens: INTEL_MONITORED_TOKENS,
     trackedEmojis: ['🚀', '🔥', '💎']
 });
@@ -453,6 +458,8 @@ async function startBot() {
             if (isGroup && INTEL_GROUPS.includes(chatId)) {
                 try {
                     await intelEngine.processMessage(message, chatId);
+                    const intelGroupName = INTEL_GROUP_NAMES[chatId] || chatId;
+                    leadEngine.processMessage(message, chatId, intelGroupName);
                 } catch (error) {
                     console.warn('[INTEL] Falha ao processar mensagem social:', error.message || String(error));
                 }
@@ -547,6 +554,11 @@ async function startBot() {
 
             if (isCommand) {
                 console.log('Ã¢Å¡Â¡ COMANDO detectado:', messageText.split(' ')[0]);
+
+                if (messageText.toLowerCase().startsWith('/leads')) {
+                    await leadEngine.handleLeadsCommand(sock, chatId);
+                    continue;
+                }
 
                 // Comando DEV (funciona em grupo e privado)
                 if (!isRestrictedGroup && messageText.toLowerCase().startsWith('/dev')) {
