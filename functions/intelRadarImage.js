@@ -128,14 +128,12 @@ export async function renderIntelRadarImages(report) {
         loadFont(SANS_16_WHITE)
     ]);
 
-    const tokenPages = chunk(report?.tokenAnalytics || [], TOKENS_PER_PAGE);
-    const userPages = chunk(report?.topActiveUsers || [], USERS_PER_PAGE);
-    const pages = Math.max(tokenPages.length, userPages.length);
+    const tokens = chunk(report?.tokenAnalytics || [], TOKENS_PER_PAGE)[0] || [];
+    const users = chunk(report?.topActiveUsers || [], USERS_PER_PAGE)[0] || [];
+    const pages = 1;
     const buffers = [];
 
     for (let page = 0; page < pages; page += 1) {
-        const tokens = tokenPages[page] || [];
-        const users = userPages[page] || [];
         const image = new Jimp({ width: WIDTH, height: HEIGHT, color: COLORS.bg });
 
         fillRect(image, 24, 24, WIDTH - 48, 140, COLORS.panel);
@@ -203,7 +201,7 @@ export async function renderIntelRadarImages(report) {
         users.forEach((user, idx) => {
             const y = 892 + (idx * 38);
             fillRect(image, 40, y - 2, WIDTH - 80, 30, idx % 2 === 0 ? COLORS.rowA : COLORS.rowB);
-            image.print({ font: bodyFont, x: 46, y, text: `${(page * USERS_PER_PAGE) + idx + 1}`, maxWidth: 80 });
+            image.print({ font: bodyFont, x: 46, y, text: `${idx + 1}`, maxWidth: 80 });
             image.print({ font: bodyFont, x: 156, y, text: String(user.name || '-'), maxWidth: 450 });
             image.print({ font: bodyFont, x: 640, y, text: formatNumber(user.totalMessages), maxWidth: 130 });
             const status = userActivityStatus(user.totalMessages);
