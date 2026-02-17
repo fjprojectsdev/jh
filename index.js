@@ -471,6 +471,11 @@ async function startBot() {
 
             // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
             if (!isGroup) {
+                if (messageText.toLowerCase().startsWith('/leads')) {
+                    await leadEngine.handleLeadsCommand(sock, chatId);
+                    continue;
+                }
+
                 // Comando /dev (ativar modo desenvolvedor)
                 if (messageText.startsWith('/dev')) {
                     await handleDevCommand(sock, message, messageText);
