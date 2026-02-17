@@ -47,8 +47,7 @@ const MIME_TYPES = {
 };
 const FORCED_RANKING_GROUPS = [
     'CriptoNoPix é Vellora (1)',
-    'CriptoNoPix é Vellora (2)',
-    'CriptoNoPix é Vellora (3)'
+    'CriptoNoPix é Vellora (2)'
 ];
 
 function sendJson(res, statusCode, payload) {

@@ -1,6 +1,19 @@
 const { fetchGroupsFromSupabase } = require('../../realtimeSupabaseSource.cjs');
 const { verificarToken } = require('../../auth/authMiddleware.js');
 
+const FORCED_RANKING_GROUPS = [
+    'CriptoNoPix é Vellora (1)',
+    'CriptoNoPix é Vellora (2)'
+];
+
+function normalizeGroupName(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
 function response(statusCode, body) {
     return {
         statusCode,
@@ -36,7 +49,9 @@ exports.handler = async (event) => {
     }
 
     try {
-        const grupos = await fetchGroupsFromSupabase();
+        const allowedSet = new Set(FORCED_RANKING_GROUPS.map((name) => normalizeGroupName(name)));
+        const grupos = (await fetchGroupsFromSupabase())
+            .filter((name) => allowedSet.has(normalizeGroupName(name)));
         return response(200, { grupos });
     } catch (error) {
         return response(400, {

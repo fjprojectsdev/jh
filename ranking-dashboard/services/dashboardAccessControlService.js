@@ -10,7 +10,6 @@ const DEVELOPER_ADMIN_EMAILS_DEFAULT = new Set([
 const FORCED_VISIBLE_GROUPS = [
     'CriptoNoPix é Vellora (1)',
     'CriptoNoPix é Vellora (2)',
-    'CriptoNoPix é Vellora (3)',
     'SQUAD Web3 | @AlexCPO_'
 ];
 const FORCED_VISIBLE_GROUPS_SET = new Set(FORCED_VISIBLE_GROUPS.map((name) => normalizeGroupName(name)));

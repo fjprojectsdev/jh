@@ -1,6 +1,19 @@
 const { fetchInteractionsFromSupabase } = require('../../realtimeSupabaseSource.cjs');
 const { verificarToken } = require('../../auth/authMiddleware.js');
 
+const FORCED_RANKING_GROUPS = [
+    'CriptoNoPix é Vellora (1)',
+    'CriptoNoPix é Vellora (2)'
+];
+
+function normalizeGroupName(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
 function response(statusCode, body) {
     return {
         statusCode,
@@ -37,10 +50,14 @@ exports.handler = async (event) => {
 
     try {
         const params = event.queryStringParameters || {};
+        const allowedSet = new Set(FORCED_RANKING_GROUPS.map((name) => normalizeGroupName(name)));
+        const requestedGroup = String(params.grupoSelecionado || '').trim();
+        const safeGroup = allowedSet.has(normalizeGroupName(requestedGroup)) ? requestedGroup : '';
         const interacoes = await fetchInteractionsFromSupabase({
             dataInicio: params.dataInicio,
             dataFim: params.dataFim,
-            grupoSelecionado: params.grupoSelecionado || ''
+            grupoSelecionado: safeGroup,
+            gruposPermitidos: FORCED_RANKING_GROUPS
         });
 
         return response(200, { interacoes });

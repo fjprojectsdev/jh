@@ -2,6 +2,19 @@ const gerarRankingParticipantesTexto = require('./ranking-engine.cjs');
 const { fetchInteractionsFromSupabase } = require('../../realtimeSupabaseSource.cjs');
 const { verificarToken } = require('../../auth/authMiddleware.js');
 
+const FORCED_RANKING_GROUPS = [
+    'CriptoNoPix é Vellora (1)',
+    'CriptoNoPix é Vellora (2)'
+];
+
+function normalizeGroupName(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
 function response(statusCode, body) {
     return {
         statusCode,
@@ -46,12 +59,19 @@ exports.handler = async (event) => {
             usarSupabase
         } = payload;
 
+        const allowedSet = new Set(FORCED_RANKING_GROUPS.map((name) => normalizeGroupName(name)));
+        const safeGroup = allowedSet.has(normalizeGroupName(grupoSelecionado)) ? String(grupoSelecionado).trim() : '';
         const fonteSupabase = Boolean(usarSupabase) || !Array.isArray(interacoes);
         const baseInteracoes = fonteSupabase
-            ? await fetchInteractionsFromSupabase({ dataInicio, dataFim, grupoSelecionado })
-            : interacoes;
+            ? await fetchInteractionsFromSupabase({
+                dataInicio,
+                dataFim,
+                grupoSelecionado: safeGroup,
+                gruposPermitidos: FORCED_RANKING_GROUPS
+            })
+            : interacoes.filter((item) => allowedSet.has(normalizeGroupName(item && item.grupo)));
 
-        const resultado = gerarRankingParticipantesTexto(baseInteracoes, dataInicio, dataFim, grupoSelecionado);
+        const resultado = gerarRankingParticipantesTexto(baseInteracoes, dataInicio, dataFim, safeGroup);
         return response(200, resultado);
     } catch (error) {
         return response(400, {
