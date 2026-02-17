@@ -45,6 +45,11 @@ const MIME_TYPES = {
     '.json': 'application/json; charset=utf-8',
     '.txt': 'text/plain; charset=utf-8'
 };
+const FORCED_RANKING_GROUPS = [
+    'CriptoNoPix é Vellora (1)',
+    'CriptoNoPix é Vellora (2)',
+    'CriptoNoPix é Vellora (3)'
+];
 
 function sendJson(res, statusCode, payload) {
     const body = JSON.stringify(payload);
@@ -150,6 +155,11 @@ function uniqueGroupNames(groups) {
     return out;
 }
 
+function applyForcedRankingScope(groups) {
+    const rankingSet = new Set(FORCED_RANKING_GROUPS.map((name) => normalizeGroupName(name)));
+    return uniqueGroupNames(groups).filter((name) => rankingSet.has(normalizeGroupName(name)));
+}
+
 async function resolvePermittedGroupNamesFromAuth(auth) {
     if (!auth || !auth.clienteId) {
         return [];
@@ -189,7 +199,7 @@ async function handleApi(req, res, parsedUrl) {
         }
 
         try {
-            const permittedGroupNames = await resolvePermittedGroupNamesFromAuth(req.auth);
+            const permittedGroupNames = applyForcedRankingScope(await resolvePermittedGroupNamesFromAuth(req.auth));
             const payload = await readJsonBody(req);
             const {
                 interacoes,
@@ -244,7 +254,7 @@ async function handleApi(req, res, parsedUrl) {
         }
 
         try {
-            const permittedGroupNames = await resolvePermittedGroupNamesFromAuth(req.auth);
+            const permittedGroupNames = applyForcedRankingScope(await resolvePermittedGroupNamesFromAuth(req.auth));
             const gruposSupabase = await fetchGroupsFromSupabase();
             const permittedSet = new Set(permittedGroupNames.map((name) => normalizeGroupName(name)));
             const grupos = (gruposSupabase || []).filter((name) => permittedSet.has(normalizeGroupName(name)));
@@ -265,7 +275,7 @@ async function handleApi(req, res, parsedUrl) {
         }
 
         try {
-            const permittedGroupNames = await resolvePermittedGroupNamesFromAuth(req.auth);
+            const permittedGroupNames = applyForcedRankingScope(await resolvePermittedGroupNamesFromAuth(req.auth));
             const dataInicio = parsedUrl.searchParams.get('dataInicio');
             const dataFim = parsedUrl.searchParams.get('dataFim');
             const grupoSelecionado = String(parsedUrl.searchParams.get('grupoSelecionado') || '').trim();

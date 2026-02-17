@@ -7,6 +7,13 @@ const DASHBOARD_ACCESS_PATH = path.resolve(__dirname, '..', '..', 'dashboard_acc
 const DEVELOPER_ADMIN_EMAILS_DEFAULT = new Set([
     'flaviojhonatan2020@gmail.com'
 ]);
+const FORCED_VISIBLE_GROUPS = [
+    'CriptoNoPix é Vellora (1)',
+    'CriptoNoPix é Vellora (2)',
+    'CriptoNoPix é Vellora (3)',
+    'SQUAD Web3 | @AlexCPO_'
+];
+const FORCED_VISIBLE_GROUPS_SET = new Set(FORCED_VISIBLE_GROUPS.map((name) => normalizeGroupName(name)));
 
 function normalizeGroupName(value) {
     return String(value || '')
@@ -191,6 +198,9 @@ function applyPolicyToGroups(grupos, policy) {
         const names = new Set(safePolicy.allowedGroupNames.map((name) => normalizeGroupName(name)));
         filtered = filtered.filter((g) => names.has(normalizeGroupName(g.nome)));
     }
+
+    // Escopo fixo de grupos visiveis no dashboard principal.
+    filtered = filtered.filter((g) => FORCED_VISIBLE_GROUPS_SET.has(normalizeGroupName(g.nome)));
 
     filtered.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }));
 
