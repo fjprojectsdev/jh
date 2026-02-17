@@ -18,6 +18,7 @@ const IMAGE_BG_COLOR = 0x06143bff;
 const IMAGE_ACCENT_COLOR = 0x0f2d7bff;
 const LEADS_STATE_FILE = path.join(__dirname, '..', '..', 'leads_state.json');
 const SAVE_DEBOUNCE_MS = 5000;
+const SAVE_INTERVAL_MS = 60000;
 
 const STOP_WORDS = new Set([
     'de', 'do', 'da', 'dos', 'das', 'e', 'em', 'no', 'na', 'nos', 'nas', 'o', 'a', 'os', 'as',
@@ -36,6 +37,33 @@ const CRYPTO_RELEVANT_WORDS = new Set([
     'dex', 'chart', 'grafico', 'pool', 'staking', 'marketcap', 'volume', 'listagem',
     'preco', 'alvo', 'resistencia', 'suporte', 'pix', 'exchange', 'binance', 'mexc'
 ]);
+
+const leadEngineInstances = new Set();
+let persistenceHooksBound = false;
+
+function flushAllLeadEngines() {
+    for (const engine of leadEngineInstances) {
+        try {
+            engine.saveStateNow();
+        } catch (_) {
+            // noop
+        }
+    }
+}
+
+function bindPersistenceHooks() {
+    if (persistenceHooksBound) {
+        return;
+    }
+
+    persistenceHooksBound = true;
+    const events = ['beforeExit', 'exit', 'SIGINT', 'SIGTERM', 'uncaughtException'];
+    for (const event of events) {
+        process.on(event, () => {
+            flushAllLeadEngines();
+        });
+    }
+}
 
 function normalizeText(value) {
     return String(value || '')
@@ -312,8 +340,12 @@ export class LeadEngine {
             this.monitoredTokens.map((token) => [token, new RegExp(`\\b${escapeRegex(token)}\\b`, 'gi')])
         );
         this.pendingSaveTimer = null;
+        this.periodicSaveTimer = null;
         this.lastSavedAt = 0;
         this.loadState();
+        this.startPeriodicSave();
+        leadEngineInstances.add(this);
+        bindPersistenceHooks();
     }
 
     makeLeadKey(userId, groupId) {
@@ -382,6 +414,19 @@ export class LeadEngine {
             this.lastSavedAt = Date.now();
         } catch (_) {
             // noop
+        }
+    }
+
+    startPeriodicSave() {
+        if (this.periodicSaveTimer) {
+            return;
+        }
+
+        this.periodicSaveTimer = setInterval(() => {
+            this.saveStateNow();
+        }, SAVE_INTERVAL_MS);
+        if (typeof this.periodicSaveTimer.unref === 'function') {
+            this.periodicSaveTimer.unref();
         }
     }
 
