@@ -11,7 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendSafeMessage } from './functions/messageHandler.js';
 import { attachOutgoingGuard } from './functions/outgoingGuard.js';
-import { checkViolation, getText, notifyAdmins, addStrike, getStrikes, applyPunishment, syncGroupRules } from './functions/antiSpam.js';
+import { checkViolation, getText, notifyAdmins, addStrike, getStrikes, applyPunishment } from './functions/antiSpam.js';
 import { handleWelcomeEvent } from './functions/welcomeMessage.js';
 import { getGroupStatus } from './functions/groupStats.js';
 
@@ -533,7 +533,6 @@ async function startBot() {
             }
 
             console.log('Ã¢Å“â€¦ Grupo autorizado:', groupSubject);
-            syncGroupRules(chatId, groupSubject, groupDescription);
             const isRestrictedGroup = isRestrictedGroupName(groupSubject);
             if (isRestrictedGroup) {
                 console.log(`Ã°Å¸â€â€™ Modo restrito ativo para o grupo: "${groupSubject}"`);
