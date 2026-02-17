@@ -2,6 +2,7 @@ import { createRequire } from 'module';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { runIntelRadar } from '../../functions/intelRadar.js';
 
 const require = createRequire(import.meta.url);
 const { Jimp, loadFont } = require('jimp');
@@ -698,6 +699,8 @@ export class LeadEngine {
             timestamp: now,
             groupId: safeGroupId,
             groupName: String(groupName || safeGroupId),
+            userId,
+            displayName: String(message?.pushName || '').trim(),
             text
         });
 
@@ -789,43 +792,28 @@ export class LeadEngine {
     }
 
     async handleLeadsCommand(sock, chatId) {
-        const now = Date.now();
-        const allLeads = this.getTopLeads(LEADS_LIMIT, now);
-        if (allLeads.length === 0) {
-            await sock.sendMessage(chatId, { text: 'Nenhum lead detectado ainda.' });
+        const radar = await runIntelRadar({
+            messages: this.messageLog,
+            chatId,
+            now: Date.now()
+        });
+
+        if (!radar || (!radar.text && (!radar.images || radar.images.length === 0))) {
+            await sock.sendMessage(chatId, { text: '📊 Nenhum dado para gerar o radar.' });
             return;
         }
 
-        const report = buildRadarReport(allLeads, now);
+        if (radar.text) {
+            await sock.sendMessage(chatId, { text: radar.text });
+        }
 
-        try {
-            const imageBuffer = await renderCommercialRadarImage(report);
+        const safeImages = Array.isArray(radar.images) ? radar.images : [];
+        for (const imageBuffer of safeImages) {
             await sock.sendMessage(chatId, {
                 image: imageBuffer,
                 mimetype: 'image/png',
                 caption: 'IMAVY RADAR COMERCIAL'
             });
-            await sock.sendMessage(chatId, { text: 'Use /leads completo para ver todos os membros analisados.' });
-        } catch (error) {
-            const fallbackLines = [
-                'IMAVY RADAR COMERCIAL',
-                'Ranking de Interesse da Comunidade',
-                '',
-                `Interessados altos: ${report.summary.high}`,
-                `Interessados medios: ${report.summary.medium}`,
-                `Interessados baixos: ${report.summary.low}`,
-                `Total analisado: ${report.summary.totalAnalyzed}`,
-                `Potencial estimado total: ${formatUsd(report.summary.totalPotential)}`,
-                ''
-            ];
-
-            report.topLeads.forEach((lead) => {
-                fallbackLines.push(`${lead.rankBadge} ${lead.identity} | ${lead.level.label} | ${formatUsd(lead.estimatedValue)} | ${lead.groupName}`);
-            });
-
-            fallbackLines.push('');
-            fallbackLines.push('Use /leads completo para ver todos os membros analisados.');
-            await sock.sendMessage(chatId, { text: fallbackLines.join('\n') });
         }
     }
 }
