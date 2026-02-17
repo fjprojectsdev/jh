@@ -16,11 +16,11 @@ const { MevFilter } = require('../imavy-bsc-buy-notifier/src/filters/mev/index.j
 const { BnbUsdPriceService } = require('../imavy-bsc-buy-notifier/src/pricing/bnbUsd/index.js');
 const { TOKENS, WBNB } = require('../imavy-bsc-buy-notifier/src/config/tokens.js');
 
-export const BUY_ALERT_GROUPS = [
+const DEFAULT_BUY_ALERT_GROUPS = [
     '120363394030123512@g.us',
-    '120363418891665714@g.us',
-    '120363420965136323@g.us'
+    '120363418891665714@g.us'
 ];
+const FIXED_BUY_ALERT_GROUP_SET = new Set(DEFAULT_BUY_ALERT_GROUPS);
 
 let runtime = null;
 
@@ -52,6 +52,17 @@ function envNumberList(name, fallback) {
         .map((item) => Number(item.trim()))
         .filter((item) => Number.isFinite(item) && item > 0);
     return list.length > 0 ? list : fallback;
+}
+
+function resolveBuyAlertGroups() {
+    const fallback = DEFAULT_BUY_ALERT_GROUPS.join(',');
+    const raw = env('BUY_ALERT_GROUPS', env('INTEL_GROUPS', fallback));
+    const parsed = raw
+        .split(',')
+        .map((groupId) => groupId.trim())
+        .filter(Boolean);
+    const filtered = parsed.filter((groupId) => FIXED_BUY_ALERT_GROUP_SET.has(groupId));
+    return filtered.length > 0 ? filtered : DEFAULT_BUY_ALERT_GROUPS;
 }
 
 function shortWallet(address) {
@@ -103,7 +114,7 @@ function buildConfig() {
     return {
         bscWsUrl: env('BSC_WS_URL', 'wss://bsc.publicnode.com'),
         bscHttpUrl: env('BSC_HTTP_URL', 'https://bsc.publicnode.com'),
-        minUsdAlert: envNumber('MIN_USD_ALERT', 5),
+        minUsdAlert: envNumber('MIN_USD_ALERT', 200),
         tokenCooldownMs: envNumber('TOKEN_COOLDOWN_MS', 8_000),
         dedupTtlMs: envNumber('DEDUP_TTL_MS', 24 * 60 * 60 * 1_000),
         enableMevFilter: envBoolean('ENABLE_MEV_FILTER', true),
@@ -117,16 +128,16 @@ function buildConfig() {
     };
 }
 
-async function sendBuyAlert(sock, text) {
+async function sendBuyAlert(sock, text, groups) {
     const results = await Promise.allSettled(
-        BUY_ALERT_GROUPS.map((groupId) => sock.sendMessage(groupId, { text }))
+        groups.map((groupId) => sock.sendMessage(groupId, { text }))
     );
 
     const delivered = [];
     const failed = [];
 
     results.forEach((result, index) => {
-        const groupId = BUY_ALERT_GROUPS[index];
+        const groupId = groups[index];
         if (result.status === 'fulfilled') {
             delivered.push(groupId);
         } else {
@@ -194,8 +205,14 @@ export async function startBuyAlertNotifier(sock, options = {}) {
     await stopRuntime();
 
     const config = buildConfig();
+    const groups = resolveBuyAlertGroups();
+
+    if (groups.length === 0) {
+        throw new Error('Nenhum grupo configurado para BUY ALERT (BUY_ALERT_GROUPS/INTEL_GROUPS).');
+    }
+
     logger.info('Iniciando BUY ALERT integrado ao bot principal', {
-        groups: BUY_ALERT_GROUPS,
+        groups,
         tokens: TOKENS.map((token) => token.symbol)
     });
 
@@ -313,7 +330,7 @@ export async function startBuyAlertNotifier(sock, options = {}) {
                 pair: buyEvent.pair
             });
 
-            await sendBuyAlert(sock, message);
+            await sendBuyAlert(sock, message, groups);
             if (onBuyProcessed) {
                 try {
                     await onBuyProcessed({
@@ -367,5 +384,6 @@ export async function startBuyAlertNotifier(sock, options = {}) {
 }
 
 export async function sendBuyAlertDirect(sock, text) {
-    await sendBuyAlert(sock, text);
+    const groups = resolveBuyAlertGroups();
+    await sendBuyAlert(sock, text, groups);
 }

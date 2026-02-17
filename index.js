@@ -44,8 +44,7 @@ console.log('Ã°Å¸â€™Â¼ IA de Vendas:', isAISalesEnabled() ? 'Ã¢Å�
 
 const DEFAULT_INTEL_GROUPS = [
     "120363394030123512@g.us",
-    "120363418891665714@g.us",
-    "120363420965136323@g.us"
+    "120363418891665714@g.us"
 ];
 const INTEL_GROUPS = String(process.env.INTEL_GROUPS || DEFAULT_INTEL_GROUPS.join(','))
     .split(',')
@@ -53,8 +52,7 @@ const INTEL_GROUPS = String(process.env.INTEL_GROUPS || DEFAULT_INTEL_GROUPS.joi
     .filter(Boolean);
 const INTEL_GROUP_NAMES = {
     "120363394030123512@g.us": "CriptoNoPix \u00E9 Vellora (1)",
-    "120363418891665714@g.us": "CriptoNoPix \u00E9 Vellora (2)",
-    "120363420965136323@g.us": "CriptoNoPix \u00E9 Vellora (3)"
+    "120363418891665714@g.us": "CriptoNoPix \u00E9 Vellora (2)"
 };
 const INTEL_MONITORED_TOKENS = String(process.env.INTEL_MONITORED_TOKENS || 'NIX,SNAP')
     .split(',')
