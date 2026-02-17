@@ -21,6 +21,10 @@ const COLORS = {
     red: 0xef4444ff,
     gray: 0x9ca3afff
 };
+const PIE_COLORS = [
+    0x38bdf8ff, 0x22c55eff, 0xf59e0bff, 0xef4444ff, 0xa78bfaFF,
+    0xf97316ff, 0x10b981ff, 0xeab308ff, 0xf43f5eff, 0x14b8a6ff
+];
 
 function fillRect(image, x, y, w, h, color) {
     const sx = Math.max(0, Math.floor(x));
@@ -58,6 +62,64 @@ function temperatureColor(level) {
     if (level === 'QUENTE') return COLORS.red;
     if (level === 'MORNO') return COLORS.orange;
     return COLORS.gray;
+}
+
+function userActivityStatus(totalMessages) {
+    const count = Number(totalMessages || 0);
+    if (count >= 15) return { label: 'MUITO ATIVO', color: COLORS.green };
+    if (count >= 8) return { label: 'ATIVO', color: COLORS.orange };
+    return { label: 'NORMAL', color: COLORS.gray };
+}
+
+function drawPieSlice(image, cx, cy, radius, startAngle, endAngle, color) {
+    const r2 = radius * radius;
+    for (let y = cy - radius; y <= cy + radius; y += 1) {
+        for (let x = cx - radius; x <= cx + radius; x += 1) {
+            const dx = x - cx;
+            const dy = y - cy;
+            if ((dx * dx) + (dy * dy) > r2) continue;
+
+            let angle = Math.atan2(dy, dx);
+            if (angle < 0) angle += Math.PI * 2;
+            if (startAngle <= endAngle) {
+                if (angle >= startAngle && angle < endAngle) {
+                    image.setPixelColor(color, x, y);
+                }
+            } else if (angle >= startAngle || angle < endAngle) {
+                image.setPixelColor(color, x, y);
+            }
+        }
+    }
+}
+
+function drawPieChart(image, cx, cy, radius, tokens) {
+    const safe = (Array.isArray(tokens) ? tokens : []).slice(0, 10);
+    const total = safe.reduce((acc, t) => acc + Number(t.totalMentions || 0), 0);
+    if (total <= 0) {
+        fillRect(image, cx - radius, cy - 16, radius * 2, 32, COLORS.rowB);
+        return [];
+    }
+
+    let cursor = 0;
+    const legend = [];
+    safe.forEach((token, idx) => {
+        const value = Number(token.totalMentions || 0);
+        const portion = value / total;
+        const angleSize = portion * Math.PI * 2;
+        const color = PIE_COLORS[idx % PIE_COLORS.length];
+        drawPieSlice(image, cx, cy, radius, cursor, cursor + angleSize, color);
+        cursor += angleSize;
+        legend.push({
+            token: String(token.token || '-'),
+            value,
+            pct: portion * 100,
+            color
+        });
+    });
+
+    fillRect(image, cx - 2, cy - radius, 4, radius * 2, COLORS.bg);
+    fillRect(image, cx - radius, cy - 2, radius * 2, 4, COLORS.bg);
+    return legend;
 }
 
 export async function renderIntelRadarImages(report) {
@@ -102,28 +164,33 @@ export async function renderIntelRadarImages(report) {
             maxWidth: 390
         });
 
-        fillRect(image, 24, 350, WIDTH - 48, 430, COLORS.panel);
-        image.print({ font: bodyFont, x: 46, y: 374, text: 'Projetos mais mencionados', maxWidth: 360 });
-        image.print({ font: bodyFont, x: 46, y: 406, text: 'Token', maxWidth: 160 });
-        image.print({ font: bodyFont, x: 248, y: 406, text: 'Total', maxWidth: 80 });
-        image.print({ font: bodyFont, x: 360, y: 406, text: 'Crescimento', maxWidth: 160 });
-        image.print({ font: bodyFont, x: 566, y: 406, text: 'Status', maxWidth: 280 });
-
-        tokens.forEach((token, idx) => {
-            const y = 440 + (idx * 32);
-            fillRect(image, 40, y - 2, WIDTH - 80, 28, idx % 2 === 0 ? COLORS.rowA : COLORS.rowB);
-            const status = tokenStatus(token);
-            image.print({ font: bodyFont, x: 46, y, text: String(token.token || '-'), maxWidth: 160 });
-            image.print({ font: bodyFont, x: 248, y, text: formatNumber(token.totalMentions), maxWidth: 80 });
+        fillRect(image, 24, 350, 520, 430, COLORS.panel);
+        image.print({ font: bodyFont, x: 46, y: 374, text: 'Distribuicao de tokens (Top 10)', maxWidth: 360 });
+        const pieLegend = drawPieChart(image, 220, 560, 130, tokens);
+        pieLegend.slice(0, 10).forEach((entry, idx) => {
+            const y = 420 + (idx * 28);
+            fillRect(image, 360, y + 2, 16, 16, entry.color);
             image.print({
                 font: bodyFont,
-                x: 360,
+                x: 382,
                 y,
-                text: `${Number(token.growthRate || 0).toFixed(1)}%`,
-                maxWidth: 150
+                text: `${entry.token} ${entry.pct.toFixed(1)}%`,
+                maxWidth: 140
             });
-            fillRect(image, 566, y, 240, 24, status.color);
-            image.print({ font: bodyFont, x: 578, y: y + 2, text: status.label, maxWidth: 220 });
+        });
+
+        fillRect(image, 560, 350, 496, 430, COLORS.panel);
+        image.print({ font: bodyFont, x: 580, y: 374, text: 'Top 10 grupos', maxWidth: 180 });
+        image.print({ font: bodyFont, x: 580, y: 406, text: 'Grupo', maxWidth: 220 });
+        image.print({ font: bodyFont, x: 830, y: 406, text: 'Msgs', maxWidth: 70 });
+        image.print({ font: bodyFont, x: 920, y: 406, text: 'Ativos', maxWidth: 90 });
+        const topGroups = Array.isArray(report?.topGroups) ? report.topGroups.slice(0, 10) : [];
+        topGroups.forEach((group, idx) => {
+            const y = 440 + (idx * 32);
+            fillRect(image, 574, y - 2, 468, 28, idx % 2 === 0 ? COLORS.rowA : COLORS.rowB);
+            image.print({ font: bodyFont, x: 580, y, text: String(group.groupName || '-'), maxWidth: 240 });
+            image.print({ font: bodyFont, x: 830, y, text: formatNumber(group.totalMessages), maxWidth: 80 });
+            image.print({ font: bodyFont, x: 920, y, text: formatNumber(group.activeUsers), maxWidth: 90 });
         });
 
         fillRect(image, 24, 802, WIDTH - 48, 524, COLORS.panel);
@@ -131,6 +198,7 @@ export async function renderIntelRadarImages(report) {
         image.print({ font: bodyFont, x: 46, y: 858, text: 'Posicao', maxWidth: 90 });
         image.print({ font: bodyFont, x: 156, y: 858, text: 'Nome', maxWidth: 420 });
         image.print({ font: bodyFont, x: 640, y: 858, text: 'Mensagens', maxWidth: 160 });
+        image.print({ font: bodyFont, x: 800, y: 858, text: 'Status', maxWidth: 160 });
 
         users.forEach((user, idx) => {
             const y = 892 + (idx * 38);
@@ -138,6 +206,9 @@ export async function renderIntelRadarImages(report) {
             image.print({ font: bodyFont, x: 46, y, text: `${(page * USERS_PER_PAGE) + idx + 1}`, maxWidth: 80 });
             image.print({ font: bodyFont, x: 156, y, text: String(user.name || '-'), maxWidth: 450 });
             image.print({ font: bodyFont, x: 640, y, text: formatNumber(user.totalMessages), maxWidth: 130 });
+            const status = userActivityStatus(user.totalMessages);
+            fillRect(image, 800, y, 180, 24, status.color);
+            image.print({ font: bodyFont, x: 812, y: y + 2, text: status.label, maxWidth: 160 });
         });
 
         buffers.push(await image.getBuffer('image/png'));

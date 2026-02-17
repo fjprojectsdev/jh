@@ -222,6 +222,42 @@ export function getTopActiveUsers(messages, limit = 10) {
         .slice(0, Math.max(1, Number(limit) || 10));
 }
 
+export function getTopGroups(messages, limit = 10) {
+    const groups = new Map();
+    const safeMessages = Array.isArray(messages) ? messages : [];
+
+    for (const item of safeMessages) {
+        const groupId = String(item?.groupId || '').trim() || 'sem-grupo';
+        const groupName = String(item?.groupName || '').trim() || groupId;
+        const userId = String(item?.userId || '').trim();
+
+        if (!groups.has(groupId)) {
+            groups.set(groupId, {
+                groupId,
+                groupName,
+                totalMessages: 0,
+                activeUsersSet: new Set()
+            });
+        }
+
+        const row = groups.get(groupId);
+        row.totalMessages += 1;
+        if (userId) {
+            row.activeUsersSet.add(userId);
+        }
+    }
+
+    return Array.from(groups.values())
+        .map((row) => ({
+            groupId: row.groupId,
+            groupName: row.groupName,
+            totalMessages: row.totalMessages,
+            activeUsers: row.activeUsersSet.size
+        }))
+        .sort((a, b) => b.totalMessages - a.totalMessages)
+        .slice(0, Math.max(1, Number(limit) || 10));
+}
+
 export function classifyGroupTemperature(stats) {
     const totalMessages = Number(stats?.totalMessages || 0);
     const activeUsers = Math.max(0, Number(stats?.activeUsers || 0));
@@ -298,6 +334,7 @@ export async function runIntelRadar({ messages, chatId, now = Date.now() }) {
     });
 
     const allUsers = getTopActiveUsers(last24h, Number.POSITIVE_INFINITY);
+    const topGroups = getTopGroups(last24h, 10);
     const summary = classifyGroupTemperature({
         totalMessages: last24h.length,
         activeUsers: allUsers.length
@@ -307,6 +344,7 @@ export async function runIntelRadar({ messages, chatId, now = Date.now() }) {
         tokenAnalytics,
         hypeTokens,
         topActiveUsers: allUsers,
+        topGroups,
         summary: {
             totalMessages24h: summary.totalMessages,
             activeUsers: summary.activeUsers,
