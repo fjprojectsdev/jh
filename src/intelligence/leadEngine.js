@@ -1,8 +1,17 @@
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const { Jimp, loadFont } = require('jimp');
+const { SANS_16_WHITE, SANS_32_WHITE } = require('@jimp/plugin-print/fonts');
+
 const LEAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LEADS_LIMIT = 5000;
 const ACTIVITY_WINDOW_MS = 3 * 60 * 1000;
 const WORDS_LIMIT = 10;
 const MESSAGE_LOG_LIMIT = 12000;
+const IMAGE_WIDTH = 1200;
+const IMAGE_BG_COLOR = 0x06143bff;
+const IMAGE_ACCENT_COLOR = 0x0f2d7bff;
 
 const STOP_WORDS = new Set([
     'de', 'do', 'da', 'dos', 'das', 'e', 'em', 'no', 'na', 'nos', 'nas', 'o', 'a', 'os', 'as',
@@ -167,6 +176,63 @@ function formatLastActivity(lastActivity, now = Date.now()) {
     }
 
     return 'mais de 2 horas atrás';
+}
+
+function truncateLine(value, maxLen = 110) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (text.length <= maxLen) {
+        return text;
+    }
+    return `${text.slice(0, maxLen - 1)}…`;
+}
+
+async function renderLeadsReportImage(lines) {
+    const safeLines = (Array.isArray(lines) ? lines : []).map((line) => truncateLine(line));
+    const [titleFont, bodyFont] = await Promise.all([
+        loadFont(SANS_32_WHITE),
+        loadFont(SANS_16_WHITE)
+    ]);
+
+    const padX = 34;
+    const padY = 28;
+    const bodyLineHeight = Math.max(20, Number(bodyFont?.common?.lineHeight || 18) + 4);
+    const titleLineHeight = Math.max(38, Number(titleFont?.common?.lineHeight || 32) + 6);
+    const title = safeLines[0] || 'RANKING DE INTERESSADOS';
+    const bodyLines = safeLines.slice(1);
+    const estimatedHeight = padY * 2 + titleLineHeight + 14 + (bodyLines.length * bodyLineHeight) + 24;
+    const height = Math.min(4200, Math.max(420, estimatedHeight));
+
+    const image = new Jimp({ width: IMAGE_WIDTH, height, color: IMAGE_BG_COLOR });
+
+    for (let y = 0; y < height; y += 64) {
+        for (let x = 0; x < IMAGE_WIDTH; x += 64) {
+            if (((x + y) / 64) % 2 === 0) {
+                image.setPixelColor(IMAGE_ACCENT_COLOR, x, y);
+            }
+        }
+    }
+
+    image.print({
+        font: titleFont,
+        x: padX,
+        y: padY,
+        text: title,
+        maxWidth: IMAGE_WIDTH - (padX * 2)
+    });
+
+    let currentY = padY + titleLineHeight + 14;
+    for (const line of bodyLines) {
+        image.print({
+            font: bodyFont,
+            x: padX,
+            y: currentY,
+            text: line,
+            maxWidth: IMAGE_WIDTH - (padX * 2)
+        });
+        currentY += bodyLineHeight;
+    }
+
+    return await image.getBuffer('image/png');
 }
 
 function jidToDigits(userId) {
@@ -434,7 +500,16 @@ export class LeadEngine {
             lines.push('────────────────────');
         }
 
-        await sock.sendMessage(chatId, { text: lines.join('\n') });
+        try {
+            const imageBuffer = await renderLeadsReportImage(lines);
+            await sock.sendMessage(chatId, {
+                image: imageBuffer,
+                mimetype: 'image/png',
+                caption: '📊 Ranking de interessados (IMAVY)'
+            });
+        } catch (error) {
+            await sock.sendMessage(chatId, { text: lines.join('\n') });
+        }
     }
 }
 
