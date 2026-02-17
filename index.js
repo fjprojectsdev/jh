@@ -458,8 +458,6 @@ async function startBot() {
             if (isGroup && INTEL_GROUPS.includes(chatId)) {
                 try {
                     await intelEngine.processMessage(message, chatId);
-                    const intelGroupName = INTEL_GROUP_NAMES[chatId] || chatId;
-                    leadEngine.processMessage(message, chatId, intelGroupName);
                 } catch (error) {
                     console.warn('[INTEL] Falha ao processar mensagem social:', error.message || String(error));
                 }
@@ -524,6 +522,13 @@ async function startBot() {
                 console.warn('Ã¢Å¡Â Ã¯Â¸Â Falha ao obter metadata do grupo:', e.message);
             }
 
+            // Captura dados de lead para qualquer grupo (permitido ou nao permitido)
+            try {
+                leadEngine.processMessage(message, chatId, groupSubject || chatId);
+            } catch (e) {
+                console.warn('[LEADS] Falha ao capturar mensagem de grupo:', e.message || String(e));
+            }
+
             const normalizedGroupSubject = normalizeGroupName(groupSubject);
             if (!groupSubject || !ALLOWED_GROUP_NAMES.has(normalizedGroupSubject)) {
                 console.log(`Ã¢ÂÂ­Ã¯Â¸Â Ignorado: Grupo "${groupSubject}" nÃƒÂ£o estÃƒÂ¡ na lista permitida.`);
@@ -531,6 +536,10 @@ async function startBot() {
                 // console.log('Permitidos:', Array.from(ALLOWED_GROUP_NAMES));
 
                 const normalizedTextForGate = String(messageText || '').trimStart();
+                if (normalizedTextForGate.toLowerCase().startsWith('/leads')) {
+                    await leadEngine.handleLeadsCommand(sock, chatId);
+                    continue;
+                }
                 if (normalizedTextForGate.startsWith('/')) {
                     const lastNoticeTs = unauthorizedGroupNoticeCooldown.get(chatId) || 0;
                     const nowTs = Date.now();
