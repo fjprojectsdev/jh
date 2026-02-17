@@ -6,12 +6,16 @@ const { SANS_16_WHITE, SANS_32_WHITE } = require('@jimp/plugin-print/fonts');
 
 const WIDTH = 1080;
 const HEIGHT = 1350;
+const TOKENS_PER_PAGE = 10;
+const USERS_PER_PAGE = 10;
 
 const COLORS = {
-    bg: 0x041332ff,
-    panel: 0x0b2154ff,
-    panelAlt: 0x0d2a63ff,
-    text: 0xffffffff,
+    bg: 0x04122eff,
+    panel: 0x0a2457ff,
+    panelSoft: 0x0d2d6aff,
+    rowA: 0x12387fff,
+    rowB: 0x0f2f6dff,
+    white: 0xffffffff,
     green: 0x22c55eff,
     orange: 0xf59e0bff,
     red: 0xef4444ff,
@@ -30,27 +34,27 @@ function fillRect(image, x, y, w, h, color) {
     }
 }
 
-function chunkList(list, size = 10) {
-    const chunks = [];
+function chunk(list, size) {
     const safe = Array.isArray(list) ? list : [];
+    const pages = [];
     for (let i = 0; i < safe.length; i += size) {
-        chunks.push(safe.slice(i, i + size));
+        pages.push(safe.slice(i, i + size));
     }
-    return chunks.length ? chunks : [[]];
+    return pages.length ? pages : [[]];
 }
 
 function formatNumber(value) {
     return Number(value || 0).toLocaleString('pt-BR');
 }
 
-function statusLabel(token) {
+function tokenStatus(token) {
     const growth = Number(token?.growthRate || 0);
-    if (growth >= 50) return { text: '🔥 Hype Forte', color: COLORS.red };
-    if (growth >= 20) return { text: '🚀 Hype Moderado', color: COLORS.orange };
-    return { text: '➖ Estavel', color: COLORS.gray };
+    if (growth >= 50) return { label: 'HYPE FORTE', color: COLORS.red };
+    if (growth >= 20) return { label: 'HYPE MODERADO', color: COLORS.orange };
+    return { label: 'ESTAVEL', color: COLORS.gray };
 }
 
-function tempColor(level) {
+function temperatureColor(level) {
     if (level === 'QUENTE') return COLORS.red;
     if (level === 'MORNO') return COLORS.orange;
     return COLORS.gray;
@@ -62,95 +66,78 @@ export async function renderIntelRadarImages(report) {
         loadFont(SANS_16_WHITE)
     ]);
 
-    const tokenChunks = chunkList(report?.tokenAnalytics || [], 10);
-    const userChunks = chunkList(report?.topActiveUsers || [], 10);
-    const pages = Math.max(tokenChunks.length, userChunks.length);
+    const tokenPages = chunk(report?.tokenAnalytics || [], TOKENS_PER_PAGE);
+    const userPages = chunk(report?.topActiveUsers || [], USERS_PER_PAGE);
+    const pages = Math.max(tokenPages.length, userPages.length);
     const buffers = [];
 
     for (let page = 0; page < pages; page += 1) {
-        const tokens = tokenChunks[page] || [];
-        const users = userChunks[page] || [];
+        const tokens = tokenPages[page] || [];
+        const users = userPages[page] || [];
         const image = new Jimp({ width: WIDTH, height: HEIGHT, color: COLORS.bg });
 
-        for (let y = 0; y < HEIGHT; y += 72) {
-            for (let x = 0; x < WIDTH; x += 72) {
-                if (((x + y) / 72) % 2 === 0) {
-                    fillRect(image, x, y, 72, 72, 0x081a43ff);
-                }
-            }
-        }
+        fillRect(image, 24, 24, WIDTH - 48, 140, COLORS.panel);
+        image.print({ font: titleFont, x: 46, y: 48, text: 'IMAVY RADAR COMERCIAL', maxWidth: 700 });
+        image.print({ font: bodyFont, x: 46, y: 98, text: 'Ranking de Interesse da Comunidade', maxWidth: 450 });
+        image.print({ font: bodyFont, x: WIDTH - 220, y: 52, text: `Pagina ${page + 1}/${pages}`, maxWidth: 170 });
 
-        fillRect(image, 28, 24, WIDTH - 56, 150, COLORS.panel);
-        image.print({ font: titleFont, x: 48, y: 46, text: 'IMAVY RADAR COMERCIAL', maxWidth: 700 });
-        image.print({ font: bodyFont, x: 48, y: 100, text: 'Ranking de Interesse da Comunidade', maxWidth: 500 });
-        image.print({
-            font: bodyFont,
-            x: WIDTH - 280,
-            y: 46,
-            text: `Pagina ${page + 1}/${pages}`,
-            maxWidth: 220
-        });
-
-        fillRect(image, 28, 190, WIDTH - 56, 150, COLORS.panelAlt);
+        fillRect(image, 24, 182, WIDTH - 48, 150, COLORS.panelSoft);
         const summary = report?.summary || {};
-        const blocks = [
+        const lines = [
             `Total analisado: ${formatNumber(summary.totalMessages24h)}`,
             `Participantes ativos: ${formatNumber(summary.activeUsers)}`,
             `Nivel do grupo: ${summary.groupTemperature?.level || 'FRIO'}`,
             `Media msg/usuario: ${Number(summary.avgMessagesPerUser || 0).toFixed(2)}`
         ];
-        blocks.forEach((line, idx) => {
-            image.print({ font: bodyFont, x: 48, y: 214 + (idx * 28), text: line, maxWidth: 480 });
+        lines.forEach((line, idx) => {
+            image.print({ font: bodyFont, x: 44, y: 206 + (idx * 26), text: line, maxWidth: 480 });
         });
-        fillRect(image, 560, 212, 420, 94, tempColor(summary.groupTemperature?.level));
+
+        fillRect(image, 560, 205, 486, 100, temperatureColor(summary.groupTemperature?.level));
         image.print({
             font: titleFont,
-            x: 590,
-            y: 240,
-            text: summary.groupTemperature?.label || 'FRIO ❄',
-            maxWidth: 360
+            x: 610,
+            y: 238,
+            text: summary.groupTemperature?.label || 'FRIO',
+            maxWidth: 390
         });
 
-        fillRect(image, 28, 360, WIDTH - 56, 440, COLORS.panel);
-        image.print({ font: bodyFont, x: 48, y: 382, text: 'Projetos mais mencionados', maxWidth: 360 });
-        image.print({ font: bodyFont, x: 48, y: 416, text: 'Token', maxWidth: 180 });
-        image.print({ font: bodyFont, x: 250, y: 416, text: 'Total', maxWidth: 120 });
-        image.print({ font: bodyFont, x: 380, y: 416, text: 'Crescimento', maxWidth: 170 });
-        image.print({ font: bodyFont, x: 590, y: 416, text: 'Status', maxWidth: 350 });
+        fillRect(image, 24, 350, WIDTH - 48, 430, COLORS.panel);
+        image.print({ font: bodyFont, x: 46, y: 374, text: 'Projetos mais mencionados', maxWidth: 360 });
+        image.print({ font: bodyFont, x: 46, y: 406, text: 'Token', maxWidth: 160 });
+        image.print({ font: bodyFont, x: 248, y: 406, text: 'Total', maxWidth: 80 });
+        image.print({ font: bodyFont, x: 360, y: 406, text: 'Crescimento', maxWidth: 160 });
+        image.print({ font: bodyFont, x: 566, y: 406, text: 'Status', maxWidth: 280 });
 
         tokens.forEach((token, idx) => {
-            const rowY = 452 + (idx * 34);
-            if (idx % 2 === 0) {
-                fillRect(image, 42, rowY - 4, WIDTH - 84, 30, 0x0f2e70ff);
-            }
-            const status = statusLabel(token);
-            image.print({ font: bodyFont, x: 48, y: rowY, text: String(token.token || '-'), maxWidth: 180 });
-            image.print({ font: bodyFont, x: 250, y: rowY, text: formatNumber(token.totalMentions), maxWidth: 110 });
+            const y = 440 + (idx * 32);
+            fillRect(image, 40, y - 2, WIDTH - 80, 28, idx % 2 === 0 ? COLORS.rowA : COLORS.rowB);
+            const status = tokenStatus(token);
+            image.print({ font: bodyFont, x: 46, y, text: String(token.token || '-'), maxWidth: 160 });
+            image.print({ font: bodyFont, x: 248, y, text: formatNumber(token.totalMentions), maxWidth: 80 });
             image.print({
                 font: bodyFont,
-                x: 380,
-                y: rowY,
+                x: 360,
+                y,
                 text: `${Number(token.growthRate || 0).toFixed(1)}%`,
-                maxWidth: 170
+                maxWidth: 150
             });
-            fillRect(image, 590, rowY - 2, 310, 28, status.color);
-            image.print({ font: bodyFont, x: 604, y: rowY + 3, text: status.text, maxWidth: 290 });
+            fillRect(image, 566, y, 240, 24, status.color);
+            image.print({ font: bodyFont, x: 578, y: y + 2, text: status.label, maxWidth: 220 });
         });
 
-        fillRect(image, 28, 820, WIDTH - 56, 500, COLORS.panel);
-        image.print({ font: bodyFont, x: 48, y: 842, text: 'Top 10 mais ativos', maxWidth: 260 });
-        image.print({ font: bodyFont, x: 48, y: 876, text: 'Posicao', maxWidth: 110 });
-        image.print({ font: bodyFont, x: 170, y: 876, text: 'Nome', maxWidth: 360 });
-        image.print({ font: bodyFont, x: 580, y: 876, text: 'Mensagens', maxWidth: 200 });
+        fillRect(image, 24, 802, WIDTH - 48, 524, COLORS.panel);
+        image.print({ font: bodyFont, x: 46, y: 826, text: 'Top 10 mais ativos', maxWidth: 260 });
+        image.print({ font: bodyFont, x: 46, y: 858, text: 'Posicao', maxWidth: 90 });
+        image.print({ font: bodyFont, x: 156, y: 858, text: 'Nome', maxWidth: 420 });
+        image.print({ font: bodyFont, x: 640, y: 858, text: 'Mensagens', maxWidth: 160 });
 
         users.forEach((user, idx) => {
-            const rowY = 912 + (idx * 36);
-            if (idx % 2 === 0) {
-                fillRect(image, 42, rowY - 4, WIDTH - 84, 31, 0x0f2e70ff);
-            }
-            image.print({ font: bodyFont, x: 48, y: rowY, text: `${(page * 10) + idx + 1}`, maxWidth: 100 });
-            image.print({ font: bodyFont, x: 170, y: rowY, text: String(user.name || '-'), maxWidth: 380 });
-            image.print({ font: bodyFont, x: 580, y: rowY, text: formatNumber(user.totalMessages), maxWidth: 180 });
+            const y = 892 + (idx * 38);
+            fillRect(image, 40, y - 2, WIDTH - 80, 30, idx % 2 === 0 ? COLORS.rowA : COLORS.rowB);
+            image.print({ font: bodyFont, x: 46, y, text: `${(page * USERS_PER_PAGE) + idx + 1}`, maxWidth: 80 });
+            image.print({ font: bodyFont, x: 156, y, text: String(user.name || '-'), maxWidth: 450 });
+            image.print({ font: bodyFont, x: 640, y, text: formatNumber(user.totalMessages), maxWidth: 130 });
         });
 
         buffers.push(await image.getBuffer('image/png'));

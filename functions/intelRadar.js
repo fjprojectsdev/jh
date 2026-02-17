@@ -8,11 +8,15 @@ const CACHE_TTL_MS = 20 * 1000;
 const COMMON_STOPWORDS = new Set([
     'MAS', 'TEM', 'AGORA', 'ISSO', 'AQUI', 'ALI', 'BORA', 'VAMOS', 'OBRIGADO', 'VALEU',
     'PARA', 'COM', 'SEM', 'PRA', 'POR', 'NOS', 'NAS', 'DE', 'DO', 'DA', 'DOS', 'DAS',
+    'QUE', 'QUEM', 'COMO', 'QUANDO', 'ONDE', 'ESTA', 'ESTAO', 'FOI', 'SER', 'TER',
     'THE', 'AND', 'FOR', 'THIS', 'THAT', 'YOU', 'ARE', 'WILL', 'HTTP', 'HTTPS', 'WWW'
 ]);
 
-const radarCache = new Map();
+const TOKEN_BLACKLIST = new Set([
+    'COME', 'QUEIMA', 'PIX', 'BORA', 'VAMO', 'HOJE', 'AMANHA', 'ONTEM', 'GALERA', 'POVO'
+]);
 
+const radarCache = new Map();
 let aliasCache = { value: {}, updatedAt: 0 };
 
 function normalizeText(value) {
@@ -31,16 +35,49 @@ function sanitizeToken(rawToken) {
     return token;
 }
 
+function formatUserFromJid(userId) {
+    const digits = String(userId || '').split('@')[0].replace(/\D/g, '');
+    if (!digits) return String(userId || '-');
+
+    let national = digits;
+    if (national.startsWith('55') && national.length >= 12) {
+        national = national.slice(2);
+    }
+
+    if (national.length === 11) {
+        return `(${national.slice(0, 2)}) ${national.slice(2, 7)}-${national.slice(7)}`;
+    }
+    if (national.length === 10) {
+        return `(${national.slice(0, 2)}) ${national.slice(2, 6)}-${national.slice(6)}`;
+    }
+    if (digits.startsWith('55')) {
+        return `+${digits}`;
+    }
+    return digits;
+}
+
+function sanitizeDisplayName(name, userId) {
+    const raw = String(name || '').trim();
+    if (!raw) {
+        return formatUserFromJid(userId);
+    }
+
+    const cleaned = raw.replace(/[^\p{L}\p{N}\s._\-]/gu, '').replace(/\s+/g, ' ').trim();
+    const safe = cleaned || raw;
+    const questionRatio = (safe.match(/\?/g) || []).length / Math.max(1, safe.length);
+    if (questionRatio > 0.2 || safe.length < 2) {
+        return formatUserFromJid(userId);
+    }
+
+    return safe.slice(0, 28);
+}
+
 function buildAliasLookup(aliasData = {}) {
     const lookup = new Map();
-    const entries = Object.entries(aliasData || {});
-    for (const [alias, data] of entries) {
+    for (const [alias, data] of Object.entries(aliasData || {})) {
         const aliasKey = sanitizeToken(alias);
-        if (!aliasKey) {
-            continue;
-        }
-        const labelSource = data?.label || aliasKey;
-        const label = sanitizeToken(labelSource) || aliasKey;
+        if (!aliasKey) continue;
+        const label = sanitizeToken(data?.label || aliasKey) || aliasKey;
         lookup.set(aliasKey, label);
     }
     return lookup;
@@ -62,56 +99,53 @@ async function getAliasLookup() {
     } catch (_) {
         aliasCache = { value: {}, updatedAt: now };
     }
-
     return aliasCache.value;
 }
 
 function extractMatchesFromText(text, aliasLookup) {
-    const mentions = [];
+    const matches = [];
     const safeText = String(text || '');
 
-    const upperCaseMatches = safeText.match(/\b[A-Z]{3,6}\b/g) || [];
-    upperCaseMatches.forEach((token) => mentions.push(token));
+    const uppercase = safeText.match(/\b[A-Z]{3,6}\b/g) || [];
+    uppercase.forEach((t) => matches.push(t));
 
-    const dollarMatches = safeText.match(/\$[A-Za-z]{2,12}\b/g) || [];
-    dollarMatches.forEach((token) => mentions.push(token.slice(1)));
+    const dollar = safeText.match(/\$[A-Za-z]{2,12}\b/g) || [];
+    dollar.forEach((t) => matches.push(t.slice(1)));
 
     const normalizedWords = normalizeText(safeText).split(/\s+/);
     normalizedWords.forEach((word) => {
         const key = sanitizeToken(word);
-        if (!key) {
-            return;
-        }
+        if (!key) return;
         if (aliasLookup.has(key)) {
-            mentions.push(aliasLookup.get(key));
+            matches.push(aliasLookup.get(key));
         }
     });
 
-    return mentions;
+    return matches;
 }
 
 export function extractTokenMentions(messages, options = {}) {
     const now = Number(options.now || Date.now());
     const aliasLookup = options.aliasLookup instanceof Map ? options.aliasLookup : new Map();
     const stopwords = options.stopwords instanceof Set ? options.stopwords : COMMON_STOPWORDS;
-    const limit = Number(options.limit || 10);
+    const limit = Number.isFinite(options.limit) ? Number(options.limit) : 10;
 
     const bucket = new Map();
     const safeMessages = Array.isArray(messages) ? messages : [];
     for (const item of safeMessages) {
         const timestamp = Number(item?.timestamp || 0);
         const text = String(item?.text || '');
-        if (!text) {
-            continue;
-        }
+        if (!text) continue;
 
+        const localCount = new Map();
         const matches = extractMatchesFromText(text, aliasLookup);
         for (const rawMatch of matches) {
             const token = sanitizeToken(rawMatch);
-            if (!token || stopwords.has(token)) {
-                continue;
-            }
+            if (!token || stopwords.has(token) || TOKEN_BLACKLIST.has(token)) continue;
+            localCount.set(token, (localCount.get(token) || 0) + 1);
+        }
 
+        for (const [token, count] of localCount.entries()) {
             if (!bucket.has(token)) {
                 bucket.set(token, {
                     token,
@@ -120,19 +154,19 @@ export function extractTokenMentions(messages, options = {}) {
                     previousHourMentions: 0
                 });
             }
-
             const current = bucket.get(token);
-            current.totalMentions += 1;
+            current.totalMentions += count;
 
             if (timestamp >= (now - HOUR_MS)) {
-                current.lastHourMentions += 1;
+                current.lastHourMentions += count;
             } else if (timestamp >= (now - (2 * HOUR_MS))) {
-                current.previousHourMentions += 1;
+                current.previousHourMentions += count;
             }
         }
     }
 
     const sorted = Array.from(bucket.values())
+        .filter((row) => row.totalMentions >= 2)
         .sort((a, b) => b.totalMentions - a.totalMentions);
 
     return Number.isFinite(limit) && limit > 0 ? sorted.slice(0, limit) : sorted;
@@ -147,38 +181,29 @@ export function detectHype(tokensData) {
         const growthRate = ((last - prev) / Math.max(prev, 1)) * 100;
         const engagementScore = (total * 0.6) + (growthRate * 0.4);
 
-        let status = 'Estavel';
-        if (growthRate >= 50) {
-            status = 'HYPE FORTE 🔥';
-        } else if (growthRate >= 20) {
-            status = 'HYPE MODERADO 🚀';
-        }
+        let status = 'ESTAVEL';
+        if (growthRate >= 50) status = 'HYPE FORTE';
+        else if (growthRate >= 20) status = 'HYPE MODERADO';
 
-        return {
-            ...tokenData,
-            growthRate,
-            engagementScore,
-            status
-        };
+        return { ...tokenData, growthRate, engagementScore, status };
     }).sort((a, b) => b.engagementScore - a.engagementScore);
 
     return enriched.filter((item) => item.growthRate >= 20);
 }
 
 export function getTopActiveUsers(messages, limit = 10) {
-    const safeMessages = Array.isArray(messages) ? messages : [];
     const usersMap = new Map();
+    const safeMessages = Array.isArray(messages) ? messages : [];
+
     for (const item of safeMessages) {
         const userId = String(item?.userId || '').trim();
-        if (!userId) {
-            continue;
-        }
-        const displayName = String(item?.displayName || '').trim();
+        if (!userId) continue;
         const timestamp = Number(item?.timestamp || 0);
 
         if (!usersMap.has(userId)) {
             usersMap.set(userId, {
-                name: displayName || userId,
+                userId,
+                name: sanitizeDisplayName(item?.displayName, userId),
                 totalMessages: 0,
                 lastMessageTime: timestamp
             });
@@ -186,9 +211,7 @@ export function getTopActiveUsers(messages, limit = 10) {
 
         const current = usersMap.get(userId);
         current.totalMessages += 1;
-        if (displayName) {
-            current.name = displayName;
-        }
+        current.name = sanitizeDisplayName(item?.displayName, userId);
         if (timestamp > current.lastMessageTime) {
             current.lastMessageTime = timestamp;
         }
@@ -205,74 +228,55 @@ export function classifyGroupTemperature(stats) {
     const avgMessagesPerUser = activeUsers > 0 ? totalMessages / activeUsers : 0;
 
     let level = 'FRIO';
-    let label = 'FRIO ❄';
+    let label = 'FRIO';
     if (totalMessages > 400) {
         level = 'QUENTE';
-        label = 'QUENTE 🔥';
+        label = 'QUENTE';
     } else if (totalMessages >= 150) {
         level = 'MORNO';
-        label = 'MORNO 🌤';
+        label = 'MORNO';
     }
 
-    return {
-        level,
-        label,
-        totalMessages,
-        activeUsers,
-        avgMessagesPerUser
-    };
+    return { level, label, totalMessages, activeUsers, avgMessagesPerUser };
 }
 
 function buildCacheKey(groupId, messages, now) {
-    const safeMessages = Array.isArray(messages) ? messages : [];
-    const len = safeMessages.length;
-    const lastTimestamp = len > 0 ? Number(safeMessages[len - 1]?.timestamp || 0) : 0;
-    const hourBucket = Math.floor(now / 10000);
-    return `${groupId}::${len}::${lastTimestamp}::${hourBucket}`;
+    const safe = Array.isArray(messages) ? messages : [];
+    const len = safe.length;
+    const lastTs = len > 0 ? Number(safe[len - 1]?.timestamp || 0) : 0;
+    const bucket = Math.floor(now / 10000);
+    return `${groupId}::${len}::${lastTs}::${bucket}`;
 }
 
 function summarizeText(report) {
     const highlight = report?.highlightToken;
     const topUser = report?.topActiveUsers?.[0];
-    const groupStatus = report?.summary?.groupTemperature?.label || 'FRIO ❄';
-
-    if (!highlight) {
-        return [
-            '📡 IMAVY RADAR DO GRUPO',
-            '',
-            '🔥 Token em destaque: sem variacao relevante',
-            '📈 Crescimento: 0.0%',
-            '',
-            `🏆 Mais ativo: ${topUser ? `${topUser.name} (${topUser.totalMessages})` : 'sem dados'}`,
-            '',
-            `🌡 Grupo esta: ${groupStatus}`
-        ].join('\n');
-    }
+    const groupStatus = report?.summary?.groupTemperature?.label || 'FRIO';
+    const tokenLabel = highlight ? highlight.token : 'sem variacao relevante';
+    const growth = highlight ? `${highlight.growthRate.toFixed(1)}%` : '0.0%';
+    const userLine = topUser ? `${topUser.name} (${topUser.totalMessages})` : 'sem dados';
 
     return [
-        '📡 IMAVY RADAR DO GRUPO',
+        'IMAVY RADAR DO GRUPO',
         '',
-        `🔥 Token em destaque: ${highlight.token}`,
-        `📈 Crescimento: ${highlight.growthRate.toFixed(1)}%`,
+        `Token em destaque: ${tokenLabel}`,
+        `Crescimento: ${growth}`,
         '',
-        `🏆 Mais ativo: ${topUser ? `${topUser.name} (${topUser.totalMessages})` : 'sem dados'}`,
+        `Mais ativo: ${userLine}`,
         '',
-        `🌡 Grupo esta: ${groupStatus}`
+        `Grupo esta: ${groupStatus}`
     ].join('\n');
 }
 
 export async function runIntelRadar({ messages, chatId, now = Date.now() }) {
     const safeMessages = Array.isArray(messages) ? messages : [];
-    const groupMessages = String(chatId || '').endsWith('@g.us')
+    const scope = String(chatId || '').endsWith('@g.us')
         ? safeMessages.filter((item) => item.groupId === chatId)
         : safeMessages;
-    const last24h = groupMessages.filter((item) => Number(item.timestamp || 0) >= (now - DAY_MS));
+    const last24h = scope.filter((item) => Number(item.timestamp || 0) >= (now - DAY_MS));
 
     if (last24h.length === 0) {
-        return {
-            text: '📊 Nenhum dado recente para gerar o radar.',
-            images: []
-        };
+        return { text: 'Nenhum dado recente para gerar o radar.', images: [] };
     }
 
     const cacheKey = buildCacheKey(String(chatId || 'private'), last24h, now);
@@ -284,24 +288,23 @@ export async function runIntelRadar({ messages, chatId, now = Date.now() }) {
     const aliasLookup = buildAliasLookup(await getAliasLookup());
     const tokenMentions = extractTokenMentions(last24h, { now, aliasLookup, limit: Number.POSITIVE_INFINITY });
     const hypeTokens = detectHype(tokenMentions);
-    const enrichedTokens = tokenMentions.map((item) => {
+    const tokenAnalytics = tokenMentions.map((item) => {
         const prev = Math.max(1, Number(item.previousHourMentions || 0));
         const growthRate = ((Number(item.lastHourMentions || 0) - Number(item.previousHourMentions || 0)) / prev) * 100;
-        let status = 'Estavel';
-        if (growthRate >= 50) status = 'HYPE FORTE 🔥';
-        else if (growthRate >= 20) status = 'HYPE MODERADO 🚀';
+        let status = 'ESTAVEL';
+        if (growthRate >= 50) status = 'HYPE FORTE';
+        else if (growthRate >= 20) status = 'HYPE MODERADO';
         return { ...item, growthRate, status };
     });
 
     const allUsers = getTopActiveUsers(last24h, Number.POSITIVE_INFINITY);
-    const topUsers = allUsers.slice(0, 10);
     const summary = classifyGroupTemperature({
         totalMessages: last24h.length,
         activeUsers: allUsers.length
     });
 
     const report = {
-        tokenAnalytics: enrichedTokens,
+        tokenAnalytics,
         hypeTokens,
         topActiveUsers: allUsers,
         summary: {
@@ -310,18 +313,18 @@ export async function runIntelRadar({ messages, chatId, now = Date.now() }) {
             avgMessagesPerUser: summary.avgMessagesPerUser,
             groupTemperature: summary
         },
-        highlightToken: hypeTokens[0] || enrichedTokens[0] || null,
+        highlightToken: hypeTokens[0] || tokenAnalytics[0] || null,
         generatedAt: now
     };
 
     const images = await renderIntelRadarImages(report);
-    const text = summarizeText({ ...report, topActiveUsers: topUsers });
-
+    const text = summarizeText({ ...report, topActiveUsers: allUsers.slice(0, 10) });
     const payload = { text, images, report };
+
     radarCache.set(cacheKey, { createdAt: now, payload });
-    if (radarCache.size > 15) {
-        const firstKey = radarCache.keys().next().value;
-        radarCache.delete(firstKey);
+    if (radarCache.size > 20) {
+        const first = radarCache.keys().next().value;
+        radarCache.delete(first);
     }
 
     return payload;
