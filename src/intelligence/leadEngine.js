@@ -1,8 +1,12 @@
 import { createRequire } from 'module';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const require = createRequire(import.meta.url);
 const { Jimp, loadFont } = require('jimp');
 const { SANS_16_WHITE, SANS_32_WHITE } = require('@jimp/plugin-print/fonts');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const LEAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const LEADS_LIMIT = 5000;
@@ -12,6 +16,8 @@ const MESSAGE_LOG_LIMIT = 12000;
 const IMAGE_WIDTH = 1200;
 const IMAGE_BG_COLOR = 0x06143bff;
 const IMAGE_ACCENT_COLOR = 0x0f2d7bff;
+const LEADS_STATE_FILE = path.join(__dirname, '..', '..', 'leads_state.json');
+const SAVE_DEBOUNCE_MS = 5000;
 
 const STOP_WORDS = new Set([
     'de', 'do', 'da', 'dos', 'das', 'e', 'em', 'no', 'na', 'nos', 'nas', 'o', 'a', 'os', 'as',
@@ -20,6 +26,15 @@ const STOP_WORDS = new Set([
     'meu', 'sua', 'seu', 'ta', 'to', 'tava', 'vai', 'vou', 'ja', 'so', 'mais', 'menos', 'muito',
     'pouco', 'isso', 'isto', 'aquele', 'aquela', 'aqui', 'ali', 'la', 'nao', 'sim', 'bom', 'boa',
     'blz', 'ok', 'beleza', 'mano', 'cara'
+]);
+const CRYPTO_RELEVANT_WORDS = new Set([
+    'btc', 'bitcoin', 'eth', 'ethereum', 'sol', 'solana', 'bnb', 'nix', 'snap', 'snappy',
+    'token', 'tokens', 'projeto', 'projetos', 'cripto', 'crypto', 'altcoin', 'altcoins',
+    'compra', 'comprar', 'vendendo', 'venda', 'buy', 'sell', 'entrada', 'saida',
+    'long', 'short', 'pump', 'dump', 'moon', 'hype', 'fomo', 'holder', 'holders',
+    'wallet', 'carteira', 'contrato', 'endereco', 'ca', 'liquidez', 'liquidity',
+    'dex', 'chart', 'grafico', 'pool', 'staking', 'marketcap', 'volume', 'listagem',
+    'preco', 'alvo', 'resistencia', 'suporte', 'pix', 'exchange', 'binance', 'mexc'
 ]);
 
 function normalizeText(value) {
@@ -289,9 +304,16 @@ export class LeadEngine {
             : ['🚀', '🔥', '💎'];
         this.leads = new Map();
         this.messageLog = [];
+        this.relevantWords = new Set(CRYPTO_RELEVANT_WORDS);
+        for (const token of this.monitoredTokens) {
+            this.relevantWords.add(normalizeText(token));
+        }
         this.tokenRegexes = new Map(
             this.monitoredTokens.map((token) => [token, new RegExp(`\\b${escapeRegex(token)}\\b`, 'gi')])
         );
+        this.pendingSaveTimer = null;
+        this.lastSavedAt = 0;
+        this.loadState();
     }
 
     makeLeadKey(userId, groupId) {
@@ -327,6 +349,60 @@ export class LeadEngine {
         }
 
         this.cleanupMessageLog(now);
+    }
+
+    loadState() {
+        try {
+            if (!fs.existsSync(LEADS_STATE_FILE)) {
+                return;
+            }
+            const raw = fs.readFileSync(LEADS_STATE_FILE, 'utf8');
+            const parsed = raw ? JSON.parse(raw) : {};
+            const leadsEntries = Array.isArray(parsed.leadsEntries) ? parsed.leadsEntries : [];
+            const messageLog = Array.isArray(parsed.messageLog) ? parsed.messageLog : [];
+
+            this.leads = new Map(leadsEntries.map((entry) => [String(entry[0] || ''), entry[1]]).filter((entry) => entry[0]));
+            this.messageLog = messageLog;
+            this.cleanup(Date.now());
+        } catch (_) {
+            this.leads = new Map();
+            this.messageLog = [];
+        }
+    }
+
+    saveStateNow() {
+        try {
+            this.cleanup(Date.now());
+            const payload = {
+                updatedAt: new Date().toISOString(),
+                leadsEntries: Array.from(this.leads.entries()),
+                messageLog: this.messageLog
+            };
+            fs.writeFileSync(LEADS_STATE_FILE, JSON.stringify(payload), 'utf8');
+            this.lastSavedAt = Date.now();
+        } catch (_) {
+            // noop
+        }
+    }
+
+    scheduleSave() {
+        const now = Date.now();
+        if (now - this.lastSavedAt > 30000) {
+            this.saveStateNow();
+            return;
+        }
+
+        if (this.pendingSaveTimer) {
+            return;
+        }
+
+        this.pendingSaveTimer = setTimeout(() => {
+            this.pendingSaveTimer = null;
+            this.saveStateNow();
+        }, SAVE_DEBOUNCE_MS);
+        if (typeof this.pendingSaveTimer.unref === 'function') {
+            this.pendingSaveTimer.unref();
+        }
     }
 
     processMessage(message, groupId, groupName, now = Date.now()) {
@@ -405,6 +481,7 @@ export class LeadEngine {
 
         this.leads.set(leadKey, current);
         this.cleanup(now);
+        this.scheduleSave();
         return current;
     }
 
@@ -427,6 +504,9 @@ export class LeadEngine {
 
             const words = tokenizeWords(item.text);
             for (const word of words) {
+                if (!this.relevantWords.has(word)) {
+                    continue;
+                }
                 wordCount.set(word, (wordCount.get(word) || 0) + 1);
             }
         }
