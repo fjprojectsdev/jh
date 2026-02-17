@@ -169,6 +169,50 @@ function formatLastActivity(lastActivity, now = Date.now()) {
     return 'mais de 2 horas atrás';
 }
 
+function jidToDigits(userId) {
+    const local = String(userId || '').split('@')[0].split(':')[0];
+    return local.replace(/\D/g, '');
+}
+
+function formatPhoneWithDdd(userId) {
+    const digits = jidToDigits(userId);
+    if (!digits) {
+        return String(userId || '');
+    }
+
+    let national = digits;
+    if (national.startsWith('55') && national.length >= 12) {
+        national = national.slice(2);
+    }
+
+    if (national.length === 11) {
+        return `(${national.slice(0, 2)}) ${national.slice(2, 7)}-${national.slice(7)}`;
+    }
+
+    if (national.length === 10) {
+        return `(${national.slice(0, 2)}) ${national.slice(2, 6)}-${national.slice(6)}`;
+    }
+
+    if (digits.startsWith('55') && digits.length >= 12) {
+        return `+${digits}`;
+    }
+
+    return digits;
+}
+
+function resolveLeadDisplayName(message, userId, existingDisplayName = '') {
+    const pushName = String(message?.pushName || '').trim();
+    if (pushName) {
+        return pushName;
+    }
+
+    if (existingDisplayName) {
+        return existingDisplayName;
+    }
+
+    return formatPhoneWithDdd(userId);
+}
+
 export class LeadEngine {
     constructor(options = {}) {
         this.monitoredTokens = Array.isArray(options.monitoredTokens) && options.monitoredTokens.length > 0
@@ -258,6 +302,7 @@ export class LeadEngine {
 
         const current = this.leads.get(leadKey) || {
             userId,
+            displayName: resolveLeadDisplayName(message, userId),
             groupId: safeGroupId,
             groupName: String(groupName || safeGroupId),
             score: 0,
@@ -278,6 +323,7 @@ export class LeadEngine {
         const hasBuyInterestKeyword = hasAnyKeyword(normalized, buyInterestKeywords);
         const hasSpeculationKeyword = hasAnyKeyword(normalized, speculationKeywords);
 
+        current.displayName = resolveLeadDisplayName(message, userId, current.displayName);
         current.groupName = String(groupName || current.groupName || safeGroupId);
         current.score += scoreDelta;
         current.messages += 1;
@@ -373,9 +419,10 @@ export class LeadEngine {
             const recentCount = Array.isArray(lead.recentMessageTimestamps)
                 ? lead.recentMessageTimestamps.filter((ts) => now - ts <= ACTIVITY_WINDOW_MS).length
                 : 0;
+            const displayName = String(lead.displayName || '').trim() || formatPhoneWithDdd(lead.userId);
 
             lines.push(`${level.icon} ${i + 1} – ${level.label}`);
-            lines.push(`👤 ${lead.userId}`);
+            lines.push(`👤 ${displayName}`);
             lines.push(`${classifyInterestType(lead)}`);
             lines.push(`📈 Pontuação: ${lead.score}`);
             lines.push(`⚡ ${classifyActivityLevel(recentCount)}`);
