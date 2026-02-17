@@ -16,6 +16,13 @@ const MESSAGE_LOG_LIMIT = 12000;
 const IMAGE_WIDTH = 1200;
 const IMAGE_BG_COLOR = 0x06143bff;
 const IMAGE_ACCENT_COLOR = 0x0f2d7bff;
+const IMAGE_PANEL_COLOR = 0x0a1f55ff;
+const IMAGE_ROW_COLOR = 0x0c285fff;
+const IMAGE_ROW_ALT_COLOR = 0x0a224fff;
+const IMAGE_LEVEL_HIGH_COLOR = 0xd34f2cff;
+const IMAGE_LEVEL_MEDIUM_COLOR = 0x1f9d59ff;
+const IMAGE_LEVEL_LOW_COLOR = 0x6b7280ff;
+const IMAGE_VALUE_COLOR = 0xc78b2cff;
 const LEADS_STATE_FILE = path.join(__dirname, '..', '..', 'leads_state.json');
 const SAVE_DEBOUNCE_MS = 5000;
 const SAVE_INTERVAL_MS = 60000;
@@ -273,6 +280,226 @@ async function renderLeadsReportImage(lines) {
             maxWidth: IMAGE_WIDTH - (padX * 2)
         });
         currentY += bodyLineHeight;
+    }
+
+    return await image.getBuffer('image/png');
+}
+
+function fillRect(image, x, y, width, height, color) {
+    const startX = Math.max(0, Math.floor(x));
+    const startY = Math.max(0, Math.floor(y));
+    const endX = Math.min(image.bitmap.width, Math.floor(x + width));
+    const endY = Math.min(image.bitmap.height, Math.floor(y + height));
+
+    for (let iy = startY; iy < endY; iy += 1) {
+        for (let ix = startX; ix < endX; ix += 1) {
+            image.setPixelColor(color, ix, iy);
+        }
+    }
+}
+
+function getRadarLevel(score) {
+    const safeScore = Number(score || 0);
+    if (safeScore >= 100) return { label: 'ALTO', icon: '🔥', color: IMAGE_LEVEL_HIGH_COLOR };
+    if (safeScore >= 50) return { label: 'MÉDIO', icon: '🟢', color: IMAGE_LEVEL_MEDIUM_COLOR };
+    return { label: 'BAIXO', icon: '⚪', color: IMAGE_LEVEL_LOW_COLOR };
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function estimateLeadValue(score) {
+    const raw = Number(score || 0) * 6;
+    return clamp(Math.round(raw), 50, 1500);
+}
+
+function formatUsd(value) {
+    const safe = Math.max(0, Number(value || 0));
+    return `$${safe.toLocaleString('en-US')}`;
+}
+
+function getRankBadge(index) {
+    if (index === 0) return '🥇';
+    if (index === 1) return '🥈';
+    if (index === 2) return '🥉';
+    return `#${index + 1}`;
+}
+
+function simplifyLeadIdentity(lead) {
+    const byName = String(lead?.displayName || '').trim();
+    if (byName) {
+        return truncateLine(byName, 24);
+    }
+
+    const digits = jidToDigits(lead?.userId);
+    if (digits) {
+        if (digits.length > 11) {
+            return `...${digits.slice(-11)}`;
+        }
+        return formatPhoneWithDdd(digits);
+    }
+
+    const localId = String(lead?.userId || '').split('@')[0];
+    return truncateLine(localId, 18);
+}
+
+function formatRadarDate(now = Date.now()) {
+    try {
+        return new Date(now).toLocaleString('pt-BR', { hour12: false });
+    } catch (_) {
+        return new Date(now).toISOString();
+    }
+}
+
+function buildRadarReport(allLeads, now = Date.now()) {
+    const ordered = Array.isArray(allLeads)
+        ? [...allLeads].sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+        : [];
+    const topLeads = ordered.slice(0, 10);
+
+    const summary = {
+        high: 0,
+        medium: 0,
+        low: 0,
+        totalAnalyzed: ordered.length,
+        totalPotential: 0
+    };
+
+    for (const lead of ordered) {
+        const level = getRadarLevel(lead.score);
+        if (level.label === 'ALTO') summary.high += 1;
+        else if (level.label === 'MÉDIO') summary.medium += 1;
+        else summary.low += 1;
+
+        summary.totalPotential += estimateLeadValue(lead.score);
+    }
+
+    return {
+        now,
+        topLeads: topLeads.map((lead, index) => ({
+            rankBadge: getRankBadge(index),
+            identity: simplifyLeadIdentity(lead),
+            level: getRadarLevel(lead.score),
+            estimatedValue: estimateLeadValue(lead.score),
+            groupName: truncateLine(String(lead.groupName || '-'), 30)
+        })),
+        summary
+    };
+}
+
+async function renderCommercialRadarImage(report) {
+    const [titleFont, bodyFont] = await Promise.all([
+        loadFont(SANS_32_WHITE),
+        loadFont(SANS_16_WHITE)
+    ]);
+
+    const topCount = Array.isArray(report?.topLeads) ? report.topLeads.length : 0;
+    const headerH = 140;
+    const summaryH = 170;
+    const rowH = 58;
+    const tableTop = 340;
+    const tableHeaderH = 40;
+    const rowsH = Math.max(1, topCount) * rowH;
+    const height = tableTop + tableHeaderH + rowsH + 30;
+    const image = new Jimp({ width: IMAGE_WIDTH, height, color: IMAGE_BG_COLOR });
+
+    for (let y = 0; y < height; y += 80) {
+        for (let x = 0; x < IMAGE_WIDTH; x += 80) {
+            if (((x + y) / 80) % 2 === 0) {
+                fillRect(image, x, y, 80, 80, IMAGE_ACCENT_COLOR);
+            }
+        }
+    }
+
+    fillRect(image, 24, 20, IMAGE_WIDTH - 48, headerH, IMAGE_PANEL_COLOR);
+    fillRect(image, 24, 180, IMAGE_WIDTH - 48, summaryH, IMAGE_PANEL_COLOR);
+
+    const summary = report?.summary || {};
+    const summaryCards = [
+        { title: '🔥 Interessados Altos', value: summary.high || 0, color: IMAGE_LEVEL_HIGH_COLOR },
+        { title: '🟢 Interessados Médios', value: summary.medium || 0, color: IMAGE_LEVEL_MEDIUM_COLOR },
+        { title: '⚪ Interessados Baixos', value: summary.low || 0, color: IMAGE_LEVEL_LOW_COLOR },
+        { title: '👥 Total analisado', value: summary.totalAnalyzed || 0, color: IMAGE_ACCENT_COLOR },
+        { title: '💰 Potencial estimado total', value: formatUsd(summary.totalPotential || 0), color: IMAGE_VALUE_COLOR }
+    ];
+
+    const cardGap = 12;
+    const cardWidth = Math.floor((IMAGE_WIDTH - 48 - 20 - (cardGap * 4)) / 5);
+    const cardY = 214;
+    const cardH = 110;
+
+    for (let i = 0; i < summaryCards.length; i += 1) {
+        const card = summaryCards[i];
+        const cardX = 34 + (i * (cardWidth + cardGap));
+        fillRect(image, cardX, cardY, cardWidth, cardH, card.color);
+        image.print({
+            font: bodyFont,
+            x: cardX + 12,
+            y: cardY + 14,
+            text: card.title,
+            maxWidth: cardWidth - 24
+        });
+        image.print({
+            font: titleFont,
+            x: cardX + 12,
+            y: cardY + 46,
+            text: String(card.value),
+            maxWidth: cardWidth - 24
+        });
+    }
+
+    image.print({
+        font: titleFont,
+        x: 40,
+        y: 42,
+        text: 'IMAVY RADAR COMERCIAL',
+        maxWidth: 700
+    });
+
+    image.print({
+        font: bodyFont,
+        x: 40,
+        y: 92,
+        text: 'Ranking de Interesse da Comunidade',
+        maxWidth: 600
+    });
+
+    image.print({
+        font: bodyFont,
+        x: IMAGE_WIDTH - 300,
+        y: 34,
+        text: formatRadarDate(report?.now),
+        maxWidth: 250
+    });
+
+    fillRect(image, 24, tableTop, IMAGE_WIDTH - 48, tableHeaderH, IMAGE_PANEL_COLOR);
+    image.print({ font: bodyFont, x: 40, y: tableTop + 10, text: 'Posição', maxWidth: 120 });
+    image.print({ font: bodyFont, x: 160, y: tableTop + 10, text: 'Lead', maxWidth: 220 });
+    image.print({ font: bodyFont, x: 420, y: tableTop + 10, text: 'Nível', maxWidth: 120 });
+    image.print({ font: bodyFont, x: 580, y: tableTop + 10, text: 'Potencial', maxWidth: 180 });
+    image.print({ font: bodyFont, x: 800, y: tableTop + 10, text: 'Grupo', maxWidth: 360 });
+
+    const topLeads = Array.isArray(report?.topLeads) ? report.topLeads : [];
+    if (topLeads.length === 0) {
+        image.print({
+            font: bodyFont,
+            x: 40,
+            y: tableTop + tableHeaderH + 16,
+            text: 'Nenhum lead detectado ainda.',
+            maxWidth: 500
+        });
+    } else {
+        topLeads.forEach((lead, index) => {
+            const rowY = tableTop + tableHeaderH + (index * rowH);
+            fillRect(image, 24, rowY, IMAGE_WIDTH - 48, rowH, index % 2 === 0 ? IMAGE_ROW_COLOR : IMAGE_ROW_ALT_COLOR);
+            image.print({ font: bodyFont, x: 40, y: rowY + 18, text: lead.rankBadge, maxWidth: 100 });
+            image.print({ font: bodyFont, x: 160, y: rowY + 18, text: lead.identity, maxWidth: 240 });
+            image.print({ font: bodyFont, x: 420, y: rowY + 18, text: `${lead.level.icon} ${lead.level.label}`, maxWidth: 140 });
+            fillRect(image, 580, rowY + 10, 180, 38, IMAGE_VALUE_COLOR);
+            image.print({ font: bodyFont, x: 595, y: rowY + 20, text: formatUsd(lead.estimatedValue), maxWidth: 150 });
+            image.print({ font: bodyFont, x: 800, y: rowY + 18, text: lead.groupName, maxWidth: 360 });
+        });
     }
 
     return await image.getBuffer('image/png');
@@ -564,76 +791,41 @@ export class LeadEngine {
     async handleLeadsCommand(sock, chatId) {
         const now = Date.now();
         const allLeads = this.getTopLeads(LEADS_LIMIT, now);
-        const topLeads = allLeads.slice(0, 10);
-
-        if (topLeads.length === 0) {
-            await sock.sendMessage(chatId, { text: '📊 Nenhum lead detectado ainda.' });
+        if (allLeads.length === 0) {
+            await sock.sendMessage(chatId, { text: 'Nenhum lead detectado ainda.' });
             return;
         }
 
-        const summary = {
-            quentes: 0,
-            mornos: 0,
-            frios: 0
-        };
-
-        for (const lead of allLeads) {
-            const level = lead.level && lead.level.label ? lead.level : classifyLead(lead.score);
-            if (level.label === 'QUENTE') summary.quentes += 1;
-            else if (level.label === 'MORNO') summary.mornos += 1;
-            else summary.frios += 1;
-        }
-
-        const topWords = this.getTopWords(chatId, now, WORDS_LIMIT);
-
-        const lines = [
-            '📊 RANKING DE INTERESSADOS (IMAVY)',
-            '',
-            '📈 Resumo Geral:',
-            `🔥 Quentes: ${summary.quentes}`,
-            `🟢 Mornos: ${summary.mornos}`,
-            `⚪ Frios: ${summary.frios}`,
-            ''
-        ];
-
-        if (topWords.length > 0) {
-            lines.push('📝 Palavras mais faladas:');
-            topWords.forEach(([word, count], idx) => {
-                lines.push(`${idx + 1}. ${word} (${count}x)`);
-            });
-            lines.push('');
-        }
-
-        for (let i = 0; i < topLeads.length; i += 1) {
-            const lead = topLeads[i];
-            const level = lead.level && lead.level.label ? lead.level : classifyLead(lead.score);
-            const recentCount = Array.isArray(lead.recentMessageTimestamps)
-                ? lead.recentMessageTimestamps.filter((ts) => now - ts <= ACTIVITY_WINDOW_MS).length
-                : 0;
-            const displayName = String(lead.displayName || '').trim() || formatPhoneWithDdd(lead.userId);
-
-            lines.push(`${level.icon} ${i + 1} – ${level.label}`);
-            lines.push(`👤 ${displayName}`);
-            lines.push(`${classifyInterestType(lead)}`);
-            lines.push(`📈 Pontuação: ${lead.score}`);
-            lines.push(`⚡ ${classifyActivityLevel(recentCount)}`);
-            lines.push(`💬 Mensagens: ${lead.messages}`);
-            lines.push(`🏷 Tokens citados: ${lead.tokenMentions}`);
-            lines.push(`🚀 Emojis de hype: ${lead.hypeEmojis}`);
-            lines.push(`⏱ Falou: ${formatLastActivity(lead.lastActivity, now)}`);
-            lines.push(`📍 Grupo: ${lead.groupName}`);
-            lines.push('────────────────────');
-        }
+        const report = buildRadarReport(allLeads, now);
 
         try {
-            const imageBuffer = await renderLeadsReportImage(lines);
+            const imageBuffer = await renderCommercialRadarImage(report);
             await sock.sendMessage(chatId, {
                 image: imageBuffer,
                 mimetype: 'image/png',
-                caption: '📊 Ranking de interessados (IMAVY)'
+                caption: 'IMAVY RADAR COMERCIAL'
             });
+            await sock.sendMessage(chatId, { text: 'Use /leads completo para ver todos os membros analisados.' });
         } catch (error) {
-            await sock.sendMessage(chatId, { text: lines.join('\n') });
+            const fallbackLines = [
+                'IMAVY RADAR COMERCIAL',
+                'Ranking de Interesse da Comunidade',
+                '',
+                `Interessados altos: ${report.summary.high}`,
+                `Interessados medios: ${report.summary.medium}`,
+                `Interessados baixos: ${report.summary.low}`,
+                `Total analisado: ${report.summary.totalAnalyzed}`,
+                `Potencial estimado total: ${formatUsd(report.summary.totalPotential)}`,
+                ''
+            ];
+
+            report.topLeads.forEach((lead) => {
+                fallbackLines.push(`${lead.rankBadge} ${lead.identity} | ${lead.level.label} | ${formatUsd(lead.estimatedValue)} | ${lead.groupName}`);
+            });
+
+            fallbackLines.push('');
+            fallbackLines.push('Use /leads completo para ver todos os membros analisados.');
+            await sock.sendMessage(chatId, { text: fallbackLines.join('\n') });
         }
     }
 }
