@@ -21,6 +21,7 @@ const DEFAULT_BUY_ALERT_GROUPS = [
     '120363418891665714@g.us'
 ];
 const FIXED_BUY_ALERT_GROUP_SET = new Set(DEFAULT_BUY_ALERT_GROUPS);
+const HARD_MIN_USD_ALERT = 200;
 
 let runtime = null;
 
@@ -111,10 +112,11 @@ function buildBuyAlertMessage(payload) {
 }
 
 function buildConfig() {
+    const configuredMinUsdAlert = envNumber('MIN_USD_ALERT', HARD_MIN_USD_ALERT);
     return {
         bscWsUrl: env('BSC_WS_URL', 'wss://bsc.publicnode.com'),
         bscHttpUrl: env('BSC_HTTP_URL', 'https://bsc.publicnode.com'),
-        minUsdAlert: envNumber('MIN_USD_ALERT', 200),
+        minUsdAlert: Math.max(HARD_MIN_USD_ALERT, configuredMinUsdAlert),
         tokenCooldownMs: envNumber('TOKEN_COOLDOWN_MS', 8_000),
         dedupTtlMs: envNumber('DEDUP_TTL_MS', 24 * 60 * 60 * 1_000),
         enableMevFilter: envBoolean('ENABLE_MEV_FILTER', true),

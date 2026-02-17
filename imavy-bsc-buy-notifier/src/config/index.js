@@ -1,6 +1,7 @@
 const path = require('path');
 const dotenv = require('dotenv');
 const { TOKENS, WBNB } = require('./tokens');
+const HARD_MIN_USD_ALERT = 200;
 
 dotenv.config();
 
@@ -62,7 +63,7 @@ const config = {
     },
 
     filters: {
-        minUsdAlert: envNumber('MIN_USD_ALERT', 5),
+        minUsdAlert: Math.max(HARD_MIN_USD_ALERT, envNumber('MIN_USD_ALERT', HARD_MIN_USD_ALERT)),
         tokenCooldownMs: envNumber('TOKEN_COOLDOWN_MS', 8_000),
         dedupTtlMs: envNumber('DEDUP_TTL_MS', 24 * 60 * 60 * 1_000),
         enableMevFilter: envBoolean('ENABLE_MEV_FILTER', true),
