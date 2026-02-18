@@ -165,6 +165,46 @@ function topGroups(messages24h) {
         .slice(0, 10);
 }
 
+function topEngagersByGroup(messages24h, limitGroups = 3, limitUsers = 5) {
+    const groupMap = new Map();
+    messages24h.forEach((m) => {
+        const gid = String(m.groupId || 'sem-grupo');
+        if (!groupMap.has(gid)) {
+            groupMap.set(gid, {
+                groupId: gid,
+                groupName: String(m.groupName || gid),
+                totalMessages: 0,
+                users: new Map()
+            });
+        }
+        const group = groupMap.get(gid);
+        group.totalMessages += 1;
+
+        const uid = String(m.userId || '').trim();
+        if (!uid) return;
+        if (!group.users.has(uid)) {
+            group.users.set(uid, {
+                userId: uid,
+                name: String(m.displayName || '').trim() || uid,
+                totalMessages: 0
+            });
+        }
+        group.users.get(uid).totalMessages += 1;
+    });
+
+    return Array.from(groupMap.values())
+        .sort((a, b) => b.totalMessages - a.totalMessages)
+        .slice(0, Math.max(1, Number(limitGroups) || 3))
+        .map((group) => ({
+            groupId: group.groupId,
+            groupName: group.groupName,
+            totalMessages: group.totalMessages,
+            topUsers: Array.from(group.users.values())
+                .sort((a, b) => b.totalMessages - a.totalMessages)
+                .slice(0, Math.max(1, Number(limitUsers) || 5))
+        }));
+}
+
 export async function buildEngagementRadar({ messages, allowedGroupNames, now = Date.now() }) {
     const scoped = getAllowedMessages(messages, allowedGroupNames);
     const currentStart = now - DAY_MS;
@@ -230,6 +270,7 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
             peakWindow: computePeakWindow(current24h, now)
         },
         topEngagers,
+        topEngagersByGroup: topEngagersByGroup(current24h, 3, 5),
         hotTopics,
         opportunities,
         topGroups: topGroups(current24h),
@@ -237,11 +278,21 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
     };
 
     const image = await renderEngagementRadarImage(report);
+    const groupLeadsLines = (report.topEngagersByGroup || []).map((group) => {
+        const leaders = (group.topUsers || [])
+            .slice(0, 3)
+            .map((u) => `${u.name} (${u.totalMessages})`)
+            .join(', ');
+        return `- ${group.groupName}: ${leaders || 'sem dados'}`;
+    });
+
     const text = [
         'IMAVY - Radar de Engajamento',
         `Status: ${report.status.label}`,
         `Mensagens: ${report.summary.totalMessages} | Ativos: ${report.summary.activeUsers} | Crescimento: ${report.summary.growthPct.toFixed(1)}%`,
         `Pico: ${report.summary.peakWindow}`,
+        'Top por grupo:',
+        ...groupLeadsLines,
         `Sugestao: ${report.suggestion}`
     ].join('\n');
 

@@ -97,13 +97,21 @@ export async function renderEngagementRadarImage(report) {
     });
 
     fillRect(image, 24, 404, 650, 560, COLORS.panel);
-    image.print({ font: bodyFont, x: 48, y: 432, text: 'Top Engajadores', maxWidth: 280 });
-    const topScore = Math.max(1, ...(report.topEngagers || []).map((u) => Number(u.totalMessages || 0)));
-    (report.topEngagers || []).slice(0, 5).forEach((user, idx) => {
-        const y = 476 + (idx * 95);
-        image.print({ font: bodyFont, x: 48, y, text: String(user.name || '-'), maxWidth: 250 });
-        drawBar(image, 300, y + 10, 320, 24, Number(user.totalMessages || 0) / topScore);
-        image.print({ font: bodyFont, x: 630, y: y + 8, text: String(user.totalMessages || 0), maxWidth: 60 });
+    image.print({ font: bodyFont, x: 48, y: 432, text: 'Top 5 por grupo', maxWidth: 280 });
+    const groupsForPanel = (report.topEngagersByGroup || []).slice(0, 3);
+    groupsForPanel.forEach((group, groupIdx) => {
+        const baseY = 470 + (groupIdx * 170);
+        fillRect(image, 40, baseY, 618, 150, groupIdx % 2 === 0 ? COLORS.rowB : COLORS.rowA);
+        image.print({ font: bodyFont, x: 52, y: baseY + 10, text: String(group.groupName || '-'), maxWidth: 580 });
+
+        const topScore = Math.max(1, ...((group.topUsers || []).map((u) => Number(u.totalMessages || 0))));
+        (group.topUsers || []).slice(0, 5).forEach((user, userIdx) => {
+            const rowY = baseY + 36 + (userIdx * 22);
+            const rank = userIdx + 1;
+            image.print({ font: bodyFont, x: 52, y: rowY, text: `${rank}. ${String(user.name || '-')}`, maxWidth: 250 });
+            drawBar(image, 318, rowY + 4, 250, 12, Number(user.totalMessages || 0) / topScore);
+            image.print({ font: bodyFont, x: 576, y: rowY - 2, text: String(user.totalMessages || 0), maxWidth: 40 });
+        });
     });
 
     fillRect(image, 698, 404, 478, 280, COLORS.panel);
