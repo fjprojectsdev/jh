@@ -834,15 +834,17 @@ export class LeadEngine {
             return;
         }
 
-        if (result.text) {
-            await sock.sendMessage(chatId, { text: result.text });
-        }
         if (result.image) {
             await sock.sendMessage(chatId, {
                 image: result.image,
                 mimetype: 'image/png',
                 caption: 'IMAVY - Radar de Engajamento'
             });
+            return;
+        }
+
+        if (result.text) {
+            await sock.sendMessage(chatId, { text: result.text });
         }
     }
 }
