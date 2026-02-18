@@ -110,6 +110,16 @@ function topicRowColor(topic, isHighlight) {
     return COLORS.rowB;
 }
 
+function drawSoftGrid(image, x, y, w, h) {
+    const lineColor = 0x17356366;
+    for (let gx = x + 24; gx < x + w; gx += 40) {
+        fillRect(image, gx, y + 6, 1, h - 12, lineColor);
+    }
+    for (let gy = y + 24; gy < y + h; gy += 32) {
+        fillRect(image, x + 6, gy, w - 12, 1, lineColor);
+    }
+}
+
 function drawBar(image, x, y, w, h, pct, color = COLORS.green) {
     fillRoundedRect(image, x, y, w, h, 6, COLORS.rowB);
     const filled = Math.max(6, Math.floor(w * Math.max(0, Math.min(1, pct))));
@@ -126,6 +136,7 @@ export async function renderEngagementRadarImage(report) {
     drawGradientBackground(image);
 
     drawCard(image, 24, 24, WIDTH - 48, 140, COLORS.panel);
+    drawSoftGrid(image, 24, 24, WIDTH - 48, 140);
     image.print({ font: titleFont, x: 48, y: 48, text: 'IMAVY - Radar de Engajamento', maxWidth: 700 });
     image.print({ font: bodyFont, x: 48, y: 108, text: 'Periodo: Ultimas 24h', maxWidth: 280 });
 
@@ -133,16 +144,18 @@ export async function renderEngagementRadarImage(report) {
     image.print({ font: bodyFont, x: 922, y: 84, text: `Status: ${report.status?.label || 'N/D'}`, maxWidth: 230 });
 
     drawCard(image, 24, 184, WIDTH - 48, 110, COLORS.panelSoft);
-    const tendencia = report.summary?.tendencia || { arrow: '→', label: 'Estavel', growthPct: 0, description: '→ Estavel (0%)' };
+    drawSoftGrid(image, 24, 184, WIDTH - 48, 110);
+    const tendencia = report.summary?.tendencia || { arrow: 'FLAT', label: 'Estavel', growthPct: 0, description: 'Estavel (0%)' };
     image.print({ font: bodyFont, x: 48, y: 208, text: 'Tendencia Atual do Grupo', maxWidth: 330 });
     fillRoundedRect(image, 360, 202, 280, 56, 10, trendColor(tendencia.label));
-    image.print({ font: bodyFont, x: 388, y: 224, text: `${tendencia.arrow} ${tendencia.label} (${formatPct(tendencia.growthPct)})`, maxWidth: 240 });
+    image.print({ font: bodyFont, x: 388, y: 224, text: `${tendencia.arrow} ${tendencia.label} (${formatPct(tendencia.growthPct)})`, maxWidth: 250 });
 
     const sparkline = String(report.summary?.sparkline || '').slice(-24);
     image.print({ font: bodyFont, x: 680, y: 208, text: 'Evolucao 24h', maxWidth: 160 });
-    image.print({ font: bodyFont, x: 680, y: 236, text: sparkline || '▁▁▁▁▁▁', maxWidth: 300 });
+    image.print({ font: bodyFont, x: 680, y: 236, text: sparkline || '......', maxWidth: 300 });
 
     drawCard(image, 24, 308, WIDTH - 48, 190, COLORS.panelSoft);
+    drawSoftGrid(image, 24, 308, WIDTH - 48, 190);
     drawCard(image, 40, 326, 340, 150, COLORS.panel);
     drawCard(image, 396, 326, 340, 150, COLORS.panel);
     drawCard(image, 752, 326, 408, 150, COLORS.panel);
@@ -168,11 +181,12 @@ export async function renderEngagementRadarImage(report) {
         font: bodyFont,
         x: 776,
         y: 462,
-        text: `Energia: ${report.energiaGrupo?.bar || '░░░░░░░░░░'} ${report.energiaGrupo?.score || 0}% (${report.energiaGrupo?.label || 'Fraco'})`,
+        text: `Energia: ${report.energiaGrupo?.bar || '----------'} ${report.energiaGrupo?.score || 0}% (${report.energiaGrupo?.label || 'Fraco'})`,
         maxWidth: 360
     });
 
     drawCard(image, 24, 512, 760, 520, COLORS.panel);
+    drawSoftGrid(image, 24, 512, 760, 520);
     image.print({ font: bodyFont, x: 48, y: 540, text: 'Top 5 por grupo', maxWidth: 280 });
 
     const groupsForPanel = (report.topEngagersByGroup || []).slice(0, 3);
@@ -191,6 +205,7 @@ export async function renderEngagementRadarImage(report) {
     });
 
     drawCard(image, 800, 512, 376, 260, COLORS.panel);
+    drawSoftGrid(image, 800, 512, 376, 260);
     image.print({ font: bodyFont, x: 824, y: 540, text: 'Assuntos Quentes', maxWidth: 220 });
 
     const highlighted = String(report.highlightedTopic?.label || '');
@@ -203,7 +218,7 @@ export async function renderEngagementRadarImage(report) {
             font: bodyFont,
             x: 836,
             y: y + 14,
-            text: `${topic.label} - ${formatNumber(topic.totalMentions)} msgs (${pct} ${topic.visual?.icon || '→'})`,
+            text: `${topic.label} - ${formatNumber(topic.totalMentions)} msgs (${pct} ${topic.visual?.icon || 'FLAT'})`,
             maxWidth: 312
         });
     });
@@ -221,6 +236,7 @@ export async function renderEngagementRadarImage(report) {
     image.print({ font: bodyFont, x: 824, y: 1000, text: accelerating ? `Token acelerando: ${accelerating.label} (${formatPct(accelerating.variationPct)})` : 'Token acelerando: nenhum', maxWidth: 330 });
 
     drawCard(image, 24, 1044, WIDTH - 48, 464, COLORS.panel);
+    drawSoftGrid(image, 24, 1044, WIDTH - 48, 464);
     image.print({ font: bodyFont, x: 48, y: 1070, text: 'Top 10 grupos (permitidos)', maxWidth: 280 });
     image.print({ font: bodyFont, x: 48, y: 1104, text: 'Grupo', maxWidth: 460 });
     image.print({ font: bodyFont, x: 860, y: 1104, text: 'Msgs', maxWidth: 80 });

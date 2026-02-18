@@ -17,7 +17,7 @@ const FIXED_GROUP_ORDER = [
     'SQUAD Web3 | @AlexCPO_'
 ];
 
-const SPARK_CHARS = ['▁', '▂', '▃', '▄', '▅', '▆', '█'];
+const SPARK_CHARS = ['.', ':', '-', '=', '+', '*', '#'];
 
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -94,9 +94,9 @@ export function calcularTendencia(totalMensagens24h, mensagensUltimaHora) {
         return {
             ratio,
             growthPct,
-            arrow: '↑',
+            arrow: 'UP',
             label: 'Acelerando',
-            description: `↑ Acelerando (${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(0)}%)`
+            description: `Acelerando (${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(0)}%)`
         };
     }
 
@@ -104,18 +104,18 @@ export function calcularTendencia(totalMensagens24h, mensagensUltimaHora) {
         return {
             ratio,
             growthPct,
-            arrow: '→',
+            arrow: 'FLAT',
             label: 'Estavel',
-            description: `→ Estavel (${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(0)}%)`
+            description: `Estavel (${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(0)}%)`
         };
     }
 
     return {
         ratio,
         growthPct,
-        arrow: '↓',
+        arrow: 'DOWN',
         label: 'Perdendo forca',
-        description: `↓ Perdendo forca (${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(0)}%)`
+        description: `Perdendo forca (${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(0)}%)`
     };
 }
 
@@ -150,11 +150,11 @@ export function calcularVariacaoToken(totalMentions24h, mentionsUltimas2h) {
 }
 
 function classifyTopicVariation(variationPct) {
-    if (variationPct > 40) return { color: 'red', icon: '🔥', status: 'Hype explosivo' };
-    if (variationPct > 15) return { color: 'green', icon: '↑', status: 'Crescimento' };
-    if (variationPct >= 5) return { color: 'orange', icon: '→', status: 'Atencao' };
-    if (variationPct < 0) return { color: 'gray', icon: '↓', status: 'Queda' };
-    return { color: 'gray', icon: '→', status: 'Estavel' };
+    if (variationPct > 40) return { color: 'red', icon: 'BOOM', status: 'Hype explosivo' };
+    if (variationPct > 15) return { color: 'green', icon: 'UP', status: 'Crescimento' };
+    if (variationPct >= 5) return { color: 'orange', icon: 'ALERT', status: 'Atencao' };
+    if (variationPct < 0) return { color: 'gray', icon: 'DOWN', status: 'Queda' };
+    return { color: 'gray', icon: 'FLAT', status: 'Estavel' };
 }
 
 function buildTopicStats(messages24h, now) {
@@ -273,7 +273,7 @@ export function calcularEnergiaGrupo({ participantesAtivos, totalParticipantes, 
 
     const score = Math.round(clamp(energia, 0, 1) * 100);
     const blocks = clamp(Math.round(score / 10), 0, 10);
-    const bar = `${'█'.repeat(blocks)}${'░'.repeat(10 - blocks)}`;
+    const bar = `${'#'.repeat(blocks)}${'-'.repeat(10 - blocks)}`;
 
     let label = 'Fraco';
     if (score >= 80) label = 'Explosivo';
