@@ -9,6 +9,12 @@ const STOP_WORDS = new Set([
     'the', 'and', 'for', 'this', 'that'
 ]);
 
+const FIXED_GROUP_ORDER = [
+    'CriptoNoPix é Vellora (1)',
+    'CriptoNoPix é Vellora (2)',
+    'SQUAD Web3 | @AlexCPO_'
+];
+
 function normalize(value) {
     return String(value || '')
         .normalize('NFD')
@@ -18,7 +24,7 @@ function normalize(value) {
 }
 
 function normalizeGroupName(value) {
-    return normalize(value).replace(/\s+/g, ' ');
+    return normalize(value).replace(/\s+/g, ' ').trim();
 }
 
 function getAllowedMessages(messages, allowedGroupNames) {
@@ -165,19 +171,20 @@ function topGroups(messages24h) {
         .slice(0, 10);
 }
 
-function topEngagersByGroup(messages24h, limitGroups = 3, limitUsers = 5) {
+function topEngagersByGroup(messages24h, limitUsers = 5) {
     const groupMap = new Map();
     messages24h.forEach((m) => {
-        const gid = String(m.groupId || 'sem-grupo');
-        if (!groupMap.has(gid)) {
-            groupMap.set(gid, {
-                groupId: gid,
-                groupName: String(m.groupName || gid),
+        const groupName = String(m.groupName || m.groupId || 'sem-grupo');
+        const groupKey = normalizeGroupName(groupName);
+        if (!groupMap.has(groupKey)) {
+            groupMap.set(groupKey, {
+                groupId: String(m.groupId || 'sem-grupo'),
+                groupName,
                 totalMessages: 0,
                 users: new Map()
             });
         }
-        const group = groupMap.get(gid);
+        const group = groupMap.get(groupKey);
         group.totalMessages += 1;
 
         const uid = String(m.userId || '').trim();
@@ -192,17 +199,26 @@ function topEngagersByGroup(messages24h, limitGroups = 3, limitUsers = 5) {
         group.users.get(uid).totalMessages += 1;
     });
 
-    return Array.from(groupMap.values())
-        .sort((a, b) => b.totalMessages - a.totalMessages)
-        .slice(0, Math.max(1, Number(limitGroups) || 3))
-        .map((group) => ({
-            groupId: group.groupId,
-            groupName: group.groupName,
-            totalMessages: group.totalMessages,
-            topUsers: Array.from(group.users.values())
+    return FIXED_GROUP_ORDER.map((fixedName) => {
+        const found = groupMap.get(normalizeGroupName(fixedName));
+        if (!found) {
+            return {
+                groupId: '',
+                groupName: fixedName,
+                totalMessages: 0,
+                topUsers: []
+            };
+        }
+
+        return {
+            groupId: found.groupId,
+            groupName: fixedName,
+            totalMessages: found.totalMessages,
+            topUsers: Array.from(found.users.values())
                 .sort((a, b) => b.totalMessages - a.totalMessages)
                 .slice(0, Math.max(1, Number(limitUsers) || 5))
-        }));
+        };
+    });
 }
 
 export async function buildEngagementRadar({ messages, allowedGroupNames, now = Date.now() }) {
@@ -270,7 +286,7 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
             peakWindow: computePeakWindow(current24h, now)
         },
         topEngagers,
-        topEngagersByGroup: topEngagersByGroup(current24h, 3, 5),
+        topEngagersByGroup: topEngagersByGroup(current24h, 5),
         hotTopics,
         opportunities,
         topGroups: topGroups(current24h),
