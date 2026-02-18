@@ -18,6 +18,10 @@ const FIXED_GROUP_ORDER = [
 ];
 
 const SPARK_CHARS = ['.', ':', '-', '=', '+', '*', '#'];
+const KNOWN_TOKENS = new Set([
+    'BNB', 'USDT', 'NIX', 'SNAPPY', 'FSX', 'KEN', 'KENESIS', 'DCAR', 'DIVICAR',
+    'MASAKA', 'VEREM', 'NELORE', 'DYMX', 'GEG'
+]);
 
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -48,11 +52,22 @@ function toTopicCandidates(text) {
     const safe = String(text || '');
     const tokens = [];
 
-    const upper = safe.match(/\b[A-Z]{3,8}\b/g) || [];
+    const upper = safe.match(/\b[A-Z]{2,12}\b/g) || [];
     upper.forEach((t) => tokens.push(t));
 
-    const dollar = safe.match(/\$[A-Za-z]{2,10}\b/g) || [];
+    const dollar = safe.match(/\$[A-Za-z]{2,12}\b/g) || [];
     dollar.forEach((t) => tokens.push(t.slice(1).toUpperCase()));
+
+    const normalizedWords = normalize(safe)
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(Boolean);
+    normalizedWords.forEach((word) => {
+        const up = word.toUpperCase();
+        if (KNOWN_TOKENS.has(up)) {
+            tokens.push(up);
+        }
+    });
 
     const normalized = normalize(safe)
         .replace(/https?:\/\/\S+/g, ' ')
@@ -187,7 +202,7 @@ function buildTopicStats(messages24h, now) {
     });
 
     const stats = Array.from(topicMap.values())
-        .filter((row) => row.totalMentions >= 2)
+        .filter((row) => row.totalMentions >= 2 || KNOWN_TOKENS.has(row.label))
         .map((row) => {
             const last2h = Number(row.hourlyMentions[22] || 0) + Number(row.hourlyMentions[23] || 0);
             const variationPct = calcularVariacaoToken(row.totalMentions, last2h);
@@ -252,12 +267,19 @@ export function detectarPico(messages24h, now) {
     const nextHour = (peakHour + 1) % 24;
     const dominantToken = Array.from(peakBucket.tokenMentions.entries())
         .sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/D';
+    const avgPerHour = messages24h.length / 24;
+    const speedPerMin = peakBucket.totalMessages / 60;
+    const aboveAveragePct = avgPerHour > 0
+        ? ((peakBucket.totalMessages / avgPerHour) - 1) * 100
+        : 0;
 
     return {
         window: `${String(peakHour).padStart(2, '0')}h-${String(nextHour).padStart(2, '0')}h`,
         totalMessages: peakBucket.totalMessages,
         activeUsers: peakBucket.users.size,
-        dominantToken
+        dominantToken,
+        speedPerMin,
+        aboveAveragePct
     };
 }
 
@@ -364,6 +386,36 @@ function summarizeStatus(growthPct) {
     if (growthPct >= 10) return { label: 'QUENTE' };
     if (growthPct >= 0) return { label: 'MORNO' };
     return { label: 'FRIO' };
+}
+
+function gerarInsightEstrategico({ growthPct, topEngagers, activeUsers, peak, topicData }) {
+    const leadingTopic = topicData?.highlighted || topicData?.top?.[0] || null;
+    const totalTopicMentions = Math.max(
+        1,
+        Number((topicData?.all || []).reduce((sum, item) => sum + Number(item.totalMentions || 0), 0))
+    );
+    const leadingShare = leadingTopic
+        ? (Number(leadingTopic.totalMentions || 0) / totalTopicMentions) * 100
+        : 0;
+
+    const top3Msg = (topEngagers || []).slice(0, 3).reduce((sum, row) => sum + Number(row.totalMessages || 0), 0);
+    const concentration = activeUsers > 0
+        ? (top3Msg / Math.max(1, Number(peak?.totalMessages || 0))) * 100
+        : 0;
+
+    if (leadingTopic && Number(leadingTopic.variationPct || 0) > 25) {
+        return `${leadingTopic.label} esta acelerando rapidamente nas ultimas 2h e concentra ${leadingShare.toFixed(0)}% das conversas.`;
+    }
+
+    if (Number(growthPct || 0) > 150) {
+        return `Grupo apresenta crescimento explosivo com aumento de ${Number(growthPct).toFixed(0)}% nas ultimas 24h.`;
+    }
+
+    if (concentration > 45) {
+        return 'Conversa esta concentrada em poucos usuarios, risco de falsa percepcao de hype.';
+    }
+
+    return 'Engajamento distribuido e saudavel, com espaco para CTA no horario de pico.';
 }
 
 function topGroups(messages24h) {
@@ -544,6 +596,13 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
         topGroups: topGroups(current24h),
         suggestion
     };
+    report.insight = gerarInsightEstrategico({
+        growthPct,
+        topEngagers,
+        activeUsers,
+        peak,
+        topicData
+    });
 
     const image = await renderEngagementRadarImage(report);
 
@@ -560,8 +619,10 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
         `Status: ${report.status.label}`,
         `Tendencia: ${report.summary.tendencia.description} | Sparkline: ${report.summary.sparkline}`,
         `Mensagens: ${report.summary.totalMessages} | Ativos: ${report.summary.activeUsers} | Crescimento: ${report.summary.growthPct.toFixed(1)}%`,
-        `Pico detectado: ${report.peak.window} | ${report.peak.totalMessages} msgs | ${report.peak.activeUsers} usuarios | Token: ${report.peak.dominantToken}`,
-        `Energia: ${report.energiaGrupo.bar} ${report.energiaGrupo.score}% (${report.energiaGrupo.label})`,
+        `Pico real: ${report.peak.window} | +${report.peak.totalMessages} msgs | +${report.peak.activeUsers} usuarios | Velocidade: ${report.peak.speedPerMin.toFixed(1)} msg/min | Tema: ${report.peak.dominantToken} | ${report.peak.aboveAveragePct >= 0 ? '+' : ''}${report.peak.aboveAveragePct.toFixed(0)}% vs media horaria`,
+        `Energia do Grupo: ${report.energiaGrupo.bar} ${report.energiaGrupo.score}% (${report.energiaGrupo.label})`,
+        'Baseado em: volume de mensagens, participacao ativa e aceleracao recente.',
+        `Insight Estrategico: ${report.insight}`,
         'Top por grupo:',
         ...groupLeadsLines,
         `Sugestao: ${report.suggestion}`
