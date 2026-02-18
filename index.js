@@ -473,6 +473,10 @@ async function startBot() {
                     await leadEngine.handleLeadsCommand(sock, chatId);
                     continue;
                 }
+                if (messageText.toLowerCase().startsWith('/engajamento')) {
+                    // privado nao permitido para este comando
+                    continue;
+                }
 
                 // Comando /dev (ativar modo desenvolvedor)
                 if (messageText.startsWith('/dev')) {
@@ -571,6 +575,12 @@ async function startBot() {
 
                 if (messageText.toLowerCase().startsWith('/leads')) {
                     await leadEngine.handleLeadsCommand(sock, chatId);
+                    continue;
+                }
+                if (messageText.toLowerCase().startsWith('/engajamento')) {
+                    await leadEngine.handleEngagementCommand(sock, chatId, {
+                        allowedGroupNames: Array.from(ALLOWED_GROUP_NAMES)
+                    });
                     continue;
                 }
 

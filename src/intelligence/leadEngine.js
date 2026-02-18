@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { runIntelRadar } from '../../functions/intelRadar.js';
+import { buildEngagementRadar } from '../../functions/engagementRadar.js';
 
 const require = createRequire(import.meta.url);
 const { Jimp, loadFont } = require('jimp');
@@ -813,6 +814,34 @@ export class LeadEngine {
                 image: imageBuffer,
                 mimetype: 'image/png',
                 caption: 'IMAVY RADAR COMERCIAL'
+            });
+        }
+    }
+
+    async handleEngagementCommand(sock, chatId, options = {}) {
+        const allowedGroupNames = Array.isArray(options.allowedGroupNames)
+            ? options.allowedGroupNames
+            : [];
+
+        const result = await buildEngagementRadar({
+            messages: this.messageLog,
+            allowedGroupNames,
+            now: Date.now()
+        });
+
+        if (!result || (!result.text && !result.image)) {
+            await sock.sendMessage(chatId, { text: 'Nenhum dado para gerar o painel de engajamento.' });
+            return;
+        }
+
+        if (result.text) {
+            await sock.sendMessage(chatId, { text: result.text });
+        }
+        if (result.image) {
+            await sock.sendMessage(chatId, {
+                image: result.image,
+                mimetype: 'image/png',
+                caption: 'IMAVY - Radar de Engajamento'
             });
         }
     }
