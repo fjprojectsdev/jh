@@ -157,6 +157,23 @@ function normalizeGroupName(name) {
         .toLowerCase();
 }
 
+function loadAllowedGroupNames() {
+    const allowed = new Set();
+    try {
+        const allowedPath = path.join(__dirname, 'allowed_groups.json');
+        if (!fs.existsSync(allowedPath)) {
+            return allowed;
+        }
+        const parsed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
+        if (Array.isArray(parsed)) {
+            parsed.map(normalizeGroupName).filter(Boolean).forEach((name) => allowed.add(name));
+        }
+    } catch (e) {
+        console.warn('Falha ao ler allowed_groups.json:', e.message);
+    }
+    return allowed;
+}
+
 function resolveParticipantName(message, senderId) {
     const pushName = String(message?.pushName || '').trim();
     if (pushName) {
@@ -474,7 +491,10 @@ async function startBot() {
                     continue;
                 }
                 if (messageText.toLowerCase().startsWith('/engajamento')) {
-                    // privado nao permitido para este comando
+                    const allowedGroups = loadAllowedGroupNames();
+                    await leadEngine.handleEngagementCommand(sock, chatId, {
+                        allowedGroupNames: Array.from(allowedGroups)
+                    });
                     continue;
                 }
 
@@ -501,18 +521,7 @@ async function startBot() {
             console.log(`Ã°Å¸â€Â DEBUG: Processando msg de ${senderId} no grupo ${chatId}`);
 
             // Carregar allowed_groups (Ideal: mover par memÃƒÂ³ria global recarregÃƒÂ¡vel)
-            let ALLOWED_GROUP_NAMES = new Set();
-            try {
-                const allowedPath = path.join(__dirname, 'allowed_groups.json');
-                if (fs.existsSync(allowedPath)) {
-                    const parsed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
-                    if (Array.isArray(parsed)) {
-                        ALLOWED_GROUP_NAMES = new Set(parsed.map(normalizeGroupName).filter(Boolean));
-                    }
-                }
-            } catch (e) {
-                console.warn('Ã¢Å¡Â Ã¯Â¸Â Falha ao ler allowed_groups.json:', e.message);
-            }
+            const ALLOWED_GROUP_NAMES = loadAllowedGroupNames();
 
             let groupSubject = null;
             let groupDescription = '';
@@ -550,7 +559,7 @@ async function startBot() {
                     if (nowTs - lastNoticeTs >= UNAUTHORIZED_GROUP_NOTICE_MS) {
                         unauthorizedGroupNoticeCooldown.set(chatId, nowTs);
                         await sendSafeMessage(sock, chatId, {
-                            text: 'Ã¢Å¡Â Ã¯Â¸Â Este grupo nÃƒÂ£o estÃƒÂ¡ autorizado para comandos.\n\nPeÃƒÂ§a a um admin para adicionar o grupo na lista permitida.'
+                            text: 'Este grupo nao esta autorizado para comandos.\n\nPeca a um admin para adicionar o grupo na lista permitida.'
                         });
                     }
                 }
