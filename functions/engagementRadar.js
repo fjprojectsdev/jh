@@ -11,17 +11,12 @@ const STOP_WORDS = new Set([
     'the', 'and', 'for', 'this', 'that'
 ]);
 
-const FIXED_GROUP_ORDER = [
-    'CriptoNoPix e Vellora (1)',
-    'CriptoNoPix e Vellora (2)',
-    'SQUAD Web3 | @AlexCPO_'
-];
-
 const SPARK_CHARS = ['.', ':', '-', '=', '+', '*', '#'];
 const KNOWN_TOKENS = new Set([
     'BNB', 'USDT', 'NIX', 'SNAPPY', 'FSX', 'KEN', 'KENESIS', 'DCAR', 'DIVICAR',
     'MASAKA', 'VEREM', 'NELORE', 'DYMX', 'GEG'
 ]);
+const IGNORED_GROUP_PATTERN = /\b(squad|teste|test)\b/;
 
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
@@ -39,13 +34,24 @@ function normalizeGroupName(value) {
     return normalize(value).replace(/\s+/g, ' ').trim();
 }
 
+function isIgnoredGroupName(value) {
+    const normalized = normalizeGroupName(value);
+    return Boolean(normalized) && IGNORED_GROUP_PATTERN.test(normalized);
+}
+
 function getAllowedMessages(messages, allowedGroupNames) {
     const allowed = new Set((allowedGroupNames || []).map((name) => normalizeGroupName(name)).filter(Boolean));
     if (allowed.size === 0) {
         return [];
     }
 
-    return (Array.isArray(messages) ? messages : []).filter((m) => allowed.has(normalizeGroupName(m.groupName)));
+    return (Array.isArray(messages) ? messages : []).filter((m) => {
+        const groupName = normalizeGroupName(m && m.groupName);
+        if (!groupName || !allowed.has(groupName)) {
+            return false;
+        }
+        return !isIgnoredGroupName(groupName);
+    });
 }
 
 function toTopicCandidates(text) {
@@ -446,7 +452,7 @@ function topGroups(messages24h) {
         .slice(0, 10);
 }
 
-function topEngagersByGroup(messages24h, limitUsers = 5) {
+function topEngagersByGroup(messages24h, limitUsers = 5, limitGroups = 3) {
     const groupMap = new Map();
     messages24h.forEach((m) => {
         const groupName = String(m.groupName || m.groupId || 'sem-grupo');
@@ -476,26 +482,17 @@ function topEngagersByGroup(messages24h, limitUsers = 5) {
         group.users.get(uid).totalMessages += 1;
     });
 
-    return FIXED_GROUP_ORDER.map((fixedName) => {
-        const found = groupMap.get(normalizeGroupName(fixedName));
-        if (!found) {
-            return {
-                groupId: '',
-                groupName: fixedName,
-                totalMessages: 0,
-                topUsers: []
-            };
-        }
-
-        return {
-            groupId: found.groupId,
-            groupName: fixedName,
-            totalMessages: found.totalMessages,
-            topUsers: Array.from(found.users.values())
+    return Array.from(groupMap.values())
+        .sort((a, b) => b.totalMessages - a.totalMessages)
+        .slice(0, Math.max(1, Number(limitGroups) || 3))
+        .map((group) => ({
+            groupId: group.groupId,
+            groupName: group.groupName,
+            totalMessages: group.totalMessages,
+            topUsers: Array.from(group.users.values())
                 .sort((a, b) => b.totalMessages - a.totalMessages)
                 .slice(0, Math.max(1, Number(limitUsers) || 5))
-        };
-    });
+        }));
 }
 
 export async function buildEngagementRadar({ messages, allowedGroupNames, now = Date.now() }) {
@@ -584,6 +581,7 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
             msgPerMin,
             peakWindow: peak.window,
             sparkline,
+            hourlySeries,
             tendencia
         },
         topEngagers,
@@ -622,6 +620,7 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
         `Pico real: ${report.peak.window} | +${report.peak.totalMessages} msgs | +${report.peak.activeUsers} usuarios | Velocidade: ${report.peak.speedPerMin.toFixed(1)} msg/min | Tema: ${report.peak.dominantToken} | ${report.peak.aboveAveragePct >= 0 ? '+' : ''}${report.peak.aboveAveragePct.toFixed(0)}% vs media horaria`,
         `Energia do Grupo: ${report.energiaGrupo.bar} ${report.energiaGrupo.score}% (${report.energiaGrupo.label})`,
         'Baseado em: volume de mensagens, participacao ativa e aceleracao recente.',
+        'Obs: mensagens de grupos com "squad" e "teste" sao desconsideradas neste radar.',
         `Insight Estrategico: ${report.insight}`,
         'Top por grupo:',
         ...groupLeadsLines,
