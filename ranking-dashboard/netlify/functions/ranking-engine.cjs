@@ -64,6 +64,29 @@ function normalizeGroupFilter(grupoSelecionado) {
     return value.toLowerCase();
 }
 
+function normalizeGroupName(value) {
+    return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function isAllowedDashboardGroup(groupName) {
+    const normalized = normalizeGroupName(groupName);
+    if (!normalized) {
+        return true;
+    }
+
+    return !/\bsquad\b/.test(normalized);
+}
+
+function buildParticipantKey(nome, grupo) {
+    const normalizedName = String(nome || '').trim().toLowerCase();
+    const normalizedGroup = String(grupo || '').trim().toLowerCase();
+    return `${normalizedName}::${normalizedGroup}`;
+}
+
 // Valida e normaliza o intervalo principal informado.
 function normalizeRange(dataInicio, dataFim) {
     const startDate = parseIsoDate(dataInicio);
@@ -110,9 +133,14 @@ function filterInteractionsByRange(interacoes, startDate, endDate, groupFilter) 
                 return false;
             }
 
+            const grupoRegistro = typeof registro.grupo === 'string' ? registro.grupo.trim() : '';
+            if (!isAllowedDashboardGroup(grupoRegistro)) {
+                return false;
+            }
+
             if (groupFilter) {
-                const grupoRegistro = typeof registro.grupo === 'string' ? registro.grupo.trim().toLowerCase() : '';
-                if (grupoRegistro !== groupFilter) {
+                const grupoNormalizado = grupoRegistro.toLowerCase();
+                if (grupoNormalizado !== groupFilter) {
                     return false;
                 }
             }
@@ -126,13 +154,27 @@ function filterInteractionsByRange(interacoes, startDate, endDate, groupFilter) 
         }));
 }
 
-// Soma 1 ponto por mensagem para cada participante.
+// Soma 1 ponto por mensagem para cada participante dentro do seu grupo.
 function countMessagesByParticipant(interacoes) {
     const totals = new Map();
 
     for (const registro of interacoes) {
-        const atual = totals.get(registro.nome) || 0;
-        totals.set(registro.nome, atual + 1);
+        const nome = String(registro.nome || '').trim();
+        const grupo = String(registro.grupo || '').trim();
+        const key = buildParticipantKey(nome, grupo);
+
+        const existente = totals.get(key);
+        if (existente) {
+            existente.total += 1;
+            continue;
+        }
+
+        totals.set(key, {
+            key,
+            nome,
+            grupo,
+            total: 1
+        });
     }
 
     return totals;
@@ -145,7 +187,12 @@ function sortByRankingRules(items) {
             return b.total - a.total;
         }
 
-        return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+        const byName = a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+        if (byName !== 0) {
+            return byName;
+        }
+
+        return String(a.grupo || '').localeCompare(String(b.grupo || ''), 'pt-BR', { sensitivity: 'base' });
     });
 }
 
@@ -153,15 +200,18 @@ function sortByRankingRules(items) {
 function buildRanking(currentTotals, previousTotals, totalGeral) {
     const ranking = [];
 
-    for (const [nome, total] of currentTotals.entries()) {
-        const previous = previousTotals.get(nome) || 0;
-        const crescimentoAbsoluto = total - previous;
-        const crescimentoPercentual = calcGrowthPercent(previous, total);
-        const percentualParticipacao = totalGeral === 0 ? 0 : (total / totalGeral) * 100;
+    for (const participante of currentTotals.values()) {
+        const previous = previousTotals.get(participante.key);
+        const previousTotal = previous ? previous.total : 0;
+        const crescimentoAbsoluto = participante.total - previousTotal;
+        const crescimentoPercentual = calcGrowthPercent(previousTotal, participante.total);
+        const percentualParticipacao = totalGeral === 0 ? 0 : (participante.total / totalGeral) * 100;
 
         ranking.push({
-            nome,
-            total,
+            key: participante.key,
+            nome: participante.nome,
+            grupo: participante.grupo,
+            total: participante.total,
             percentual: round2(percentualParticipacao),
             crescimento: {
                 absoluto: crescimentoAbsoluto,
@@ -174,32 +224,67 @@ function buildRanking(currentTotals, previousTotals, totalGeral) {
 
     return ordered.map((item, index) => ({
         posicao: index + 1,
+        key: item.key,
         nome: item.nome,
+        grupo: item.grupo,
         total: item.total,
         percentual: item.percentual,
         crescimento: item.crescimento
     }));
 }
 
+function compareParticipantLabel(a, b) {
+    const byName = String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR', { sensitivity: 'base' });
+    if (byName !== 0) {
+        return byName;
+    }
+
+    return String(a.grupo || '').localeCompare(String(b.grupo || ''), 'pt-BR', { sensitivity: 'base' });
+}
+
+function formatParticipantLabel(participante) {
+    if (!participante) {
+        return '';
+    }
+
+    const nome = String(participante.nome || '').trim();
+    const grupo = String(participante.grupo || '').trim();
+
+    if (!grupo) {
+        return nome;
+    }
+
+    return `${nome} (${grupo})`;
+}
+
 // Identifica maior crescimento e maior queda considerando todos os participantes dos dois periodos.
 function analyzeMovement(currentTotals, previousTotals) {
-    const nomes = new Set([...currentTotals.keys(), ...previousTotals.keys()]);
+    const participantes = new Set([...currentTotals.keys(), ...previousTotals.keys()]);
     let maiorCrescimento = null;
     let maiorQueda = null;
 
-    for (const nome of nomes) {
-        const atual = currentTotals.get(nome) || 0;
-        const anterior = previousTotals.get(nome) || 0;
+    for (const key of participantes) {
+        const atualItem = currentTotals.get(key);
+        const anteriorItem = previousTotals.get(key);
+        const atual = atualItem ? atualItem.total : 0;
+        const anterior = anteriorItem ? anteriorItem.total : 0;
         const absoluto = atual - anterior;
         const percentual = round2(calcGrowthPercent(anterior, atual));
-        const base = { nome, absoluto, percentual };
+        const ref = atualItem || anteriorItem || {};
+        const base = {
+            key,
+            nome: ref.nome || '',
+            grupo: ref.grupo || '',
+            absoluto,
+            percentual
+        };
 
         if (
             absoluto > 0 &&
             (!maiorCrescimento ||
                 absoluto > maiorCrescimento.absoluto ||
                 (absoluto === maiorCrescimento.absoluto &&
-                    nome.localeCompare(maiorCrescimento.nome, 'pt-BR', { sensitivity: 'base' }) < 0))
+                    compareParticipantLabel(base, maiorCrescimento) < 0))
         ) {
             maiorCrescimento = base;
         }
@@ -209,7 +294,7 @@ function analyzeMovement(currentTotals, previousTotals) {
             (!maiorQueda ||
                 absoluto < maiorQueda.absoluto ||
                 (absoluto === maiorQueda.absoluto &&
-                    nome.localeCompare(maiorQueda.nome, 'pt-BR', { sensitivity: 'base' }) < 0))
+                    compareParticipantLabel(base, maiorQueda) < 0))
         ) {
             maiorQueda = base;
         }
@@ -222,9 +307,10 @@ function analyzeMovement(currentTotals, previousTotals) {
 function buildInsights(rankingCompleto, resumo, movement) {
     const insights = [];
     const lider = rankingCompleto[0];
+    const liderLabel = formatParticipantLabel(lider);
 
     if (lider) {
-        insights.push(`${lider.nome} lidera com ${lider.percentual}% das mensagens.`);
+        insights.push(`${liderLabel} lidera com ${lider.percentual}% das mensagens.`);
     } else {
         insights.push('Nao houve mensagens no periodo selecionado.');
     }
@@ -234,13 +320,13 @@ function buildInsights(rankingCompleto, resumo, movement) {
     insights.push(`Top 3 concentram ${top3Percentual}% da participacao.`);
 
     if (movement.maiorCrescimento) {
-        insights.push(`${movement.maiorCrescimento.nome} teve maior crescimento no periodo (${formatSignedPercent(movement.maiorCrescimento.percentual)}).`);
+        insights.push(`${formatParticipantLabel(movement.maiorCrescimento)} teve maior crescimento no periodo (${formatSignedPercent(movement.maiorCrescimento.percentual)}).`);
     } else {
         insights.push('Nenhum participante apresentou crescimento no periodo.');
     }
 
     if (movement.maiorQueda) {
-        insights.push(`${movement.maiorQueda.nome} teve maior queda no periodo (${formatSignedPercent(movement.maiorQueda.percentual)}).`);
+        insights.push(`${formatParticipantLabel(movement.maiorQueda)} teve maior queda no periodo (${formatSignedPercent(movement.maiorQueda.percentual)}).`);
     } else {
         insights.push('Nao houve queda de mensagens em relacao ao periodo anterior.');
     }

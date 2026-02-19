@@ -41,7 +41,26 @@ function normalizeGroupName(value) {
 }
 
 function isGrupoPermitidoNoDashboard(groupName) {
-    return Boolean(normalizeGroupName(groupName));
+    const normalized = normalizeGroupName(groupName);
+    if (!normalized) {
+        return false;
+    }
+
+    return !/\bsquad\b/.test(normalized);
+}
+
+function buildParticipantKey(nome, grupo) {
+    return `${String(nome || '').trim().toLowerCase()}::${String(grupo || '').trim().toLowerCase()}`;
+}
+
+function formatParticipantLabel(participante) {
+    if (!participante) {
+        return '-';
+    }
+
+    const nome = String(participante.nome || '').trim() || '-';
+    const grupo = String(participante.grupo || '').trim();
+    return grupo ? `${nome} (${grupo})` : nome;
 }
 
 function getAuthToken() {
@@ -708,11 +727,13 @@ function calcularRankingPeriodoLocal(interacoes, dataInicio, dataFim, grupoSelec
             continue;
         }
 
-        if (groupFilter) {
-            const grupo = typeof item.grupo === 'string' ? item.grupo.trim().toLowerCase() : '';
-            if (grupo !== groupFilter) {
-                continue;
-            }
+        const grupo = typeof item.grupo === 'string' ? item.grupo.trim() : '';
+        if (!isGrupoPermitidoNoDashboard(grupo)) {
+            continue;
+        }
+
+        if (groupFilter && grupo.toLowerCase() !== groupFilter) {
+            continue;
         }
 
         const nome = item.nome.trim();
@@ -720,22 +741,36 @@ function calcularRankingPeriodoLocal(interacoes, dataInicio, dataFim, grupoSelec
             continue;
         }
 
-        mapa.set(nome, (mapa.get(nome) || 0) + 1);
+        const key = buildParticipantKey(nome, grupo);
+        const atual = mapa.get(key);
+        if (atual) {
+            atual.total += 1;
+            continue;
+        }
+
+        mapa.set(key, { nome, grupo, total: 1 });
     }
 
-    const total = Array.from(mapa.values()).reduce((sum, value) => sum + value, 0);
+    const total = Array.from(mapa.values()).reduce((sum, value) => sum + value.total, 0);
 
-    return Array.from(mapa.entries())
-        .map(([nome, qtd]) => ({
-            nome,
-            total: qtd,
-            percentual: total === 0 ? 0 : round2((qtd / total) * 100)
+    return Array.from(mapa.values())
+        .map((participante) => ({
+            nome: participante.nome,
+            grupo: participante.grupo,
+            total: participante.total,
+            percentual: total === 0 ? 0 : round2((participante.total / total) * 100)
         }))
         .sort((a, b) => {
             if (b.total !== a.total) {
                 return b.total - a.total;
             }
-            return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+
+            const byName = a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+            if (byName !== 0) {
+                return byName;
+            }
+
+            return String(a.grupo || '').localeCompare(String(b.grupo || ''), 'pt-BR', { sensitivity: 'base' });
         });
 }
 
@@ -859,6 +894,7 @@ function renderTable(targetId, rows, maxTotal) {
         tr.innerHTML = `
             <td>${row.posicao}</td>
             <td>${row.nome}</td>
+            <td>${row.grupo || '-'}</td>
             <td><span class="level-pill">${row.nivel}</span></td>
             <td>
                 <div class="bar-cell">
@@ -911,11 +947,13 @@ function renderTop1(meta) {
         return;
     }
 
-    byId('top1Nome').textContent = lider.nome;
+    const liderLabel = formatParticipantLabel(lider);
+
+    byId('top1Nome').textContent = liderLabel;
     byId('top1Resumo').textContent = `${lider.nivel} com ${formatPercent(lider.percentual)} de participacao.`;
     byId('top1Total').textContent = String(lider.total);
     byId('top1Score').textContent = String(lider.scoreEngajamento.toFixed(2));
-    byId('top1Projecao').textContent = `Se o ritmo continuar, ${lider.nome} fechara o mes com ${meta.projecaoLider.totalProjetado} mensagens.`;
+    byId('top1Projecao').textContent = `Se o ritmo continuar, ${liderLabel} fechara o mes com ${meta.projecaoLider.totalProjetado} mensagens.`;
 }
 
 function calcularMetaPremium(interacoes, resultado, rankingEnriquecido, grupoSelecionado, dataInicio, dataFim) {

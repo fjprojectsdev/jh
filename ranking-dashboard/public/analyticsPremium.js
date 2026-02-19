@@ -125,6 +125,26 @@
         return Array.isArray(ranking) && ranking.length > 0 ? ranking[0] : null;
     }
 
+    function participanteKey(participante) {
+        if (!participante) {
+            return '';
+        }
+
+        const nome = String(participante.nome || '').trim().toLowerCase();
+        const grupo = String(participante.grupo || '').trim().toLowerCase();
+        return `${nome}::${grupo}`;
+    }
+
+    function participanteLabel(participante) {
+        if (!participante) {
+            return '-';
+        }
+
+        const nome = String(participante.nome || '').trim() || '-';
+        const grupo = String(participante.grupo || '').trim();
+        return grupo ? `${nome} (${grupo})` : nome;
+    }
+
     // Gera 8 insights premium com foco estrategico.
     function gerarInsightsPremium(payload) {
         const ranking = payload.ranking || [];
@@ -158,10 +178,10 @@
 
         const insights = [];
 
-        if (liderAtual && liderAnterior && liderAtual.nome === liderAnterior.nome) {
-            insights.push(`${liderAtual.nome} lidera pelo segundo ciclo consecutivo.`);
+        if (liderAtual && liderAnterior && participanteKey(liderAtual) === participanteKey(liderAnterior)) {
+            insights.push(`${participanteLabel(liderAtual)} lidera pelo segundo ciclo consecutivo.`);
         } else if (liderAtual) {
-            insights.push(`${liderAtual.nome} assumiu a lideranca neste ciclo.`);
+            insights.push(`${participanteLabel(liderAtual)} assumiu a lideranca neste ciclo.`);
         } else {
             insights.push('Nao houve lideranca definida neste ciclo.');
         }
@@ -175,13 +195,13 @@
         }
 
         if (acelerado) {
-            insights.push(`${acelerado.nome} apresenta crescimento acelerado.`);
+            insights.push(`${participanteLabel(acelerado)} apresenta crescimento acelerado.`);
         } else {
             insights.push('Nenhum participante apresentou crescimento acelerado neste ciclo.');
         }
 
         if (emRisco.length > 0) {
-            insights.push(`${emRisco[0].nome} apresenta risco de inatividade.`);
+            insights.push(`${participanteLabel(emRisco[0])} apresenta risco de inatividade.`);
         } else {
             insights.push('Nao ha participantes em risco critico no periodo atual.');
         }
@@ -196,7 +216,7 @@
         insights.push(`${abaixoDaMedia} participantes estao abaixo da media.`);
 
         if (liderAtual) {
-            insights.push(`Se o ritmo continuar, ${liderAtual.nome} fechara o mes com ${round2(projecaoLider.totalProjetado)} mensagens.`);
+            insights.push(`Se o ritmo continuar, ${participanteLabel(liderAtual)} fechara o mes com ${round2(projecaoLider.totalProjetado)} mensagens.`);
         } else {
             insights.push('Sem atividade suficiente para projetar fechamento do mes.');
         }
