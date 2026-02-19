@@ -45,6 +45,23 @@ const PROJECT_TOKENS = {
 const DIRECT_PAIR_COMMANDS = {
     '/vkinha': { chain: 'bsc', pair: '0x530f75e77eb4f15b124add2a6c8e23b603d9ad64', label: 'VKINHA' }
 };
+const VALYRAFI_MESSAGE = `🚀 A ValyraFi está só começando — e você pode fazer parte desde o início.
+Estamos construindo um ecossistema DeFi com múltiplos apps de apelo global, geração de receita real e um modelo sustentável onde 50% das receitas dos aplicativos retornam ao token através de compra e queima.
+
+📲 Vamos iniciar com apps e plataformas para setor automotivo, saúde, viagem, jurídico e muito mais…
+
+🔔 Atenção: a Fase 1 da pré-venda será exclusiva para a comunidade Vellora e acontece em breve. Quem estiver dentro da comunidade sai na frente.
+
+👉 Entre agora e acompanhe de perto todas as novidades:
+
+🌐 Site: ValyraFi.com
+❌ X (Twitter): https://x.com/ValyraFi
+💬 Telegram: https://t.me/ValyraFiEcosystem
+📸 Instagram: https://Instagram.com/ValyraFiEcosystem
+
+O ecossistema está sendo construído agora.
+
+Os primeiros sempre têm mais vantagens. 🔥`;
 
 function getCommandToken(normalizedText) {
     return String(normalizedText || '').trim().split(/\s+/)[0] || '';
@@ -71,6 +88,7 @@ function isAllowedCommandForRestrictedGroup(commandToken) {
     if (!commandToken || !commandToken.startsWith('/')) return false;
     if (commandToken === '/aviso') return true;
     if (commandToken === '/lembrete') return true;
+    if (commandToken === '/valyrafi') return true;
     return isCryptoCommandToken(commandToken);
 }
 
@@ -469,7 +487,8 @@ const RESPONSES = {
     '/lux': '0xa3baAAD9C19805f52cFa2490700C297359b4fA52',
     '/kenesis': '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad',
     '/dcar': '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5',
-    '/fsx': '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a'
+    '/fsx': '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a',
+    '/valyrafi': VALYRAFI_MESSAGE
 };
 
 // Inicialização movida para index.js
@@ -537,6 +556,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot
 * 📱 /comandos - Lista de comandos
+* 🚀 /valyrafi - Apresentação oficial ValyraFi
 * @IMAVY [pergunta] - Analista cripto por menção
 * 💹 /btc /eth /bnb /sol /xrp /usdt - Cotação de mercado
 * 🥇 /ouro (ou /paxg) - Pax Gold com gráfico no CoinMarketCap
@@ -725,6 +745,12 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         const cryptoReply = await generateImavyCryptoReply(text);
         await sendSafeMessage(sock, groupId, { text: cryptoReply });
+        return;
+    }
+
+    if (normalizedText.startsWith('/valyrafi')) {
+        await sendSafeMessage(sock, groupId, { text: VALYRAFI_MESSAGE });
+        registrarComandoAceitoAtual('/valyrafi');
         return;
     }
 
@@ -1808,6 +1834,7 @@ _iMavyAgent | Sistema de Lembretes_`;
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot
 * 📱 /comandos - Lista de comandos
+* 🚀 /valyrafi - Apresentação oficial ValyraFi
 * @IMAVY [pergunta] - Analista cripto por menção
 * 💹 /btc /eth /bnb /sol /xrp /usdt - Cotação de mercado
 * 🥇 /ouro (ou /paxg) - Pax Gold com gráfico no CoinMarketCap
