@@ -8,9 +8,7 @@ const state = {
     realtimeChannel: null,
     realtimeDebounceTimer: null,
     autoRefreshTimer: null,
-    opsResumoTimer: null,
-    groupVisualTimer: null,
-    intelEventsTimer: null
+    groupVisualTimer: null
 };
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
@@ -1412,23 +1410,11 @@ function init() {
 
     byId('dataInicio').value = isoHoje;
     byId('dataFim').value = isoHoje;
-    carregarResumoOperacao().catch(() => {});
     carregarPainelGruposVisual().catch(() => {});
-    carregarIntelEventos().catch(() => {});
-    if (!state.opsResumoTimer) {
-        state.opsResumoTimer = setInterval(() => {
-            carregarResumoOperacao({ silent: true }).catch(() => {});
-        }, 15000);
-    }
     if (!state.groupVisualTimer) {
         state.groupVisualTimer = setInterval(() => {
             carregarPainelGruposVisual().catch(() => {});
         }, 20000);
-    }
-    if (!state.intelEventsTimer) {
-        state.intelEventsTimer = setInterval(() => {
-            carregarIntelEventos({ silent: true }).catch(() => {});
-        }, 3000);
     }
 
     if (isSupabaseRealtimeReady()) {
