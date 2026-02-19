@@ -97,6 +97,7 @@ function getOpsResumo() {
     const socialSpike24h = Number(intelSummary.socialSpike24h || 0);
     const tokenDominance24h = Number(intelSummary.tokenDominance24h || 0);
     const socialOnchainConfirm24h = Number(intelSummary.socialOnchainConfirm24h || 0);
+    const chatgptConversation24h = Number(intelSummary.chatgptConversation24h || 0);
     const totalIntel24h = Number(intelSummary.totalIntel24h || 0);
 
     const itens = [];
@@ -144,6 +145,14 @@ function getOpsResumo() {
         });
     }
 
+    if (chatgptConversation24h > 0) {
+        itens.push({
+            id: 'chatgpt_conversation_24h',
+            label: 'Analises ChatGPT (24h)',
+            valor: chatgptConversation24h
+        });
+    }
+
     return {
         atualizacao: new Date().toISOString(),
         linksBloqueados,
@@ -153,6 +162,7 @@ function getOpsResumo() {
         socialSpike24h,
         tokenDominance24h,
         socialOnchainConfirm24h,
+        chatgptConversation24h,
         totalIntel24h,
         itens
     };

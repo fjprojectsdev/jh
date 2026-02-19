@@ -349,17 +349,19 @@ async function startBot() {
             const senderId = message.key.participant || message.key.remoteJid;
             const chatId = message.key.remoteJid;
 
-            if (isGroup && INTEL_GROUPS.includes(chatId)) {
-                try {
-                    await intelEngine.processMessage(message, chatId);
-                } catch (error) {
-                    console.warn('[INTEL] Falha ao processar mensagem social:', error.message || String(error));
-                }
-            }
-
             // Extrair texto usando getText()
             const messageText = getText(message);
             if (!messageText) continue;
+
+            // Intelligence mode: analisar todas as conversas sem bloquear o loop principal.
+            intelEngine.processMessage(message, chatId, messageTimestamp, {
+                text: messageText,
+                senderId,
+                isGroup,
+                timestamp: messageTimestamp
+            }).catch((error) => {
+                console.warn('[INTEL] Falha ao processar mensagem:', error.message || String(error));
+            });
 
             // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
             if (!isGroup) {

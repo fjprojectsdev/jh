@@ -3,7 +3,8 @@ const { sanitizeText } = require('./supabaseTenantClient.js');
 const VALID_TYPES = new Set([
     'SOCIAL_SPIKE',
     'TOKEN_DOMINANCE',
-    'SOCIAL_ONCHAIN_CONFIRM'
+    'SOCIAL_ONCHAIN_CONFIRM',
+    'CHATGPT_CONVERSATION_ANALYSIS'
 ]);
 
 const DEFAULT_BUFFER_SIZE = 800;
@@ -60,6 +61,21 @@ function normalizeIntelEvent(payload) {
         tokenCount: toFiniteNumber(safePayload.tokenCount, 0),
         othersCount: toFiniteNumber(safePayload.othersCount, 0),
         ratio: toFiniteNumber(safePayload.ratio, 0),
+        senderId: sanitizeText(safePayload.senderId, 180) || '',
+        isGroup: Boolean(safePayload.isGroup),
+        snippet: sanitizeText(safePayload.snippet, 320) || '',
+        sentiment: sanitizeText(safePayload.sentiment, 24).toUpperCase() || '',
+        intent: sanitizeText(safePayload.intent, 120) || '',
+        riskLevel: sanitizeText(safePayload.riskLevel, 24).toUpperCase() || '',
+        summary: sanitizeText(safePayload.summary, 320) || '',
+        relevanceScore: toFiniteNumber(safePayload.relevanceScore, 0),
+        model: sanitizeText(safePayload.model, 80) || '',
+        topics: Array.isArray(safePayload.topics)
+            ? safePayload.topics
+                .map((topic) => sanitizeText(topic, 50))
+                .filter(Boolean)
+                .slice(0, 8)
+            : [],
         raw: safePayload
     };
 
@@ -123,6 +139,7 @@ function getIntelOpsSummary() {
     let socialSpike24h = 0;
     let tokenDominance24h = 0;
     let socialOnchainConfirm24h = 0;
+    let chatgptConversation24h = 0;
 
     for (const item of eventsBuffer) {
         const ts = Number(item.timestamp || 0);
@@ -136,6 +153,8 @@ function getIntelOpsSummary() {
             tokenDominance24h += 1;
         } else if (item.type === 'SOCIAL_ONCHAIN_CONFIRM') {
             socialOnchainConfirm24h += 1;
+        } else if (item.type === 'CHATGPT_CONVERSATION_ANALYSIS') {
+            chatgptConversation24h += 1;
         }
     }
 
@@ -143,7 +162,8 @@ function getIntelOpsSummary() {
         socialSpike24h,
         tokenDominance24h,
         socialOnchainConfirm24h,
-        totalIntel24h: socialSpike24h + tokenDominance24h + socialOnchainConfirm24h
+        chatgptConversation24h,
+        totalIntel24h: socialSpike24h + tokenDominance24h + socialOnchainConfirm24h + chatgptConversation24h
     };
 }
 
@@ -166,4 +186,3 @@ module.exports = {
     getIntelOpsSummary,
     isIntelWebhookAuthorized
 };
-

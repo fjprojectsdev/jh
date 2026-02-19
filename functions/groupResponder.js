@@ -21,6 +21,7 @@ import { getAlias, listAliases as listCryptoAliases, addAlias as addCryptoAlias,
 import { startWatch, stopWatch, stopAllWatches, listWatches, parseIntervalMs } from './crypto/watchManager.js';
 import { isMarketPriceCommand, getMarketQuote } from './crypto/marketPrices.js';
 import { generateImavyCryptoReply } from './crypto/imavyAnalyst.js';
+import { askChatGPT } from './chatgpt.js';
 import { isRestrictedGroupName } from './groupPolicy.js';
 import { registrarComandoAceito } from './commandMetrics.js';
 import fs from 'fs';
@@ -154,6 +155,12 @@ function isImavyMentioned({ text, message, sock }) {
     if (!botJid) return false;
 
     return mentioned.some((jid) => isSameJid(jid, botJid));
+}
+
+function stripImavyMention(text) {
+    return String(text || '')
+        .replace(/^@?(imavy|imavyagent)\b[\s,:-]*/i, '')
+        .trim();
 }
 
 function formatUsdCompact(value) {
@@ -709,8 +716,15 @@ export async function handleGroupMessages(sock, message, context = {}) {
             return;
         }
 
-        const reply = await generateImavyCryptoReply(text);
-        await sendSafeMessage(sock, groupId, { text: reply });
+        const question = stripImavyMention(text) || text;
+        const chatReply = await askChatGPT(question, senderId);
+        if (chatReply) {
+            await sendSafeMessage(sock, groupId, { text: chatReply });
+            return;
+        }
+
+        const cryptoReply = await generateImavyCryptoReply(text);
+        await sendSafeMessage(sock, groupId, { text: cryptoReply });
         return;
     }
 

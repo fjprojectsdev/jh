@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import SocialEngine from './socialEngine.js';
 
 const MINUTE_MS = 60_000;
@@ -5,6 +6,8 @@ const SOCIAL_SPIKE_TTL_MS = 3 * MINUTE_MS;
 const BUY_RATE_HISTORY_MS = 10 * MINUTE_MS;
 const SOCIAL_ONCHAIN_COOLDOWN_MS = 2 * MINUTE_MS;
 const INTERNAL_EVENT_BUFFER_LIMIT = 200;
+const DEFAULT_CHATGPT_MODEL = String(process.env.IMAVY_INTEL_OPENAI_MODEL || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+const DEFAULT_CHATGPT_MAX_QUEUE = 200;
 
 const internalEventBuffer = [];
 
@@ -25,6 +28,76 @@ function pushInternalBuffer(payload) {
     internalEventBuffer.push(payload);
     if (internalEventBuffer.length > INTERNAL_EVENT_BUFFER_LIMIT) {
         internalEventBuffer.shift();
+    }
+}
+
+function extractContentFromMessage(messageContent) {
+    if (!messageContent || typeof messageContent !== 'object') {
+        return null;
+    }
+
+    const wrappers = [
+        messageContent.ephemeralMessage,
+        messageContent.viewOnceMessage,
+        messageContent.viewOnceMessageV2,
+        messageContent.viewOnceMessageV2Extension,
+        messageContent.documentWithCaptionMessage
+    ];
+
+    for (const wrapped of wrappers) {
+        if (wrapped && wrapped.message) {
+            return extractContentFromMessage(wrapped.message);
+        }
+    }
+
+    return messageContent;
+}
+
+function extractMessageText(message) {
+    const content = extractContentFromMessage(message && message.message);
+    if (!content) {
+        return '';
+    }
+
+    const candidates = [
+        content.conversation,
+        content.extendedTextMessage && content.extendedTextMessage.text,
+        content.imageMessage && content.imageMessage.caption,
+        content.videoMessage && content.videoMessage.caption,
+        content.documentMessage && content.documentMessage.caption,
+        content.buttonsResponseMessage && content.buttonsResponseMessage.selectedDisplayText,
+        content.listResponseMessage && content.listResponseMessage.title,
+        content.templateButtonReplyMessage && content.templateButtonReplyMessage.selectedDisplayText
+    ];
+
+    for (const value of candidates) {
+        const text = String(value || '').trim();
+        if (text) {
+            return text;
+        }
+    }
+
+    return '';
+}
+
+function normalizeList(value, limit = 6) {
+    if (!Array.isArray(value)) {
+        return [];
+    }
+
+    return value
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+        .slice(0, limit);
+}
+
+function safeJsonParse(value) {
+    const text = String(value || '').trim();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch (_) {
+        return null;
     }
 }
 
@@ -65,11 +138,28 @@ export class IntelEngine {
         this.sendEvent = typeof options.sendEvent === 'function' ? options.sendEvent : sendIntelEvent;
         this.socialEngine = new SocialEngine({
             monitoredTokens: options.monitoredTokens || ['NIX', 'SNAP'],
-            trackedEmojis: options.trackedEmojis || ['🚀', '🔥', '💎']
+            trackedEmojis: options.trackedEmojis || ['ðŸš€', 'ðŸ”¥', 'ðŸ’Ž']
         });
         this.onchainBuyBuckets = new Map();
         this.recentSocialSpikes = new Map();
         this.lastConfirmAt = new Map();
+
+        this.intelChatGPTEnabled = String(process.env.IMAVY_INTEL_CHATGPT_ENABLED || 'true').toLowerCase() !== 'false';
+        this.intelChatGPTModel = DEFAULT_CHATGPT_MODEL;
+        this.intelChatGPTMaxQueue = Math.max(10, Number(process.env.IMAVY_INTEL_CHATGPT_MAX_QUEUE || DEFAULT_CHATGPT_MAX_QUEUE));
+        this.intelChatGPTMinChars = Math.max(1, Number(process.env.IMAVY_INTEL_CHATGPT_MIN_CHARS || 8));
+        this.openai = null;
+        this.chatAnalysisChain = Promise.resolve();
+        this.chatAnalysisQueued = 0;
+
+        const openaiKey = String(process.env.OPENAI_API_KEY || '').trim();
+        if (this.intelChatGPTEnabled && openaiKey) {
+            this.openai = new OpenAI({ apiKey: openaiKey });
+            console.log(`[INTEL] ChatGPT analysis ativo (model=${this.intelChatGPTModel})`);
+        } else {
+            console.log('[INTEL] ChatGPT analysis inativo (configure OPENAI_API_KEY e IMAVY_INTEL_CHATGPT_ENABLED=true)');
+        }
+
         this.cleanupTimer = setInterval(() => {
             const now = Date.now();
             this.socialEngine.cleanupAll(now);
@@ -80,12 +170,8 @@ export class IntelEngine {
         }
     }
 
-    async processMessage(message, groupJid, now = Date.now()) {
+    async processMessage(message, groupJid, now = Date.now(), meta = {}) {
         const result = this.socialEngine.processMessage(message, groupJid, now);
-        if (!result) {
-            return;
-        }
-
         if (result.socialSpike) {
             const socialSpikePayload = {
                 type: 'SOCIAL_SPIKE',
@@ -131,7 +217,91 @@ export class IntelEngine {
             await this.safeSend(payload);
         }
 
+        const text = String(meta.text || extractMessageText(message) || '').trim();
+        if (text.length >= this.intelChatGPTMinChars) {
+            const senderId = String(meta.senderId || message?.key?.participant || message?.key?.remoteJid || '').trim();
+            const isGroup = typeof meta.isGroup === 'boolean'
+                ? meta.isGroup
+                : String(groupJid || '').endsWith('@g.us');
+            const groupName = String(meta.groupName || this.groupNames[groupJid] || groupJid || '').trim();
+
+            this.queueConversationAnalysis({
+                text,
+                senderId,
+                groupJid: String(groupJid || '').trim(),
+                groupName,
+                isGroup,
+                timestamp: toNumber(meta.timestamp, now)
+            });
+        }
+
         this.cleanup(now);
+    }
+
+    queueConversationAnalysis(payload) {
+        if (!this.openai) return;
+        if (this.chatAnalysisQueued >= this.intelChatGPTMaxQueue) return;
+
+        this.chatAnalysisQueued += 1;
+        this.chatAnalysisChain = this.chatAnalysisChain
+            .then(() => this.analyzeConversation(payload))
+            .catch((error) => {
+                console.warn('[INTEL] Falha na analise ChatGPT:', error.message || String(error));
+            })
+            .finally(() => {
+                this.chatAnalysisQueued = Math.max(0, this.chatAnalysisQueued - 1);
+            });
+    }
+
+    async analyzeConversation(payload) {
+        const completion = await this.openai.chat.completions.create({
+            model: this.intelChatGPTModel,
+            temperature: 0.2,
+            max_tokens: 220,
+            messages: [
+                {
+                    role: 'system',
+                    content:
+                        'Voce analisa mensagens de WhatsApp para inteligencia operacional. Responda somente JSON valido com as chaves: sentiment (POSITIVO|NEGATIVO|NEUTRO), intent (texto curto), riskLevel (BAIXO|MEDIO|ALTO), topics (array curto), summary (1 frase curta), relevanceScore (0-100).'
+                },
+                {
+                    role: 'user',
+                    content:
+                        `Grupo: ${payload.groupName}\n` +
+                        `Eh grupo: ${payload.isGroup ? 'sim' : 'nao'}\n` +
+                        `Mensagem: ${payload.text}`
+                }
+            ]
+        });
+
+        const rawResponse = completion?.choices?.[0]?.message?.content || '';
+        const parsed = safeJsonParse(rawResponse) || {};
+        const sentiment = safeUpper(parsed.sentiment || 'NEUTRO');
+        const riskLevel = safeUpper(parsed.riskLevel || 'BAIXO');
+        const topics = normalizeList(parsed.topics, 8);
+        const summary = String(parsed.summary || '').trim().slice(0, 320);
+        const intent = String(parsed.intent || '').trim().slice(0, 120);
+        const relevanceScore = Math.max(0, Math.min(100, toNumber(parsed.relevanceScore, 0)));
+
+        const eventPayload = {
+            type: 'CHATGPT_CONVERSATION_ANALYSIS',
+            group: payload.groupName,
+            groupJid: payload.groupJid,
+            senderId: payload.senderId,
+            isGroup: payload.isGroup,
+            snippet: String(payload.text || '').slice(0, 280),
+            sentiment,
+            intent,
+            riskLevel,
+            topics,
+            summary,
+            relevanceScore,
+            model: this.intelChatGPTModel,
+            timestamp: payload.timestamp || Date.now(),
+            raw: parsed
+        };
+
+        await this.safeSend(eventPayload);
     }
 
     async registerOnchainBuy(buyEvent, now = Date.now()) {

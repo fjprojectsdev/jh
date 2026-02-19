@@ -267,6 +267,10 @@ function formatIntelType(type) {
         return 'Social + Onchain';
     }
 
+    if (type === 'CHATGPT_CONVERSATION_ANALYSIS') {
+        return 'ChatGPT Analysis';
+    }
+
     return String(type || '-');
 }
 
@@ -284,6 +288,16 @@ function formatIntelSignal(evento) {
         return `Social +${Number(evento.socialIncrease || 0).toFixed(0)}% | Buy +${Number(evento.buyIncrease || 0).toFixed(0)}%`;
     }
 
+    if (type === 'CHATGPT_CONVERSATION_ANALYSIS') {
+        const sentiment = String(evento.sentiment || 'NEUTRO');
+        const riskLevel = String(evento.riskLevel || 'BAIXO');
+        const intent = String(evento.intent || '').trim();
+        const summary = String(evento.summary || '').trim();
+        const score = Number(evento.relevanceScore || 0).toFixed(0);
+        const detail = intent || summary || '-';
+        return `${sentiment} | Risco ${riskLevel} | Score ${score} | ${detail}`;
+    }
+
     return '-';
 }
 
@@ -298,6 +312,7 @@ function renderIntelResumo(summary) {
     const socialSpike24h = toInt(summary && summary.socialSpike24h);
     const tokenDominance24h = toInt(summary && summary.tokenDominance24h);
     const socialOnchainConfirm24h = toInt(summary && summary.socialOnchainConfirm24h);
+    const chatgptConversation24h = toInt(summary && summary.chatgptConversation24h);
     const totalIntel24h = toInt(summary && summary.totalIntel24h);
 
     listEl.innerHTML = '';
@@ -315,6 +330,9 @@ function renderIntelResumo(summary) {
         }
         if (socialOnchainConfirm24h > 0) {
             lines.push(`SOCIAL_ONCHAIN_CONFIRM (24h): ${socialOnchainConfirm24h}`);
+        }
+        if (chatgptConversation24h > 0) {
+            lines.push(`CHATGPT_CONVERSATION_ANALYSIS (24h): ${chatgptConversation24h}`);
         }
     }
 
