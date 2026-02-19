@@ -5,17 +5,13 @@ const DAY_MS = 24 * HOUR_MS;
 const WEEK_MS = 7 * DAY_MS;
 const TEN_MIN_MS = 10 * 60 * 1000;
 
-const STOP_WORDS = new Set([
-    'de', 'do', 'da', 'dos', 'das', 'e', 'em', 'no', 'na', 'nos', 'nas', 'o', 'a', 'os', 'as',
-    'um', 'uma', 'uns', 'umas', 'para', 'pra', 'com', 'sem', 'por', 'que', 'como', 'isso', 'agora',
-    'the', 'and', 'for', 'this', 'that'
-]);
-
 const SPARK_CHARS = ['.', ':', '-', '=', '+', '*', '#'];
-const KNOWN_TOKENS = new Set([
-    'BNB', 'USDT', 'NIX', 'SNAPPY', 'FSX', 'KEN', 'KENESIS', 'DCAR', 'DIVICAR',
-    'MASAKA', 'VEREM', 'NELORE', 'DYMX', 'GEG'
-]);
+const DEFAULT_TRACKED_TOKENS = ['NIX', 'SNAP', 'SNAPPY', 'BNB', 'USDT'];
+const TOKEN_EQUIVALENTS = [
+    ['SNAP', 'SNAPPY'],
+    ['KEN', 'KENESIS'],
+    ['DCAR', 'DIVICAR']
+];
 const IGNORED_GROUP_PATTERN = /\b(squad|teste|test)\b/;
 
 function clamp(value, min, max) {
@@ -54,40 +50,86 @@ function getAllowedMessages(messages, allowedGroupNames) {
     });
 }
 
-function toTopicCandidates(text) {
-    const safe = String(text || '');
-    const tokens = [];
+function escapeRegex(value) {
+    return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
-    const upper = safe.match(/\b[A-Z]{2,12}\b/g) || [];
-    upper.forEach((t) => tokens.push(t));
+function sanitizeToken(value) {
+    return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').trim();
+}
 
-    const dollar = safe.match(/\$[A-Za-z]{2,12}\b/g) || [];
-    dollar.forEach((t) => tokens.push(t.slice(1).toUpperCase()));
+function parseTrackedTokens(monitoredTokens) {
+    const raw = Array.isArray(monitoredTokens) && monitoredTokens.length > 0
+        ? monitoredTokens
+        : String(process.env.INTEL_MONITORED_TOKENS || DEFAULT_TRACKED_TOKENS.join(','))
+            .split(',');
 
-    const normalizedWords = normalize(safe)
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter(Boolean);
-    normalizedWords.forEach((word) => {
-        const up = word.toUpperCase();
-        if (KNOWN_TOKENS.has(up)) {
-            tokens.push(up);
+    const parsed = raw
+        .map((token) => sanitizeToken(token))
+        .filter((token) => token.length >= 2 && token.length <= 15);
+
+    return Array.from(new Set(parsed));
+}
+
+function buildTokenConfig(monitoredTokens) {
+    const tracked = parseTrackedTokens(monitoredTokens);
+    const canonical = tracked.length > 0 ? tracked : DEFAULT_TRACKED_TOKENS;
+    const aliasToCanonical = new Map();
+    const regexByCanonical = new Map();
+
+    canonical.forEach((token) => {
+        aliasToCanonical.set(token, token);
+        regexByCanonical.set(token, [new RegExp(`\\b${escapeRegex(token)}\\b`, 'gi')]);
+    });
+
+    TOKEN_EQUIVALENTS.forEach(([a, b]) => {
+        const hasA = canonical.includes(a);
+        const hasB = canonical.includes(b);
+        if (hasA && !hasB) {
+            aliasToCanonical.set(b, a);
+            regexByCanonical.get(a).push(new RegExp(`\\b${escapeRegex(b)}\\b`, 'gi'));
+        }
+        if (hasB && !hasA) {
+            aliasToCanonical.set(a, b);
+            regexByCanonical.get(b).push(new RegExp(`\\b${escapeRegex(a)}\\b`, 'gi'));
         }
     });
 
-    const normalized = normalize(safe)
-        .replace(/https?:\/\/\S+/g, ' ')
-        .replace(/[^a-z0-9\s]/g, ' ')
-        .split(/\s+/)
-        .filter(Boolean)
-        .filter((w) => w.length >= 3)
-        .filter((w) => !STOP_WORDS.has(w));
+    return {
+        canonical,
+        aliasToCanonical,
+        regexByCanonical
+    };
+}
 
-    for (let i = 0; i < normalized.length - 1; i += 1) {
-        tokens.push(`${normalized[i]} ${normalized[i + 1]}`);
+function toTopicCandidates(text, tokenConfig) {
+    const safe = String(text || '');
+    if (!safe || !tokenConfig || !tokenConfig.regexByCanonical) {
+        return [];
     }
 
-    return tokens;
+    const mentions = [];
+    for (const [token, regexList] of tokenConfig.regexByCanonical.entries()) {
+        let totalHits = 0;
+        for (const regex of regexList) {
+            const hits = safe.match(regex);
+            totalHits += Array.isArray(hits) ? hits.length : 0;
+        }
+        for (let i = 0; i < totalHits; i += 1) {
+            mentions.push(token);
+        }
+    }
+
+    const specialMatches = safe.match(/[$#]([A-Za-z0-9]{2,15})\b/g) || [];
+    specialMatches.forEach((raw) => {
+        const normalized = sanitizeToken(raw.replace(/[$#]/g, ''));
+        const canonical = tokenConfig.aliasToCanonical.get(normalized);
+        if (canonical) {
+            mentions.push(canonical);
+        }
+    });
+
+    return mentions;
 }
 
 function getHourlySeries(messages24h, now) {
@@ -178,7 +220,7 @@ function classifyTopicVariation(variationPct) {
     return { color: 'gray', icon: 'FLAT', status: 'Estavel' };
 }
 
-function buildTopicStats(messages24h, now) {
+function buildTopicStats(messages24h, now, tokenConfig) {
     const start = now - DAY_MS;
     const topicMap = new Map();
 
@@ -187,7 +229,7 @@ function buildTopicStats(messages24h, now) {
         const idx = Math.floor((ts - start) / HOUR_MS);
         if (idx < 0 || idx >= 24) return;
 
-        const candidates = toTopicCandidates(m.text);
+        const candidates = toTopicCandidates(m.text, tokenConfig);
         candidates.forEach((candidate) => {
             const raw = String(candidate || '').trim();
             if (!raw) return;
@@ -208,7 +250,7 @@ function buildTopicStats(messages24h, now) {
     });
 
     const stats = Array.from(topicMap.values())
-        .filter((row) => row.totalMentions >= 2 || KNOWN_TOKENS.has(row.label))
+        .filter((row) => row.totalMentions >= 1)
         .map((row) => {
             const last2h = Number(row.hourlyMentions[22] || 0) + Number(row.hourlyMentions[23] || 0);
             const variationPct = calcularVariacaoToken(row.totalMentions, last2h);
@@ -234,7 +276,7 @@ function buildTopicStats(messages24h, now) {
     };
 }
 
-export function detectarPico(messages24h, now) {
+export function detectarPico(messages24h, now, tokenConfig) {
     const start = now - DAY_MS;
     const buckets = Array.from({ length: 24 }, () => ({
         totalMessages: 0,
@@ -251,7 +293,7 @@ export function detectarPico(messages24h, now) {
         bucket.totalMessages += 1;
         if (m.userId) bucket.users.add(String(m.userId));
 
-        toTopicCandidates(m.text).forEach((candidate) => {
+        toTopicCandidates(m.text, tokenConfig).forEach((candidate) => {
             const label = String(candidate || '').trim().toUpperCase();
             if (!label) return;
             bucket.tokenMentions.set(label, (bucket.tokenMentions.get(label) || 0) + 1);
@@ -495,8 +537,9 @@ function topEngagersByGroup(messages24h, limitUsers = 5, limitGroups = 3) {
         }));
 }
 
-export async function buildEngagementRadar({ messages, allowedGroupNames, now = Date.now() }) {
+export async function buildEngagementRadar({ messages, allowedGroupNames, monitoredTokens, now = Date.now() }) {
     const scoped = getAllowedMessages(messages, allowedGroupNames);
+    const tokenConfig = buildTokenConfig(monitoredTokens);
     const currentStart = now - DAY_MS;
     const prevStart = now - (2 * DAY_MS);
 
@@ -540,10 +583,10 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
         .sort((a, b) => b.totalMessages - a.totalMessages)
         .slice(0, 5);
 
-    const topicData = buildTopicStats(current24h, now);
+    const topicData = buildTopicStats(current24h, now, tokenConfig);
     const hotTopics = topicData.top;
 
-    const peak = detectarPico(current24h, now);
+    const peak = detectarPico(current24h, now, tokenConfig);
 
     const participants7d = new Set(
         scoped
@@ -567,10 +610,12 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
     });
 
     const tokenAcelerando = opportunities.acceleratingToken;
-    const highlightedToken = topicData.highlighted?.label || tokenAcelerando?.label || 'SEM TOPICO';
+    const highlightedToken = topicData.highlighted?.label || tokenAcelerando?.label || '';
     const suggestion = tokenAcelerando
         ? `${tokenAcelerando.label} acelerou ${tokenAcelerando.variationPct.toFixed(0)}% nas ultimas 2h. Abrir enquete/CTA agora.`
-        : `${highlightedToken} esta puxando conversa. Considere abrir enquete e CTA no horario de pico.`;
+        : highlightedToken
+            ? `${highlightedToken} esta puxando conversa. Considere abrir enquete e CTA no horario de pico.`
+            : 'Sem token dominante no periodo. Foque em CTA de participacao e perguntas objetivas no pico.';
 
     const report = {
         status: summarizeStatus(growthPct),
@@ -617,6 +662,7 @@ export async function buildEngagementRadar({ messages, allowedGroupNames, now = 
         `Status: ${report.status.label}`,
         `Tendencia: ${report.summary.tendencia.description} | Sparkline: ${report.summary.sparkline}`,
         `Mensagens: ${report.summary.totalMessages} | Ativos: ${report.summary.activeUsers} | Crescimento: ${report.summary.growthPct.toFixed(1)}%`,
+        `Topicos monitorados: ${tokenConfig.canonical.join(', ') || 'N/D'}`,
         `Pico real: ${report.peak.window} | +${report.peak.totalMessages} msgs | +${report.peak.activeUsers} usuarios | Velocidade: ${report.peak.speedPerMin.toFixed(1)} msg/min | Tema: ${report.peak.dominantToken} | ${report.peak.aboveAveragePct >= 0 ? '+' : ''}${report.peak.aboveAveragePct.toFixed(0)}% vs media horaria`,
         `Energia do Grupo: ${report.energiaGrupo.bar} ${report.energiaGrupo.score}% (${report.energiaGrupo.label})`,
         'Baseado em: volume de mensagens, participacao ativa e aceleracao recente.',

@@ -826,6 +826,7 @@ export class LeadEngine {
         const result = await buildEngagementRadar({
             messages: this.messageLog,
             allowedGroupNames,
+            monitoredTokens: this.monitoredTokens,
             now: Date.now()
         });
 

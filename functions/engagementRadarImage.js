@@ -293,20 +293,17 @@ export async function renderEngagementRadarImage(report) {
     image.print({
         font: bodyFont,
         x: 776,
-        y: 382,
+        y: 376,
         text: `Velocidade: ${(Number(report.summary?.msgPerMin || 0)).toFixed(1)} msg/min | Pico: ${report.summary?.peakWindow || 'N/D'}`,
         maxWidth: 360
     });
-    fillRect(image, 776, 402, 360, 1, COLORS.borderSoft);
+    fillRect(image, 776, 396, 360, 1, COLORS.borderSoft);
 
-    image.print({ font: bodyFont, x: 776, y: 404, text: 'Energia do Grupo', maxWidth: 220 });
-    drawBar(image, 776, 424, 300, 14, Number(report.energiaGrupo?.score || 0) / 100, COLORS.green);
-    image.print({ font: bodyFont, x: 1082, y: 418, text: `${report.energiaGrupo?.score || 0}%`, maxWidth: 68 });
-    image.print({ font: bodyFont, x: 776, y: 444, text: `${report.energiaGrupo?.label || 'Fraco'}`, maxWidth: 160 });
-    image.print({ font: bodyFont, x: 776, y: 460, text: 'Baseado em:', maxWidth: 140 });
-    image.print({ font: bodyFont, x: 776, y: 474, text: '- Volume de mensagens', maxWidth: 200 });
-    image.print({ font: bodyFont, x: 962, y: 474, text: '- Participacao ativa', maxWidth: 200 });
-    image.print({ font: bodyFont, x: 776, y: 488, text: '- Aceleracao recente', maxWidth: 200 });
+    image.print({ font: bodyFont, x: 776, y: 402, text: 'Energia do Grupo', maxWidth: 220 });
+    drawBar(image, 776, 420, 300, 14, Number(report.energiaGrupo?.score || 0) / 100, COLORS.green);
+    image.print({ font: bodyFont, x: 1082, y: 414, text: `${report.energiaGrupo?.score || 0}%`, maxWidth: 68 });
+    image.print({ font: bodyFont, x: 776, y: 440, text: `Nivel: ${report.energiaGrupo?.label || 'Fraco'}`, maxWidth: 180 });
+    image.print({ font: bodyFont, x: 776, y: 456, text: 'Fonte: volume, participacao e aceleracao.', maxWidth: 340 });
 
     drawCard(image, 24, 518, 760, 520, COLORS.panel, { borderColor: COLORS.borderSoft });
     drawSoftGrid(image, 24, 518, 760, 520);
