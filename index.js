@@ -367,15 +367,6 @@ async function startBot() {
             if (!isGroup) {
                 const privateText = String(messageText || '').trim().toLowerCase();
                 const privateCommandToken = privateText.split(/\s+/)[0] || '';
-                const privateBotCommands = new Set([
-                    '/comandos',
-                    '/adicionargrupo',
-                    '/removergrupo',
-                    '/listargrupos',
-                    '/adicionaradmin',
-                    '/removeradmin',
-                    '/listaradmins'
-                ]);
 
                 if (messageText.toLowerCase().startsWith('/leads')) {
                     await leadEngine.handleLeadsCommand(sock, chatId);
@@ -401,8 +392,8 @@ async function startBot() {
                     continue;
                 }
 
-                // Comandos administrativos/listagem no PV devem continuar funcionando.
-                if (privateBotCommands.has(privateCommandToken)) {
+                // Encaminhar qualquer slash-command no PV para o handler dedicado de comandos.
+                if (privateCommandToken.startsWith('/')) {
                     await handleGroupMessages(sock, message, { isPrivate: true });
                     continue;
                 }
