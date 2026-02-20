@@ -12,8 +12,15 @@ const snapshotCache = new Map();
 
 function normalizeHexAddress(input) {
   if (!input) return null;
-  const m = String(input).trim().match(/0x[a-fA-F0-9]{40}/);
-  return m ? m[0] : null;
+  const raw = String(input).trim();
+  const evmMatch = raw.match(/0x[a-fA-F0-9]{40}/);
+  if (evmMatch) return evmMatch[0];
+
+  // Suporte a enderecos base58 (ex.: Solana)
+  const base58Match = raw.match(/[1-9A-HJ-NP-Za-km-z]{32,48}/);
+  if (base58Match) return base58Match[0];
+
+  return null;
 }
 
 function parseDexScreenerLink(input) {
@@ -47,7 +54,7 @@ function safeNumber(v, fallback = 0) {
  */
 export async function resolveDexTarget(argsText, defaultChain = 'bsc') {
   const raw = String(argsText || '').trim();
-  if (!raw) return { ok: false, error: 'Use: /grafico <link|0x...> ou /grafico <chain> <0x...>' };
+  if (!raw) return { ok: false, error: 'Use: /grafico <link|endereco> ou /grafico <chain> <endereco>' };
 
   // 1) Link
   const fromLink = parseDexScreenerLink(raw);
@@ -60,7 +67,7 @@ export async function resolveDexTarget(argsText, defaultChain = 'bsc') {
   let chain = defaultChain;
   let addr = null;
 
-  if (parts.length >= 2 && /^[a-z0-9-]+$/i.test(parts[0]) && parts[1].includes('0x')) {
+  if (parts.length >= 2 && /^[a-z0-9-]+$/i.test(parts[0])) {
     chain = parts[0].toLowerCase();
     addr = normalizeHexAddress(parts[1]);
   } else {

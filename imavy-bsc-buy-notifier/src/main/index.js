@@ -1,4 +1,6 @@
 const { JsonRpcProvider } = require('ethers');
+const fs = require('fs');
+const path = require('path');
 const { config } = require('../config');
 const { createLogger } = require('../config/logger');
 const { BuyDetector } = require('../bsc/buyDetector');
@@ -14,6 +16,8 @@ if (typeof global.WebSocket === 'undefined') {
 }
 
 const logger = createLogger(config.logLevel);
+const BUY_ALERT_PROMO_SYMBOLS = new Set(['NIX', 'SNAP', 'SNAPPY']);
+let promoImageMissingWarned = false;
 
 function shortWallet(address) {
     const safe = String(address || '').trim();
@@ -61,6 +65,55 @@ function buildMessage(payload) {
         `📊 Chart: https://dexscreener.com/bsc/${payload.pair}`,
         '🌐 BSC'
     ].join('\n');
+}
+
+function resolvePromoImageUrl() {
+    const raw = String(process.env.BUY_ALERT_PROMO_IMAGE || '').trim();
+    const candidates = raw
+        ? [raw]
+        : [
+            path.resolve(process.cwd(), 'assets', 'buy-alert-vellora.png'),
+            path.resolve(process.cwd(), '..', 'assets', 'buy-alert-vellora.png')
+        ];
+
+    for (const candidate of candidates) {
+        if (/^https?:\/\//i.test(candidate)) {
+            return candidate;
+        }
+
+        const absolute = path.isAbsolute(candidate) ? candidate : path.resolve(process.cwd(), candidate);
+        if (fs.existsSync(absolute)) {
+            return absolute;
+        }
+    }
+
+    return null;
+}
+
+function buildMessagePayload(payload) {
+    const text = buildMessage(payload);
+    const symbol = String(payload.symbol || '').trim().toUpperCase();
+
+    if (!BUY_ALERT_PROMO_SYMBOLS.has(symbol)) {
+        return { text };
+    }
+
+    const imageUrl = resolvePromoImageUrl();
+    if (!imageUrl) {
+        if (!promoImageMissingWarned) {
+            promoImageMissingWarned = true;
+            logger.warn('Imagem promocional BUY ALERT nao encontrada; fallback para texto.', {
+                symbol,
+                envVar: 'BUY_ALERT_PROMO_IMAGE'
+            });
+        }
+        return { text };
+    }
+
+    return {
+        image: { url: imageUrl },
+        caption: text
+    };
 }
 
 async function run() {
@@ -181,7 +234,7 @@ async function run() {
 
             cooldownFilter.hit(buyEvent.symbol);
 
-            const message = buildMessage({
+            const messagePayload = buildMessagePayload({
                 symbol: buyEvent.symbol,
                 usdValue,
                 tokenAmount: buyEvent.tokenOut,
@@ -190,7 +243,7 @@ async function run() {
                 pair: buyEvent.pair
             });
 
-            await whatsappClient.sendMessageWithRetry(message);
+            await whatsappClient.sendMessageWithRetry(messagePayload);
 
             logger.info('Alerta BUY enviado com sucesso.', {
                 symbol: buyEvent.symbol,

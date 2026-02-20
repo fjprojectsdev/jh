@@ -182,7 +182,7 @@ class WhatsAppGroupClient extends EventEmitter {
         throw new Error('Timeout aguardando conexao do WhatsApp e resolucao do grupo alvo.');
     }
 
-    async sendMessageWithRetry(text) {
+    async sendMessageWithRetry(content) {
         if (!this.ready || !this.sock) {
             throw new Error('WhatsApp ainda nao esta pronto para envio.');
         }
@@ -193,10 +193,13 @@ class WhatsAppGroupClient extends EventEmitter {
 
         const maxAttempts = 3;
         let lastError = null;
+        const payload = content && typeof content === 'object'
+            ? content
+            : { text: String(content || '') };
 
         for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
             try {
-                await this.sock.sendMessage(this.targetGroupJid, { text });
+                await this.sock.sendMessage(this.targetGroupJid, payload);
                 return;
             } catch (error) {
                 lastError = error;

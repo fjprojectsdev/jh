@@ -40,7 +40,9 @@ const PROJECT_TOKENS = {
     '/lux': { address: '0xa3baAAD9C19805f52cFa2490700C297359b4fA52', chain: 'bsc', label: 'LUX' },
     '/kenesis': { address: '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad', chain: 'bsc', label: 'KENESIS' },
     '/dcar': { address: '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5', chain: 'bsc', label: 'DCAR' },
-    '/fsx': { address: '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a', chain: 'bsc', label: 'FSX' }
+    '/fsx': { address: '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a', chain: 'bsc', label: 'FSX' },
+    '/nlc': { address: '0x5f320c3b8f82acfe8f2bb1c85d63aa66a7ff524f', chain: 'bsc', label: 'NLC' },
+    '/masaka': { address: '96jWXh7S6Yh1Lkj4Fss14q1jRMwhTKkVpSFzRaunsMKT', chain: 'solana', label: 'MASAKA' }
 };
 const DIRECT_PAIR_COMMANDS = {
     '/vkinha': { chain: 'bsc', pair: '0x530f75e77eb4f15b124add2a6c8e23b603d9ad64', label: 'VKINHA' }
@@ -488,6 +490,8 @@ const RESPONSES = {
     '/kenesis': '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad',
     '/dcar': '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5',
     '/fsx': '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a',
+    '/nlc': '0x5f320c3b8f82acfe8f2bb1c85d63aa66a7ff524f',
+    '/masaka': '96jWXh7S6Yh1Lkj4Fss14q1jRMwhTKkVpSFzRaunsMKT',
     '/valyrafi': VALYRAFI_MESSAGE
 };
 
@@ -570,6 +574,8 @@ export async function handleGroupMessages(sock, message, context = {}) {
 * /Kenesis
 * /Dcar
 * /Fsx
+* /Nlc
+* /Masaka
 * /Vkinha
 ━━━━━━━━━━━━━━━━
 🔒 *Sistema de Segurança Ativo*

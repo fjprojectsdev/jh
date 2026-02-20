@@ -1,7 +1,11 @@
 import { createRequire } from 'module';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { logger } from './logger.js';
 
 const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 if (typeof global.WebSocket === 'undefined') {
     global.WebSocket = require('ws');
@@ -22,8 +26,11 @@ const DEFAULT_BUY_ALERT_GROUPS = [
 ];
 const FIXED_BUY_ALERT_GROUP_SET = new Set(DEFAULT_BUY_ALERT_GROUPS);
 const HARD_MIN_USD_ALERT = 200;
+const BUY_ALERT_PROMO_SYMBOLS = new Set(['NIX', 'SNAP', 'SNAPPY']);
+const DEFAULT_BUY_ALERT_PROMO_IMAGE = path.resolve(__dirname, '..', 'assets', 'buy-alert-vellora.png');
 
 let runtime = null;
+let promoImageMissingWarned = false;
 
 function env(name, fallback = '') {
     const value = process.env[name];
@@ -111,6 +118,66 @@ function buildBuyAlertMessage(payload) {
     ].join('\n');
 }
 
+function resolvePromoImageUrl() {
+    const configured = env('BUY_ALERT_PROMO_IMAGE', '');
+    const source = configured || DEFAULT_BUY_ALERT_PROMO_IMAGE;
+
+    if (!source) {
+        return null;
+    }
+
+    if (/^https?:\/\//i.test(source)) {
+        return source;
+    }
+
+    const absolute = path.isAbsolute(source) ? source : path.resolve(process.cwd(), source);
+    if (!fs.existsSync(absolute)) {
+        return null;
+    }
+
+    return absolute;
+}
+
+function buildBuyAlertPayload(payload) {
+    const text = buildBuyAlertMessage(payload);
+    const symbol = String(payload.symbol || '').trim().toUpperCase();
+
+    if (!BUY_ALERT_PROMO_SYMBOLS.has(symbol)) {
+        return { text };
+    }
+
+    const imageUrl = resolvePromoImageUrl();
+    if (!imageUrl) {
+        if (!promoImageMissingWarned) {
+            promoImageMissingWarned = true;
+            logger.warn('Imagem promocional BUY ALERT nao encontrada; fallback para texto.', {
+                symbol,
+                envVar: 'BUY_ALERT_PROMO_IMAGE',
+                defaultPath: DEFAULT_BUY_ALERT_PROMO_IMAGE
+            });
+        }
+        return { text };
+    }
+
+    return {
+        image: { url: imageUrl },
+        caption: text
+    };
+}
+
+function cloneMessagePayload(payload) {
+    if (payload && payload.image && payload.image.url) {
+        return {
+            image: { url: payload.image.url },
+            caption: String(payload.caption || '')
+        };
+    }
+
+    return {
+        text: String(payload && payload.text || '')
+    };
+}
+
 function buildConfig() {
     const configuredMinUsdAlert = envNumber('MIN_USD_ALERT', HARD_MIN_USD_ALERT);
     return {
@@ -130,9 +197,9 @@ function buildConfig() {
     };
 }
 
-async function sendBuyAlert(sock, text, groups) {
+async function sendBuyAlert(sock, payload, groups) {
     const results = await Promise.allSettled(
-        groups.map((groupId) => sock.sendMessage(groupId, { text }))
+        groups.map((groupId) => sock.sendMessage(groupId, cloneMessagePayload(payload)))
     );
 
     const delivered = [];
@@ -323,7 +390,7 @@ export async function startBuyAlertNotifier(sock, options = {}) {
 
             cooldownFilter.hit(buyEvent.symbol);
 
-            const message = buildBuyAlertMessage({
+            const messagePayload = buildBuyAlertPayload({
                 symbol: buyEvent.symbol,
                 usdValue,
                 tokenOut: buyEvent.tokenOut,
@@ -332,7 +399,7 @@ export async function startBuyAlertNotifier(sock, options = {}) {
                 pair: buyEvent.pair
             });
 
-            await sendBuyAlert(sock, message, groups);
+            await sendBuyAlert(sock, messagePayload, groups);
             if (onBuyProcessed) {
                 try {
                     await onBuyProcessed({
@@ -387,5 +454,5 @@ export async function startBuyAlertNotifier(sock, options = {}) {
 
 export async function sendBuyAlertDirect(sock, text) {
     const groups = resolveBuyAlertGroups();
-    await sendBuyAlert(sock, text, groups);
+    await sendBuyAlert(sock, { text }, groups);
 }
