@@ -365,6 +365,18 @@ async function startBot() {
 
             // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
             if (!isGroup) {
+                const privateText = String(messageText || '').trim().toLowerCase();
+                const privateCommandToken = privateText.split(/\s+/)[0] || '';
+                const privateBotCommands = new Set([
+                    '/comandos',
+                    '/adicionargrupo',
+                    '/removergrupo',
+                    '/listargrupos',
+                    '/adicionaradmin',
+                    '/removeradmin',
+                    '/listaradmins'
+                ]);
+
                 if (messageText.toLowerCase().startsWith('/leads')) {
                     await leadEngine.handleLeadsCommand(sock, chatId);
                     continue;
@@ -386,6 +398,12 @@ async function startBot() {
                 // Modo desenvolvedor ativo
                 if (isDevModeActive(senderId)) {
                     await handleDevConversation(sock, senderId, messageText);
+                    continue;
+                }
+
+                // Comandos administrativos/listagem no PV devem continuar funcionando.
+                if (privateBotCommands.has(privateCommandToken)) {
+                    await handleGroupMessages(sock, message, { isPrivate: true });
                     continue;
                 }
 
