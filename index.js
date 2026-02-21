@@ -1,7 +1,7 @@
 ﻿// index.js
 console.log('[DEBUG] Carregando index.js...');
 import 'dotenv/config';
-import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, getContentType } from "@whiskeysockets/baileys";
+import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import http from 'http';
@@ -11,7 +11,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendSafeMessage } from './functions/messageHandler.js';
 import { attachOutgoingGuard } from './functions/outgoingGuard.js';
-import { checkViolation, getText, notifyAdmins, addStrike, getStrikes, applyPunishment } from './functions/antiSpam.js';
+import { checkViolation, notifyAdmins, addStrike, getStrikes, applyPunishment } from './functions/antiSpam.js';
 import { handleWelcomeEvent } from './functions/welcomeMessage.js';
 import { getGroupStatus } from './functions/groupStats.js';
 
@@ -157,6 +157,51 @@ function normalizeGroupName(name) {
         .toLowerCase();
 }
 
+function sanitizeIncomingText(value) {
+    if (typeof value !== 'string') return '';
+    return value
+        .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '')
+        .replace(/\r/g, '')
+        .trim();
+}
+
+function unwrapIncomingMessageContent(content, depth = 0) {
+    if (!content || typeof content !== 'object' || depth > 6) {
+        return null;
+    }
+
+    const wrappedNodes = [
+        content.ephemeralMessage?.message,
+        content.viewOnceMessage?.message,
+        content.viewOnceMessageV2?.message,
+        content.viewOnceMessageV2Extension?.message,
+        content.editedMessage?.message
+    ];
+
+    for (const nested of wrappedNodes) {
+        if (!nested) continue;
+        const unwrapped = unwrapIncomingMessageContent(nested, depth + 1);
+        if (unwrapped) {
+            return unwrapped;
+        }
+    }
+
+    return content;
+}
+
+function extractProcessableIncomingText(message) {
+    const content = unwrapIncomingMessageContent(message?.message);
+    if (!content) return '';
+
+    const conversation = sanitizeIncomingText(content.conversation);
+    if (conversation) return conversation;
+
+    const extendedText = sanitizeIncomingText(content?.extendedTextMessage?.text);
+    if (extendedText) return extendedText;
+
+    return '';
+}
+
 function loadAllowedGroupNames() {
     const allowed = new Set();
     try {
@@ -236,7 +281,9 @@ async function startBot() {
         retryRequestDelayMs: 250,
         maxMsgRetryCount: 5,
         getMessage: async (key) => {
-            return { conversation: '' };
+            // Best practice: never fabricate an empty text message as fallback.
+            // Returning undefined avoids phantom blank payloads during retry flows.
+            return undefined;
         }
     });
 
@@ -331,7 +378,11 @@ async function startBot() {
 
     // Evento de mensagens recebidas
     sock.ev.on('messages.upsert', async (msgUpsert) => {
-        const messages = msgUpsert.messages;
+        if (msgUpsert?.type && msgUpsert.type !== 'notify') {
+            return;
+        }
+
+        const messages = Array.isArray(msgUpsert?.messages) ? msgUpsert.messages : [];
 
         // Atualizar heartbeat a cada mensagem processada
         updateHeartbeat();
@@ -340,6 +391,15 @@ async function startBot() {
             // ========== 1. FILTROS INICIAIS (Fast Return) ==========
             if (!message.message) continue;
             if (message.key.fromMe) continue;
+            if (!message.key.remoteJid) continue;
+            if (message.key.remoteJid === 'status@broadcast') continue;
+            if (message.key.remoteJid.endsWith('@broadcast')) continue;
+            if (message.messageStubType !== undefined && message.messageStubType !== null) continue;
+
+            const unwrappedContent = unwrapIncomingMessageContent(message.message);
+            if (!unwrappedContent) continue;
+            if (unwrappedContent.protocolMessage) continue;
+            if (unwrappedContent.senderKeyDistributionMessage) continue;
 
             const messageTimestamp = message.messageTimestamp ? parseInt(message.messageTimestamp) * 1000 : Date.now();
             if (messageTimestamp < botStartTime) continue;
@@ -349,8 +409,8 @@ async function startBot() {
             const senderId = message.key.participant || message.key.remoteJid;
             const chatId = message.key.remoteJid;
 
-            // Extrair texto usando getText()
-            const messageText = getText(message);
+            // Extrair texto apenas de conversation/extendedTextMessage.text
+            const messageText = extractProcessableIncomingText(message);
             if (!messageText) continue;
 
             // Intelligence mode: analisar todas as conversas sem bloquear o loop principal.

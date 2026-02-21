@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { runIntelRadar } from '../../functions/intelRadar.js';
 import { buildEngagementRadar } from '../../functions/engagementRadar.js';
+import { sendSafeMessage } from '../../functions/messageHandler.js';
 
 const require = createRequire(import.meta.url);
 const { Jimp, loadFont } = require('jimp');
@@ -800,17 +801,17 @@ export class LeadEngine {
         });
 
         if (!radar || (!radar.text && (!radar.images || radar.images.length === 0))) {
-            await sock.sendMessage(chatId, { text: '📊 Nenhum dado para gerar o radar.' });
+            await sendSafeMessage(sock, chatId, { text: '📊 Nenhum dado para gerar o radar.' });
             return;
         }
 
         if (radar.text) {
-            await sock.sendMessage(chatId, { text: radar.text });
+            await sendSafeMessage(sock, chatId, { text: radar.text });
         }
 
         const safeImages = Array.isArray(radar.images) ? radar.images : [];
         for (const imageBuffer of safeImages) {
-            await sock.sendMessage(chatId, {
+            await sendSafeMessage(sock, chatId, {
                 image: imageBuffer,
                 mimetype: 'image/png',
                 caption: 'IMAVY RADAR COMERCIAL'
@@ -831,12 +832,12 @@ export class LeadEngine {
         });
 
         if (!result || (!result.text && !result.image)) {
-            await sock.sendMessage(chatId, { text: 'Nenhum dado para gerar o painel de engajamento.' });
+            await sendSafeMessage(sock, chatId, { text: 'Nenhum dado para gerar o painel de engajamento.' });
             return;
         }
 
         if (result.image) {
-            await sock.sendMessage(chatId, {
+            await sendSafeMessage(sock, chatId, {
                 image: result.image,
                 mimetype: 'image/png',
                 caption: 'IMAVY - Radar de Engajamento'
@@ -845,7 +846,7 @@ export class LeadEngine {
         }
 
         if (result.text) {
-            await sock.sendMessage(chatId, { text: result.text });
+            await sendSafeMessage(sock, chatId, { text: result.text });
         }
     }
 }

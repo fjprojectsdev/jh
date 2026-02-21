@@ -1,130 +1,128 @@
 import { logger } from './logger.js';
 
-/**
- * Remove caracteres invisíveis e espaços extras.
- * @param {string} text 
- * @returns {string} Texto limpo ou string vazia se inválido
- */
-export function sanitizeText(text) {
-    if (!text) return '';
-    if (typeof text !== 'string') return '';
+const INVISIBLE_CHAR_REGEX = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
 
-    // Remove caracteres invisíveis comuns:
-    // \u200B (Zero width space)
-    // \u200C (Zero width non-joiner)
-    // \u200D (Zero width joiner)
-    // \uFEFF (Zero width no-break space)
-    // \u00A0 (Non-breaking space) - opcional, às vezes útil, mas vou normalizar para espaço
-    // \r (Carriage return) - manter ou remover? Geralmente \n é suficiente.
-    let clean = text
-        .replace(/[\u200B\u200C\u200D\uFEFF]/g, '') // Remove invisíveis
-        .trim();
-
-    return clean;
+function hasOwn(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-/**
- * Envia uma mensagem de forma segura, evitando envios vazios.
- * @param {Object} sock Instância do socket do Baileys
- * @param {string} chatId JID do destino
- * @param {string|Object} content Texto ou objeto de mensagem (ex: { text: '...', mentions: [] })
- * @param {Object} options Opções adicionais do Baileys (quoted, etc)
- * @returns {Promise<Object|null>} Retorna a mensagem enviada ou null se bloqueado/erro
- */
+function isMediaOrActionPayload(content) {
+    return Boolean(
+        content
+        && typeof content === 'object'
+        && (
+            'image' in content
+            || 'video' in content
+            || 'document' in content
+            || 'sticker' in content
+            || 'audio' in content
+            || 'delete' in content
+            || 'edit' in content
+            || 'react' in content
+        )
+    );
+}
+
+export function sanitizeText(text) {
+    if (typeof text !== 'string') return '';
+    return text
+        .replace(INVISIBLE_CHAR_REGEX, '')
+        .replace(/\r/g, '')
+        .trim();
+}
+
 export async function sendSafeMessage(sock, chatId, content, options = {}) {
     try {
-        if (!sock) {
-            logger.error('sendSafeMessage: Socket inválido/nulo', { chatId });
+        if (!sock || typeof sock.sendMessage !== 'function') {
+            logger.error('sendSafeMessage: Socket invalido/nulo', { chatId });
             return null;
         }
 
-        let finalContent = content;
-        let textToCheck = '';
+        if (!chatId || String(chatId).trim().length === 0) {
+            logger.warn('sendSafeMessage: chatId invalido', { chatId });
+            return null;
+        }
 
-        // Normaliza o conteúdo para validação
         if (typeof content === 'string') {
-            textToCheck = content;
-            finalContent = { text: content }; // Converter para objeto padrão
-        } else if (typeof content === 'object' && content !== null) {
-            // Se for objeto, tenta extrair o texto/caption para validar
-            if (content.text) textToCheck = content.text;
-            else if (content.caption) textToCheck = content.caption;
-            // Se for imagem/video sem caption, ou delete, ou sticker, textToCheck fica vazio mas pode ser válido.
-            // Precisamos distinguir "texto vazio inválido" de "mídia válida sem texto".
+            if (!content || !content.trim()) return null;
+            const cleanText = sanitizeText(content);
+            if (!cleanText) return null;
+            return await sock.sendMessage(chatId, { text: cleanText }, options);
+        }
 
-            const isMedia = content.image || content.video || content.document || content.sticker || content.audio;
-            const isAction = content.delete || content.edit;
-
-            if (isMedia || isAction) {
-                // Se for mídia ou ação (delete/edit), permitimos passar sem texto
-                // Mas se tiver caption, sanitizamos a caption
-                if (content.caption) {
-                    content.caption = sanitizeText(content.caption);
-                }
-                // Mídia/Ação é válido por si só
-            } else {
-                // Se NÃO for mídia/ação, assumimos que é mensagem de texto
-                // Se não tem 'text', é inválido (ex: objeto vazio)
-                if (!content.text) {
-                    // Verifica se tem outras chaves válidas que não conhecemos? 
-                    // Por segurança, se não tem text e não é mídia conhecida, bloqueia se for vazio.
-                    // Mas o Baileys suporta outros tipos. 
-                    // Foco: Bloquear MENSAGENS DE TEXTO vazias.
-                    if (!textToCheck) {
-                        // Pode ser um botão, template, etc. Vamos logar aviso mas permitir se tiver keys
-                        if (Object.keys(content).length > 0) {
-                            // ok, deixa passar estruturas complexas se não conseguimos validar texto
-                        } else {
-                            logger.warn('sendSafeMessage: Bloqueado envio de objeto vazio', { chatId });
-                            return null;
-                        }
-                    }
-                }
-            }
-        } else {
-            logger.warn('sendSafeMessage: Tipo de conteúdo inválido', { chatId, type: typeof content });
+        if (!content || typeof content !== 'object') {
+            logger.warn('sendSafeMessage: Tipo de conteudo invalido', { chatId, type: typeof content });
             return null;
         }
 
-        // Validação de TEXTO (se houver texto para validar)
-        if (textToCheck) {
-            const cleanText = sanitizeText(textToCheck);
-            if (!cleanText) {
-                logger.warn('sendSafeMessage: Bloqueado envio de texto vazio/invisível', { chatId, original: textToCheck });
-                return null;
-            }
+        const finalContent = { ...content };
+        const hasMediaOrAction = isMediaOrActionPayload(finalContent);
 
-            // Atualiza o conteúdo sanitizado se for string pura ou objeto text
-            if (typeof content === 'string') {
-                finalContent = { text: cleanText };
-            } else if (content.text) {
-                finalContent.text = cleanText;
-            }
-        } else {
-            // Se textToCheck é vazio, mas não era mídia/ação e chegou aqui:
-            // Se tiver content.text estritamente igual a "" ou null, bloqueia
-            if (content && typeof content === 'object' && 'text' in content && !content.text) {
-                logger.warn('sendSafeMessage: Bloqueado content.text vazio', { chatId });
-                return null;
+        if (hasOwn(finalContent, 'text')) {
+            const rawText = typeof finalContent.text === 'string' ? finalContent.text : '';
+            if (!rawText || !rawText.trim()) {
+                if (!hasMediaOrAction) return null;
+                delete finalContent.text;
+            } else {
+                const cleanText = sanitizeText(rawText);
+                if (!cleanText) {
+                    if (!hasMediaOrAction) return null;
+                    delete finalContent.text;
+                } else {
+                    finalContent.text = cleanText;
+                }
             }
         }
 
-        // Envio real
-        return await sock.sendMessage(chatId, finalContent, options);
+        if (hasOwn(finalContent, 'conversation')) {
+            const cleanConversation = sanitizeText(
+                typeof finalContent.conversation === 'string' ? finalContent.conversation : ''
+            );
+            if (!cleanConversation) {
+                if (!hasMediaOrAction) return null;
+                delete finalContent.conversation;
+            } else {
+                finalContent.conversation = cleanConversation;
+            }
+        }
 
+        if (hasOwn(finalContent, 'caption')) {
+            const cleanCaption = sanitizeText(
+                typeof finalContent.caption === 'string' ? finalContent.caption : ''
+            );
+            if (cleanCaption) {
+                finalContent.caption = cleanCaption;
+            } else {
+                delete finalContent.caption;
+                if (!hasMediaOrAction && !hasOwn(finalContent, 'text') && !hasOwn(finalContent, 'conversation')) {
+                    return null;
+                }
+            }
+        }
+
+        const textToValidate = sanitizeText(
+            typeof finalContent.text === 'string'
+                ? finalContent.text
+                : (typeof finalContent.conversation === 'string'
+                    ? finalContent.conversation
+                    : '')
+        );
+
+        if (!hasMediaOrAction && !textToValidate) {
+            return null;
+        }
+
+        if (!hasMediaOrAction && Object.keys(finalContent).length === 0) {
+            return null;
+        }
+
+        return await sock.sendMessage(chatId, finalContent, options);
     } catch (error) {
         logger.error('sendSafeMessage: Erro ao enviar', { chatId, error: error.message });
         return null;
     }
 }
 
-/**
- * Envia uma mensagem de texto puro, sem previews ou cards.
- * @param {Object} sock Instância do socket
- * @param {string} chatId JID do destino
- * @param {string} text Texto da mensagem
- * @returns {Promise<Object|null>}
- */
 export async function sendPlainText(sock, chatId, text) {
     return sendSafeMessage(sock, chatId, { text });
 }

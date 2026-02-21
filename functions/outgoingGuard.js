@@ -1,56 +1,71 @@
 /**
- * Módulo de Segurança de Saída (Outgoing Guard)
- * Intercepta todas as chamadas sock.sendMessage para garantir que nada vazio saia.
+ * Outgoing guard for Baileys sendMessage.
+ * Blocks empty text payloads and logs what is being sent.
  */
 
 function sanitizeText(input) {
-    if (input === null || input === undefined) return "";
-    let t = String(input);
+    if (input === null || input === undefined) return '';
+    let text = String(input);
+    text = text.replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '');
+    text = text.replace(/\r/g, '');
+    text = text.replace(/[ \t]+/g, ' ');
+    text = text.replace(/\n{3,}/g, '\n\n');
+    return text.trim();
+}
 
-    // remove invisíveis comuns + normaliza espaços
-    t = t.replace(/[\u200B-\u200D\uFEFF]/g, "");
-    t = t.replace(/\r/g, "");
-    t = t.replace(/[ \t]+/g, " ");
-    t = t.replace(/\n{3,}/g, "\n\n"); // Máximo 2 quebras de linha seguidas
+function hasOwn(obj, key) {
+    return Object.prototype.hasOwnProperty.call(obj, key);
+}
 
-    return t.trim();
+function hasMediaOrAction(content) {
+    return Boolean(
+        content
+        && typeof content === 'object'
+        && (
+            hasOwn(content, 'image')
+            || hasOwn(content, 'video')
+            || hasOwn(content, 'audio')
+            || hasOwn(content, 'document')
+            || hasOwn(content, 'sticker')
+            || hasOwn(content, 'contacts')
+            || hasOwn(content, 'location')
+            || hasOwn(content, 'delete')
+            || hasOwn(content, 'edit')
+            || hasOwn(content, 'react')
+        )
+    );
+}
+
+function extractTextCandidate(content) {
+    if (!content || typeof content !== 'object') return '';
+    if (typeof content.text === 'string') return content.text;
+    if (typeof content.caption === 'string') return content.caption;
+    if (typeof content.conversation === 'string') return content.conversation;
+    return '';
 }
 
 function isEmptyBaileysContent(content) {
-    if (!content || typeof content !== "object") return true;
+    if (!content || typeof content !== 'object') return true;
 
-    // Principais formas de texto/caption
-    const text = content.text ?? content.caption ?? content.conversation ?? "";
-    const cleaned = sanitizeText(text);
+    const textLike =
+        hasOwn(content, 'text')
+        || hasOwn(content, 'caption')
+        || hasOwn(content, 'conversation');
+    const mediaOrAction = hasMediaOrAction(content);
 
-    // Se for mensagem puramente de texto/caption e ficar vazia => bloqueia
-    const isTextLike = ("text" in content) || ("caption" in content) || ("conversation" in content);
-
-    // Se não for "text-like", pode ser imagem, doc, sticker etc. Aí checa se tem mídia
-    const hasMedia =
-        "image" in content ||
-        "video" in content ||
-        "audio" in content ||
-        "document" in content ||
-        "sticker" in content ||
-        "contacts" in content ||
-        "location" in content ||
-        "delete" in content || // Permite apagar mensagens
-        "edit" in content;     // Permite editar
-
-    if (isTextLike) {
-        // Se for text-like E não tiver mídia/ação associada, vale o texto limpo
-        if (!hasMedia && cleaned.length === 0) return true;
-
-        // Se tiver mídia/ação, o texto (caption) pode ser vazio, mas se tiver texto, ele deve ser limpo depois
+    if (textLike) {
+        const cleaned = sanitizeText(
+            typeof content.text === 'string'
+                ? content.text
+                : (typeof content.caption === 'string' ? content.caption : content.conversation)
+        );
+        if (!mediaOrAction && cleaned.length === 0) {
+            return true;
+        }
         return false;
     }
 
-    // Se não é texto e não tem mídia, é payload “fantasma”
-    if (!hasMedia) return true;
-
-    // Se tem mídia, ok mesmo sem caption
-    return false;
+    return !mediaOrAction;
 }
 
 export function attachOutgoingGuard(sock) {
@@ -58,33 +73,61 @@ export function attachOutgoingGuard(sock) {
 
     sock.sendMessage = async (jid, content, options) => {
         try {
-            if (isEmptyBaileysContent(content)) {
-                console.warn(`[OUTGOING BLOCK] Bloqueado envio vazio para ${jid}. Content keys: ${content ? Object.keys(content) : 'null'}`);
-                return; // não envia
+            let finalContent = content;
+            if (typeof finalContent === 'string') {
+                finalContent = { text: finalContent };
             }
 
-            // Se for texto/caption, substitui pelo sanitizado (evita invisíveis escaparem no payload final)
-            if (content) {
-                if ("text" in content && typeof content.text === 'string') {
-                    const clean = sanitizeText(content.text);
-                    if (!clean && !content.delete && !content.edit) return; // Bloqueia se a limpeza resultou em vazio e não é ação
-                    content.text = clean;
+            if (isEmptyBaileysContent(finalContent)) {
+                console.warn(`[OUTGOING BLOCK] Bloqueado envio vazio para ${jid}. Content keys: ${finalContent ? Object.keys(finalContent) : 'null'}`);
+                return null;
+            }
+
+            if (finalContent && typeof finalContent === 'object') {
+                if (hasOwn(finalContent, 'text')) {
+                    const cleanText = sanitizeText(typeof finalContent.text === 'string' ? finalContent.text : '');
+                    if (!cleanText && !hasMediaOrAction(finalContent)) return null;
+                    if (cleanText) {
+                        finalContent.text = cleanText;
+                    } else {
+                        delete finalContent.text;
+                    }
                 }
-                if ("caption" in content && typeof content.caption === 'string') {
-                    content.caption = sanitizeText(content.caption);
+
+                if (hasOwn(finalContent, 'caption')) {
+                    const cleanCaption = sanitizeText(typeof finalContent.caption === 'string' ? finalContent.caption : '');
+                    if (cleanCaption) {
+                        finalContent.caption = cleanCaption;
+                    } else {
+                        delete finalContent.caption;
+                    }
                 }
-                if ("conversation" in content && typeof content.conversation === 'string') {
-                    content.conversation = sanitizeText(content.conversation);
+
+                if (hasOwn(finalContent, 'conversation')) {
+                    const cleanConversation = sanitizeText(typeof finalContent.conversation === 'string' ? finalContent.conversation : '');
+                    if (cleanConversation) {
+                        finalContent.conversation = cleanConversation;
+                    } else {
+                        delete finalContent.conversation;
+                    }
                 }
             }
 
-            return await original(jid, content, options);
-        } catch (e) {
-            console.error(`[OUTGOING ERROR] Falha ao enviar para ${jid}: ${e.message}`);
-            throw e;
+            const debugText = sanitizeText(extractTextCandidate(finalContent));
+            if (debugText) {
+                console.log('Enviando:', JSON.stringify(debugText));
+            } else {
+                const keys = finalContent && typeof finalContent === 'object' ? Object.keys(finalContent) : [];
+                console.log('[DEBUG] Enviando payload sem texto:', JSON.stringify({ jid, keys }));
+            }
+
+            return await original(jid, finalContent, options);
+        } catch (error) {
+            console.error(`[OUTGOING ERROR] Falha ao enviar para ${jid}: ${error.message}`);
+            throw error;
         }
     };
 
-    console.log('🛡️ Outgoing Guard ativado: Socket protegido contra mensagens vazias.');
+    console.log('[DEBUG] Outgoing Guard ativado: socket protegido contra mensagens vazias.');
     return sock;
 }

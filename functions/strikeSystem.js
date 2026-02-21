@@ -5,6 +5,7 @@
 
 import { getUserName } from './userInfo.js';
 import * as db from './database.js';
+import { sendSafeMessage } from './messageHandler.js';
 
 export async function addStrike(userId, violation) {
     return await db.addStrike(userId, violation);
@@ -36,7 +37,7 @@ export async function applyPunishment(sock, groupId, userId) {
 
 Consulte as regras para evitar novas ocorrências.`;
 
-            await sock.sendMessage(groupId, { 
+            await sendSafeMessage(sock, groupId, {
                 text: avisoMsg,
                 mentions: [userId]
             });
@@ -54,7 +55,7 @@ Consulte as regras para evitar novas ocorrências.`;
 
 Recomendamos atenção total às regras para evitar penalidades.`;
 
-            await sock.sendMessage(groupId, { 
+            await sendSafeMessage(sock, groupId, {
                 text: avisoMsg,
                 mentions: [userId]
             });
@@ -73,7 +74,7 @@ Recomendamos atenção total às regras para evitar penalidades.`;
 
 Esta medida visa preservar a ordem e a qualidade do grupo.`;
 
-            await sock.sendMessage(groupId, { 
+            await sendSafeMessage(sock, groupId, {
                 text: avisoMsg,
                 mentions: [userId]
             });

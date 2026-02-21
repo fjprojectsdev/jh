@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from './logger.js';
+import { sendSafeMessage } from './messageHandler.js';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -199,7 +200,13 @@ function buildConfig() {
 
 async function sendBuyAlert(sock, payload, groups) {
     const results = await Promise.allSettled(
-        groups.map((groupId) => sock.sendMessage(groupId, cloneMessagePayload(payload)))
+        groups.map(async (groupId) => {
+            const sent = await sendSafeMessage(sock, groupId, cloneMessagePayload(payload));
+            if (!sent) {
+                throw new Error('Payload bloqueado por validacao de mensagem vazia.');
+            }
+            return sent;
+        })
     );
 
     const delivered = [];
