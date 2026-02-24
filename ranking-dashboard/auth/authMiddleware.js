@@ -66,9 +66,36 @@ async function resolveSingleModeAuth() {
     let clienteId = String(process.env.IMAVY_DASHBOARD_DEFAULT_CLIENTE_ID || '').trim();
     if (!clienteId) {
         try {
-            const clientes = await listClientes(1);
-            const first = Array.isArray(clientes) && clientes.length > 0 ? clientes[0] : null;
-            clienteId = first && first.id ? String(first.id).trim() : '';
+            const clientes = await listClientes(100);
+            const safeClientes = Array.isArray(clientes) ? clientes : [];
+            let fallbackFirst = '';
+
+            for (const cliente of safeClientes) {
+                const id = String(cliente && cliente.id || '').trim();
+                if (!id) {
+                    continue;
+                }
+
+                if (!fallbackFirst) {
+                    fallbackFirst = id;
+                }
+
+                try {
+                    const access = await resolveDashboardAccessForCliente(id);
+                    const totalDisponiveis = Array.isArray(access && access.gruposDisponiveis) ? access.gruposDisponiveis.length : 0;
+                    const totalVisiveis = Array.isArray(access && access.gruposVisiveis) ? access.gruposVisiveis.length : 0;
+                    if (totalDisponiveis > 0 || totalVisiveis > 0) {
+                        clienteId = id;
+                        break;
+                    }
+                } catch (_) {
+                    // ignora cliente com falha de consulta e testa o proximo
+                }
+            }
+
+            if (!clienteId) {
+                clienteId = fallbackFirst;
+            }
         } catch (_) {
             clienteId = '';
         }
