@@ -15,6 +15,7 @@ const {
 } = require('./realtimeSupabaseSource.cjs');
 const { getOpsResumo } = require('./services/opsResumoService.cjs');
 const { getAgendamentosStatus } = require('./services/agendamentosStatusService.cjs');
+const { getBuyAlertsResumo } = require('./services/buyAlertsResumoService.cjs');
 const { handleAuthRoutes } = require('./routes/authRoutes.js');
 const { handleGrupoRoutes } = require('./routes/grupoRoutes.js');
 const { handleAdminRoutes } = require('./routes/adminRoutes.js');
@@ -358,6 +359,26 @@ async function handleApi(req, res, parsedUrl) {
             sendJson(res, 500, {
                 ok: false,
                 error: error.message || 'Erro ao carregar status de agendamentos.'
+            });
+            return;
+        }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/buy-alerts-resumo') {
+        if (!(await verificarToken(req, res, authHelpers))) {
+            return;
+        }
+
+        try {
+            const days = Number(parsedUrl.searchParams.get('dias') || 30);
+            const recentLimit = Number(parsedUrl.searchParams.get('limit') || 50);
+            const payload = getBuyAlertsResumo({ days, recentLimit });
+            sendJson(res, 200, payload);
+            return;
+        } catch (error) {
+            sendJson(res, 500, {
+                ok: false,
+                error: error.message || 'Erro ao carregar resumo de buy alerts.'
             });
             return;
         }

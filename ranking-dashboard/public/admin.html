@@ -40,11 +40,13 @@
 
         <main class="main">
             <header class="topbar">
-                <div>
+                <div class="topbar-left">
                     <p class="eyebrow">PAINEL ADMINISTRATIVO</p>
-                    <h1>Relatorios</h1>
+                    <h1 id="pageTitle">Relatorios</h1>
+                    <p class="bot-pill" id="botBadge">TESTE BOT (0 ativo)</p>
                     <p class="meta-line" id="metaLinha">Carregando dados...</p>
                 </div>
+
                 <div class="top-actions">
                     <label>
                         <span>PERIODO</span>
@@ -69,55 +71,110 @@
                     <strong id="kpiMembrosAtivos">0</strong>
                 </article>
                 <article class="summary-card">
-                    <p>Interacoes no periodo</p>
-                    <strong id="kpiInteracoesPeriodo">0</strong>
+                    <p>Volume total</p>
+                    <strong id="kpiVolumeTotal">$0.00</strong>
                 </article>
                 <article class="summary-card">
-                    <p>Eventos inteligentes (24h)</p>
-                    <strong id="kpiEventosIntel">0</strong>
+                    <p>Alertas enviados</p>
+                    <strong id="kpiAlertasEnviados">0</strong>
                 </article>
             </section>
 
             <div class="sections">
                 <section class="panel section is-active" id="section-relatorios">
                     <h2>Relatorios</h2>
-                    <div class="grid-two">
+
+                    <div class="grid-four gap-top">
+                        <article class="mini-card">
+                            <p>Compras no periodo</p>
+                            <strong id="rpCompras">0</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Volume no periodo</p>
+                            <strong id="rpVolume">$0.00</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Tokens ativos</p>
+                            <strong id="rpTokensAtivos">0</strong>
+                        </article>
                         <article class="mini-card">
                             <p>Grupos ativos</p>
                             <strong id="rpGruposAtivos">0</strong>
                         </article>
-                        <article class="mini-card">
-                            <p>Top participante</p>
-                            <strong id="rpTopNome">-</strong>
+                    </div>
+
+                    <article class="mini-card gap-top">
+                        <p>Minimo USD</p>
+                        <strong id="rpMinUsd">$0.00</strong>
+                        <small id="rpFilas">Fila process: 0 | telegram: 0</small>
+                    </article>
+
+                    <div class="grid-two gap-top">
+                        <article class="panel soft-panel">
+                            <div class="panel-title-row">
+                                <h3>Tendencias de Tokens</h3>
+                                <small>Mais citados nas compras</small>
+                            </div>
+                            <div id="tokenTrendList" class="token-chip-list"></div>
                         </article>
-                        <article class="mini-card">
-                            <p>Media por participante</p>
-                            <strong id="rpMediaParticipante">0</strong>
-                        </article>
-                        <article class="mini-card">
-                            <p>Incidentes monitorados</p>
-                            <strong id="rpIncidentes">0</strong>
+
+                        <article class="panel soft-panel">
+                            <div class="panel-title-row">
+                                <h3>Distribuicao por Rede</h3>
+                                <small>Participacao no periodo</small>
+                            </div>
+                            <div id="redeBars" class="bars"></div>
                         </article>
                     </div>
-                    <div class="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>#</th>
-                                    <th>Participante</th>
-                                    <th>Total</th>
-                                    <th>Participacao</th>
-                                    <th>Crescimento</th>
-                                </tr>
-                            </thead>
-                            <tbody id="relatoriosTopBody"></tbody>
-                        </table>
+
+                    <article class="panel soft-panel gap-top">
+                        <div class="panel-title-row">
+                            <h3>Compras com Maior Impacto</h3>
+                            <small>Ordenado por valor USD</small>
+                        </div>
+                        <div id="impactList" class="impact-list"></div>
+                    </article>
+
+                    <div class="grid-two gap-top">
+                        <article class="panel soft-panel">
+                            <h3 id="topGroup1Title">Top 5 Vellora 1</h3>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Membro</th>
+                                            <th>Total</th>
+                                            <th>Crescimento</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="topGroup1Body"></tbody>
+                                </table>
+                            </div>
+                        </article>
+
+                        <article class="panel soft-panel">
+                            <h3 id="topGroup2Title">Top 5 Vellora 2</h3>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Membro</th>
+                                            <th>Total</th>
+                                            <th>Crescimento</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="topGroup2Body"></tbody>
+                                </table>
+                            </div>
+                        </article>
                     </div>
                 </section>
 
                 <section class="panel section" id="section-grupos">
                     <h2>Grupos</h2>
-                    <div class="table-wrap">
+                    <div class="table-wrap gap-top">
                         <table>
                             <thead>
                                 <tr>
@@ -132,7 +189,7 @@
 
                 <section class="panel section" id="section-membros">
                     <h2>Membros</h2>
-                    <div class="table-wrap">
+                    <div class="table-wrap gap-top">
                         <table>
                             <thead>
                                 <tr>
@@ -140,6 +197,7 @@
                                     <th>Nome</th>
                                     <th>Total</th>
                                     <th>Participacao</th>
+                                    <th>Crescimento</th>
                                 </tr>
                             </thead>
                             <tbody id="membrosBody"></tbody>
@@ -150,29 +208,100 @@
                 <section class="panel section" id="section-comandos">
                     <h2>Comandos</h2>
                     <p class="helper">Controle em tempo real das funcoes principais do bot.</p>
-                    <div class="toggles" id="comandosToggles"></div>
+                    <div class="toggles gap-top" id="comandosToggles"></div>
                     <button id="salvarComandosBtn" class="btn-primary" type="button">Salvar em tempo real</button>
                     <p id="comandosStatus" class="helper"></p>
                 </section>
 
                 <section class="panel section" id="section-agendamentos">
-                    <h2>Agendamentos</h2>
-                    <ul class="list" id="agendamentosList"></ul>
+                    <div class="panel-title-row">
+                        <h2>Agendamentos</h2>
+                        <small>Envios automaticos por data/hora</small>
+                    </div>
+                    <div class="inline-actions gap-top">
+                        <input id="agendamentosSearch" type="text" placeholder="Buscar agendamentos..." />
+                        <button id="agendarNovaBtn" class="btn-ghost" type="button">Nova Mensagem</button>
+                    </div>
+                    <div class="table-wrap gap-top">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Mensagem</th>
+                                    <th>Tipo</th>
+                                    <th>Data/Hora</th>
+                                    <th>Recorrencia</th>
+                                    <th>Status</th>
+                                    <th>Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="agendamentosBody"></tbody>
+                        </table>
+                    </div>
                 </section>
 
                 <section class="panel section" id="section-automacoes">
-                    <h2>Automacoes & Moderacao</h2>
-                    <ul class="list" id="automacoesList"></ul>
+                    <div class="panel-title-row">
+                        <h2>Automacoes & Moderacao</h2>
+                        <small>Sistema de strikes, punicoes e respostas automaticas</small>
+                    </div>
+                    <label class="field gap-top">
+                        <span>Grupo alvo</span>
+                        <select id="automacaoGrupoSelect"></select>
+                    </label>
+
+                    <div class="chip-tabs gap-top">
+                        <button class="chip-tab is-active" type="button">Automacoes</button>
+                        <button class="chip-tab" type="button">Gatilhos de Strike</button>
+                        <button class="chip-tab" type="button">Escada de Punicao</button>
+                        <button class="chip-tab" type="button">Whitelist</button>
+                        <button class="chip-tab" type="button">Logs de Moderacao</button>
+                    </div>
+
+                    <div id="automacoesRows" class="stack-cards gap-top"></div>
                 </section>
 
                 <section class="panel section" id="section-moderacao">
-                    <h2>Moderacao</h2>
-                    <ul class="list" id="moderacaoList"></ul>
+                    <div class="panel-title-row">
+                        <h2>Moderacao</h2>
+                        <small>Gerencie denuncias e banimentos</small>
+                    </div>
+                    <div class="grid-four gap-top">
+                        <article class="mini-card">
+                            <p>Pendentes</p>
+                            <strong id="modPendentes">0</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Banidos</p>
+                            <strong id="modBanidos">0</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Resolvidos</p>
+                            <strong id="modResolvidos">0</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Strikes</p>
+                            <strong id="modStrikes">0</strong>
+                        </article>
+                    </div>
+                    <div class="table-wrap gap-top">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Horario</th>
+                                    <th>Tipo</th>
+                                    <th>User</th>
+                                    <th>Status</th>
+                                    <th>Motivo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="moderacaoBody"></tbody>
+                        </table>
+                    </div>
                 </section>
 
                 <section class="panel section" id="section-incidentes">
                     <h2>Incidentes</h2>
-                    <div class="table-wrap">
+                    <div class="table-wrap gap-top">
                         <table>
                             <thead>
                                 <tr>
@@ -189,24 +318,177 @@
                 </section>
 
                 <section class="panel section" id="section-broadcast">
-                    <h2>Broadcast</h2>
-                    <p class="helper">Modelo rapido para comunicados.</p>
-                    <textarea id="broadcastTemplate" rows="7">Aviso geral: monitoramento ativo, novos eventos e comandos atualizados no painel.</textarea>
+                    <div class="panel-title-row">
+                        <h2>Broadcast</h2>
+                        <small>Envie comunicados em massa para grupos</small>
+                    </div>
+                    <div class="form-grid gap-top">
+                        <label class="field field-full">
+                            <span>Titulo (opcional)</span>
+                            <input id="broadcastTitulo" type="text" placeholder="Comunicado iMAVY" />
+                        </label>
+                        <label class="field field-full">
+                            <span>Mensagem</span>
+                            <textarea id="broadcastMensagem" rows="6" placeholder="Digite sua mensagem de broadcast..."></textarea>
+                        </label>
+                        <label class="field field-grow">
+                            <span>Imagem (URL, opcional)</span>
+                            <input id="broadcastImagem" type="text" placeholder="https://cdn.seudominio.com/imagem.jpg" />
+                        </label>
+                        <label class="field field-fit">
+                            <span>&nbsp;</span>
+                            <button class="btn-ghost" type="button">Upload</button>
+                        </label>
+                    </div>
+
+                    <div class="field gap-top">
+                        <span>Selecionar Grupos</span>
+                        <div id="broadcastGroupList" class="group-checklist"></div>
+                    </div>
+
+                    <div class="inline-actions gap-top">
+                        <button id="enviarBroadcastBtn" class="btn-primary" type="button">Enviar Broadcast</button>
+                        <p id="broadcastStatus" class="helper"></p>
+                    </div>
                 </section>
 
                 <section class="panel section" id="section-tokens">
-                    <h2>Tokens</h2>
-                    <div id="tokensRows" class="bars"></div>
+                    <div class="panel-title-row">
+                        <h2>Tokens Monitorados</h2>
+                        <small>Cadastro sem restart + imagem de compra por token</small>
+                    </div>
+
+                    <div class="form-grid gap-top">
+                        <label class="field">
+                            <span>Nome</span>
+                            <input id="tokenNome" type="text" placeholder="Nix" />
+                        </label>
+                        <label class="field">
+                            <span>Simbolo</span>
+                            <input id="tokenSimbolo" type="text" placeholder="NIX" />
+                        </label>
+                        <label class="field">
+                            <span>Rede</span>
+                            <select id="tokenRede">
+                                <option value="Ethereum">Ethereum</option>
+                                <option value="BSC" selected>BSC</option>
+                                <option value="Base">Base</option>
+                                <option value="Polygon">Polygon</option>
+                                <option value="Solana">Solana</option>
+                            </select>
+                        </label>
+
+                        <label class="field">
+                            <span>Token Address</span>
+                            <input id="tokenAddress" type="text" placeholder="0x..." />
+                        </label>
+                        <label class="field">
+                            <span>Pair Address</span>
+                            <input id="tokenPair" type="text" placeholder="0x... ou mint Solana" />
+                        </label>
+                        <label class="field">
+                            <span>Decimals</span>
+                            <input id="tokenDecimals" type="number" min="0" step="1" value="18" />
+                        </label>
+
+                        <label class="field field-grow">
+                            <span>Imagem de Compra (URL, opcional)</span>
+                            <input id="tokenImagem" type="text" placeholder="https://cdn.seudominio.com/imagens/token-buy.jpg" />
+                        </label>
+                        <label class="field field-fit">
+                            <span>&nbsp;</span>
+                            <button class="btn-ghost" type="button">Upload</button>
+                        </label>
+                    </div>
+                    <small class="helper">Essa imagem sera usada apenas nos alertas de compra deste token.</small>
+
+                    <button id="adicionarTokenBtn" class="btn-primary gap-top" type="button">Adicionar Token</button>
+
+                    <div class="table-wrap gap-top">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Token</th>
+                                    <th>Rede</th>
+                                    <th>Status</th>
+                                    <th>Pair</th>
+                                    <th>Imagem Buy</th>
+                                    <th>Acoes</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tokensBody"></tbody>
+                        </table>
+                    </div>
                 </section>
 
                 <section class="panel section" id="section-atividade">
-                    <h2>Atividade</h2>
-                    <ul id="atividadeList" class="timeline"></ul>
+                    <div class="panel-title-row">
+                        <h2>Atividade</h2>
+                        <small>Historico registrado no bot</small>
+                    </div>
+                    <div class="table-wrap gap-top">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Horario</th>
+                                    <th>Token</th>
+                                    <th>Rede</th>
+                                    <th>Buyer</th>
+                                    <th>Amount</th>
+                                    <th>USD</th>
+                                    <th>TX</th>
+                                </tr>
+                            </thead>
+                            <tbody id="atividadeBody"></tbody>
+                        </table>
+                    </div>
                 </section>
 
                 <section class="panel section" id="section-configuracoes">
-                    <h2>Configuracoes</h2>
-                    <ul class="list" id="configList"></ul>
+                    <div class="panel-title-row">
+                        <h2>Configuracoes</h2>
+                        <small>Ajustes em tempo real</small>
+                    </div>
+
+                    <article class="panel soft-panel gap-top">
+                        <h3>Regras de Alerta</h3>
+                        <label class="field gap-top">
+                            <span>Filtro minimo (USD)</span>
+                            <input id="configMinUsd" type="number" min="0" step="0.01" />
+                        </label>
+
+                        <label class="field gap-top">
+                            <span>Imagem de Compra</span>
+                            <input type="text" value="A imagem de compra agora e configurada por token, na aba Tokens. Cada token pode ter sua propria arte." readonly />
+                        </label>
+
+                        <label class="field gap-top">
+                            <span>Imagem padrao - Lembretes e Avisos</span>
+                            <div class="inline-actions">
+                                <input id="configImagemPadrao" type="text" />
+                                <button class="btn-ghost" type="button">Upload</button>
+                            </div>
+                        </label>
+                        <small class="helper">Usada em agendamentos quando nao houver imagem especifica no item.</small>
+
+                        <button id="salvarConfigBtn" class="btn-primary full-width gap-top" type="button">Salvar</button>
+                    </article>
+
+                    <div class="grid-three gap-top">
+                        <article class="mini-card">
+                            <p>API CONECTADA</p>
+                            <strong id="cfgApiStatus">-</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>REDES ATIVAS</p>
+                            <strong id="cfgRedesAtivas">-</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>FILAS</p>
+                            <strong id="cfgFilas">Process 0 | Telegram 0</strong>
+                        </article>
+                    </div>
+                    <p class="helper" id="cfgStatusMsg"></p>
                 </section>
             </div>
         </main>

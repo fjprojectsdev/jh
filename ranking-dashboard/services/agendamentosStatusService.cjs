@@ -128,16 +128,44 @@ function mapScheduledMessages(scheduledList) {
         });
 }
 
+function splitReminderBuckets(lembretesRaw) {
+    const source = lembretesRaw && typeof lembretesRaw === 'object' ? lembretesRaw : {};
+    const hasBuckets = Object.prototype.hasOwnProperty.call(source, 'interval')
+        || Object.prototype.hasOwnProperty.call(source, 'daily');
+
+    if (hasBuckets) {
+        return {
+            intervalBucket: source.interval && typeof source.interval === 'object' ? source.interval : {},
+            dailyBucket: source.daily && typeof source.daily === 'object' ? source.daily : {}
+        };
+    }
+
+    // Compatibilidade com formato antigo:
+    // {
+    //   "<groupId>": { comando, intervalo, encerramento, startTime, nextTrigger }
+    // }
+    const intervalBucket = {};
+    const dailyBucket = {};
+    for (const [groupId, config] of Object.entries(source)) {
+        if (!config || typeof config !== 'object') {
+            continue;
+        }
+
+        if (Array.isArray(config.horarios)) {
+            dailyBucket[groupId] = config;
+            continue;
+        }
+
+        intervalBucket[groupId] = config;
+    }
+
+    return { intervalBucket, dailyBucket };
+}
+
 function getAgendamentosStatus() {
     const lembretesRaw = readJsonFile(LEMBRETES_FILE, {});
     const scheduledRaw = readJsonFile(SCHEDULED_FILE, []);
-
-    const intervalBucket = lembretesRaw && typeof lembretesRaw === 'object' && lembretesRaw.interval && typeof lembretesRaw.interval === 'object'
-        ? lembretesRaw.interval
-        : {};
-    const dailyBucket = lembretesRaw && typeof lembretesRaw === 'object' && lembretesRaw.daily && typeof lembretesRaw.daily === 'object'
-        ? lembretesRaw.daily
-        : {};
+    const { intervalBucket, dailyBucket } = splitReminderBuckets(lembretesRaw);
 
     const intervalReminders = mapIntervalReminders(intervalBucket);
     const dailyReminders = mapDailyReminders(dailyBucket);
@@ -166,4 +194,3 @@ function getAgendamentosStatus() {
 module.exports = {
     getAgendamentosStatus
 };
-
