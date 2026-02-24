@@ -1,6 +1,7 @@
 const state = {
     ultimoResultado: null,
     rankingEnriquecido: [],
+    rankingsPorGrupo: null,
     insightsPremium: [],
     premiumMeta: null,
     realtimeEnabled: false,
@@ -31,6 +32,10 @@ const SAMPLE_DATA = [
     { nome: 'Lia', data: '2026-01-31', grupo: 'Marketing' },
     { nome: 'Paulo', data: '2026-01-31', grupo: 'Suporte' }
 ];
+const VELLORA_DEFAULT_GROUPS = {
+    vellora1: 'CriptoNoPix é Vellora (1)',
+    vellora2: 'CriptoNoPix é Vellora (2)'
+};
 
 function normalizeGroupName(value) {
     return String(value || '')
@@ -38,6 +43,50 @@ function normalizeGroupName(value) {
         .replace(/[\u0300-\u036f]/g, '')
         .toLowerCase()
         .trim();
+}
+
+function normalizeGroupToken(value) {
+    return normalizeGroupName(value).replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function collectAvailableGroupNames(interacoes = []) {
+    const names = new Set();
+    const select = byId('grupoSelecionado');
+
+    if (select) {
+        for (const option of Array.from(select.options || [])) {
+            const value = String(option.value || '').trim();
+            if (value) {
+                names.add(value);
+            }
+        }
+    }
+
+    for (const item of Array.isArray(interacoes) ? interacoes : []) {
+        const grupo = String(item && item.grupo || '').trim();
+        if (grupo) {
+            names.add(grupo);
+        }
+    }
+
+    return Array.from(names);
+}
+
+function resolveVelloraGroupNames(groupNames = []) {
+    const entries = groupNames
+        .map((name) => ({ name, token: normalizeGroupToken(name) }))
+        .filter((item) => item.token);
+
+    function pick(number) {
+        const pattern = new RegExp(`\\bvellora\\b.*\\b${number}\\b|\\bvellora\\s*${number}\\b`);
+        const found = entries.find((item) => pattern.test(item.token));
+        return found ? found.name : null;
+    }
+
+    return {
+        vellora1: pick(1) || VELLORA_DEFAULT_GROUPS.vellora1,
+        vellora2: pick(2) || VELLORA_DEFAULT_GROUPS.vellora2
+    };
 }
 
 function isGrupoPermitidoNoDashboard(groupName) {
@@ -859,7 +908,7 @@ function formatGrowth(crescimento) {
     const percentual = Number(crescimento && crescimento.percentual || 0);
     const icon = growthIcon(percentual);
     const sinal = percentual > 0 ? '+' : '';
-    return `${icon} ${sinal}${percentual.toFixed(2)}% (abs ${crescimento.absoluto})`;
+    return `${icon} ${sinal}${percentual.toFixed(2)}%`;
 }
 
 function enrichRanking(resultado) {
@@ -879,11 +928,23 @@ function enrichRanking(resultado) {
     return ranking;
 }
 
-function renderTable(targetId, rows, maxTotal) {
+function renderTable(targetId, rows, maxTotal, emptyText = 'Sem dados no periodo selecionado.') {
     const tbody = byId(targetId);
+    if (!tbody) {
+        return;
+    }
+
     tbody.innerHTML = '';
 
-    for (const row of rows) {
+    const safeRows = Array.isArray(rows) ? rows : [];
+    if (safeRows.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="8">${emptyText}</td>`;
+        tbody.appendChild(tr);
+        return;
+    }
+
+    for (const row of safeRows) {
         const tr = document.createElement('tr');
         if (row.emRisco) {
             tr.classList.add('risk-row');
@@ -895,7 +956,7 @@ function renderTable(targetId, rows, maxTotal) {
             <td>${row.posicao}</td>
             <td>${row.nome}</td>
             <td>${row.grupo || '-'}</td>
-            <td><span class="level-pill">${row.nivel}</span></td>
+            <td><span class="level-pill">${row.nivel || '-'}</span></td>
             <td>
                 <div class="bar-cell">
                     <strong>${row.total}</strong>
@@ -904,11 +965,84 @@ function renderTable(targetId, rows, maxTotal) {
             </td>
             <td>${formatPercent(row.percentual)}</td>
             <td><strong>${Number(row.scoreEngajamento || 0).toFixed(2)}</strong></td>
-            <td class="growth ${growthClass(row.crescimento.percentual)}">${formatGrowth(row.crescimento)}</td>
+            <td class="growth ${growthClass(row.crescimento && row.crescimento.percentual)}">${formatGrowth(row.crescimento || {})}</td>
         `;
 
         tbody.appendChild(tr);
     }
+}
+
+async function fetchTop5ByGroup(params) {
+    const dataInicio = params && params.dataInicio;
+    const dataFim = params && params.dataFim;
+    const grupoSelecionado = params && params.grupoSelecionado;
+    const usarSupabase = Boolean(params && params.usarSupabase);
+    const interacoes = Array.isArray(params && params.interacoes) ? params.interacoes : [];
+
+    if (!grupoSelecionado) {
+        return { nomeGrupo: '-', rows: [], ok: false, error: 'grupo_nao_informado' };
+    }
+
+    const response = await fetchComAuth('/api/ranking-texto', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            interacoes: usarSupabase ? undefined : interacoes,
+            dataInicio,
+            dataFim,
+            grupoSelecionado,
+            usarSupabase
+        })
+    });
+
+    const body = await response.json();
+    if (!response.ok || (body && body.ok === false)) {
+        throw new Error(body.error || `Erro ao gerar Top 5 para ${grupoSelecionado}.`);
+    }
+
+    const rows = enrichRanking(body)
+        .slice(0, 5)
+        .map((row, index) => ({
+            ...row,
+            posicao: index + 1,
+            grupo: grupoSelecionado
+        }));
+
+    return {
+        nomeGrupo: grupoSelecionado,
+        rows,
+        ok: true
+    };
+}
+
+async function carregarTop5Vellora(params) {
+    const interacoes = Array.isArray(params && params.interacoes) ? params.interacoes : [];
+    const availableGroups = collectAvailableGroupNames(interacoes);
+    const resolved = resolveVelloraGroupNames(availableGroups);
+
+    const tasks = await Promise.allSettled([
+        fetchTop5ByGroup({ ...params, grupoSelecionado: resolved.vellora1 }),
+        fetchTop5ByGroup({ ...params, grupoSelecionado: resolved.vellora2 })
+    ]);
+
+    function normalizeResult(settled, fallbackName) {
+        if (settled.status === 'fulfilled') {
+            return settled.value;
+        }
+        return {
+            nomeGrupo: fallbackName,
+            rows: [],
+            ok: false,
+            error: settled.reason && settled.reason.message ? settled.reason.message : 'Falha ao carregar ranking.'
+        };
+    }
+
+    return {
+        vellora1: normalizeResult(tasks[0], resolved.vellora1),
+        vellora2: normalizeResult(tasks[1], resolved.vellora2)
+    };
 }
 
 function renderInsights(targetId, insights) {
@@ -1004,22 +1138,30 @@ function calcularMetaPremium(interacoes, resultado, rankingEnriquecido, grupoSel
     };
 }
 
-function renderResultado(resultado, rankingEnriquecido, premiumMeta) {
+function renderTop5PorGrupo(rankingsPorGrupo) {
+    const r1 = rankingsPorGrupo && rankingsPorGrupo.vellora1 ? rankingsPorGrupo.vellora1 : { nomeGrupo: VELLORA_DEFAULT_GROUPS.vellora1, rows: [] };
+    const r2 = rankingsPorGrupo && rankingsPorGrupo.vellora2 ? rankingsPorGrupo.vellora2 : { nomeGrupo: VELLORA_DEFAULT_GROUPS.vellora2, rows: [] };
+
+    const max1 = (r1.rows || []).reduce((max, row) => Math.max(max, Number(row.total || 0)), 0);
+    const max2 = (r2.rows || []).reduce((max, row) => Math.max(max, Number(row.total || 0)), 0);
+
+    renderTable('topVellora1Body', r1.rows || [], max1, `Sem dados para ${r1.nomeGrupo} no periodo.`);
+    renderTable('topVellora2Body', r2.rows || [], max2, `Sem dados para ${r2.nomeGrupo} no periodo.`);
+}
+
+function renderResultado(resultado, rankingEnriquecido, premiumMeta, rankingsPorGrupo) {
     state.ultimoResultado = resultado;
     state.rankingEnriquecido = rankingEnriquecido;
+    state.rankingsPorGrupo = rankingsPorGrupo;
     state.premiumMeta = premiumMeta;
     state.insightsPremium = premiumMeta.insightsPremium;
-
-    const top15Enriquecido = rankingEnriquecido.slice(0, 15);
-    const maxTotal = rankingEnriquecido.reduce((max, row) => Math.max(max, Number(row.total || 0)), 0);
 
     renderResumo(resultado.resumo);
     renderPremiumCards(premiumMeta);
     renderTop1(premiumMeta);
     renderInsights('insightsList', resultado.insights || []);
     renderInsights('insightsPremiumList', premiumMeta.insightsPremium || []);
-    renderTable('top15Body', top15Enriquecido, maxTotal);
-    renderTable('rankingBody', rankingEnriquecido, maxTotal);
+    renderTop5PorGrupo(rankingsPorGrupo);
 
     byId('resultados').classList.remove('hidden');
     carregarResumoOperacao({ silent: true }).catch(() => {});
@@ -1277,8 +1419,14 @@ async function gerarDashboard(options = {}) {
             dataInicio,
             dataFim
         );
+        const top5PorGrupo = await carregarTop5Vellora({
+            dataInicio,
+            dataFim,
+            usarSupabase,
+            interacoes
+        });
 
-        renderResultado(body, rankingEnriquecido, premiumMeta);
+        renderResultado(body, rankingEnriquecido, premiumMeta, top5PorGrupo);
 
         if (!options.silentStatus) {
             if (grupoSelecionado) {
