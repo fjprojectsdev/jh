@@ -148,6 +148,15 @@ let qrCodeData = null;
 const botStartTime = Date.now();
 const unauthorizedGroupNoticeCooldown = new Map();
 const UNAUTHORIZED_GROUP_NOTICE_MS = parseInt(process.env.UNAUTHORIZED_GROUP_NOTICE_MS || '180000', 10);
+const ALLOWED_GROUPS_CACHE_TTL_MS = Math.max(5_000, parseInt(process.env.ALLOWED_GROUPS_CACHE_TTL_MS || '15000', 10));
+
+const allowedGroupsState = {
+    normalizedNames: new Set(),
+    groupIds: new Set(),
+    loadedAt: 0,
+    loadingPromise: null,
+    source: 'file'
+};
 
 function normalizeGroupName(name) {
     return String(name || '')
@@ -163,6 +172,80 @@ function sanitizeIncomingText(value) {
         .replace(/[\u200B\u200C\u200D\u2060\uFEFF]/g, '')
         .replace(/\r/g, '')
         .trim();
+}
+
+function getSupabaseRestConfig() {
+    const url = String(process.env.IMAVY_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+    const key = String(
+        process.env.IMAVY_SUPABASE_SERVICE_KEY ||
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.IMAVY_SUPABASE_ANON_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        process.env.IMAVY_SUPABASE_PUBLISHABLE_KEY ||
+        process.env.SUPABASE_PUBLISHABLE_KEY ||
+        process.env.SUPABASE_KEY ||
+        ''
+    ).trim();
+    const allowedGroupsTable = String(process.env.IMAVY_ALLOWED_GROUPS_TABLE || 'allowed_groups').trim();
+    const gruposTable = String(process.env.IMAVY_GRUPOS_TABLE || 'grupos').trim();
+    return { url, key, allowedGroupsTable, gruposTable };
+}
+
+function dedupeStrings(values = []) {
+    const out = [];
+    const seen = new Set();
+    for (const value of values) {
+        const text = String(value || '').trim();
+        if (!text || seen.has(text)) continue;
+        seen.add(text);
+        out.push(text);
+    }
+    return out;
+}
+
+async function fetchAllowedGroupsFromSupabase() {
+    const config = getSupabaseRestConfig();
+    if (!config.url || !config.key) {
+        return { names: [], ids: [] };
+    }
+
+    const headers = {
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`
+    };
+    const names = [];
+    const ids = [];
+
+    try {
+        const allowedUrl = `${config.url}/rest/v1/${encodeURIComponent(config.allowedGroupsTable)}?select=name,nome&limit=10000`;
+        const allowedResponse = await fetch(allowedUrl, { method: 'GET', headers });
+        if (allowedResponse.ok) {
+            const rows = await allowedResponse.json();
+            for (const row of Array.isArray(rows) ? rows : []) {
+                const name = String(row?.name || row?.nome || '').trim();
+                if (name) names.push(name);
+            }
+        }
+    } catch (_) {}
+
+    try {
+        const gruposUrl = `${config.url}/rest/v1/${encodeURIComponent(config.gruposTable)}?select=id,nome&limit=10000`;
+        const gruposResponse = await fetch(gruposUrl, { method: 'GET', headers });
+        if (gruposResponse.ok) {
+            const rows = await gruposResponse.json();
+            for (const row of Array.isArray(rows) ? rows : []) {
+                const id = String(row?.id || '').trim();
+                const nome = String(row?.nome || '').trim();
+                if (id) ids.push(id);
+                if (nome) names.push(nome);
+            }
+        }
+    } catch (_) {}
+
+    return {
+        names: dedupeStrings(names),
+        ids: dedupeStrings(ids)
+    };
 }
 
 function unwrapIncomingMessageContent(content, depth = 0) {
@@ -219,6 +302,65 @@ function loadAllowedGroupNames() {
     return allowed;
 }
 
+function getAllowedGroupsSnapshot() {
+    if (allowedGroupsState.loadedAt <= 0 || allowedGroupsState.normalizedNames.size === 0) {
+        const local = loadAllowedGroupNames();
+        allowedGroupsState.normalizedNames = local;
+        allowedGroupsState.groupIds = new Set();
+        allowedGroupsState.loadedAt = Date.now();
+        allowedGroupsState.source = 'file';
+    }
+
+    return {
+        normalizedNames: allowedGroupsState.normalizedNames,
+        groupIds: allowedGroupsState.groupIds,
+        source: allowedGroupsState.source
+    };
+}
+
+async function refreshAllowedGroupsCache(force = false) {
+    const now = Date.now();
+    if (!force && allowedGroupsState.loadedAt > 0 && (now - allowedGroupsState.loadedAt) < ALLOWED_GROUPS_CACHE_TTL_MS) {
+        return getAllowedGroupsSnapshot();
+    }
+
+    if (allowedGroupsState.loadingPromise) {
+        await allowedGroupsState.loadingPromise;
+        return getAllowedGroupsSnapshot();
+    }
+
+    allowedGroupsState.loadingPromise = (async () => {
+        const localNames = loadAllowedGroupNames();
+        const normalizedNames = new Set(localNames);
+        const groupIds = new Set();
+        let source = 'file';
+
+        const remote = await fetchAllowedGroupsFromSupabase();
+        for (const name of remote.names) {
+            const normalized = normalizeGroupName(name);
+            if (normalized) normalizedNames.add(normalized);
+        }
+        for (const id of remote.ids) {
+            const groupId = String(id || '').trim();
+            if (groupId) groupIds.add(groupId);
+        }
+
+        if (remote.names.length > 0 || remote.ids.length > 0) {
+            source = 'file+supabase';
+        }
+
+        allowedGroupsState.normalizedNames = normalizedNames;
+        allowedGroupsState.groupIds = groupIds;
+        allowedGroupsState.loadedAt = Date.now();
+        allowedGroupsState.source = source;
+    })().finally(() => {
+        allowedGroupsState.loadingPromise = null;
+    });
+
+    await allowedGroupsState.loadingPromise;
+    return getAllowedGroupsSnapshot();
+}
+
 function resolveParticipantName(message, senderId) {
     const pushName = String(message?.pushName || '').trim();
     if (pushName) {
@@ -254,6 +396,7 @@ async function startBot() {
 
     console.log('[DEBUG] ensureCoreConfigFiles...');
     await ensureCoreConfigFiles();
+    await refreshAllowedGroupsCache(true);
 
     console.log('[DEBUG] restoreSessionFromBackup...');
     // Tentar restaurar sessao do backup se necessario
@@ -433,7 +576,7 @@ async function startBot() {
                     continue;
                 }
                 if (messageText.toLowerCase().startsWith('/engajamento')) {
-                    const allowedGroups = loadAllowedGroupNames();
+                    const allowedGroups = getAllowedGroupsSnapshot().normalizedNames;
                     await leadEngine.handleEngagementCommand(sock, chatId, {
                         allowedGroupNames: Array.from(allowedGroups)
                     });
@@ -469,7 +612,9 @@ async function startBot() {
             console.log(`[DEBUG] Processando msg de ${senderId} no grupo ${chatId}`);
 
             // Carregar allowed_groups (ideal: mover para memoria global recarregavel)
-            const ALLOWED_GROUP_NAMES = loadAllowedGroupNames();
+            const allowedGroupsSnapshot = await refreshAllowedGroupsCache();
+            const ALLOWED_GROUP_NAMES = allowedGroupsSnapshot.normalizedNames;
+            const ALLOWED_GROUP_IDS = allowedGroupsSnapshot.groupIds;
 
             let groupSubject = null;
             let groupDescription = '';
@@ -491,7 +636,9 @@ async function startBot() {
             }
 
             const normalizedGroupSubject = normalizeGroupName(groupSubject);
-            if (!groupSubject || !ALLOWED_GROUP_NAMES.has(normalizedGroupSubject)) {
+            const isAllowedByName = Boolean(groupSubject) && ALLOWED_GROUP_NAMES.has(normalizedGroupSubject);
+            const isAllowedById = ALLOWED_GROUP_IDS.has(chatId);
+            if (!isAllowedByName && !isAllowedById) {
                 console.log(`Ignorado: Grupo "${groupSubject}" nao esta na lista permitida.`);
                 // DEBUG: Listar permitidos se falhar
                 // console.log('Permitidos:', Array.from(ALLOWED_GROUP_NAMES));

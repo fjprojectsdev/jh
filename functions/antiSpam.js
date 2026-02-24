@@ -6,22 +6,214 @@ import { sendSafeMessage } from './messageHandler.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRIKES_FILE = path.join(__dirname, '..', 'strikes.json');
+const GROUP_RULES_FILE = path.join(__dirname, '..', 'group_rules_cache.json');
 
-// Cache: userId+chatId -> { textMap: { normalizedText: [timestamps] } }
+// Cache: userId+chatId -> { textMap: { normalizedText: [timestamps] }, timeline: [timestamps] }
 const messageCache = new Map();
-const WINDOW = 10000; // 10 segundos
-const MAX_REPEAT = 3;
+const FLOOD_WINDOW_MS = Number(process.env.FLOOD_WINDOW_MS || 60000);
+const MAX_REPEAT = Number(process.env.FLOOD_REPEAT_LIMIT || 3);
+const MAX_MESSAGES_PER_WINDOW = Number(process.env.FLOOD_VOLUME_LIMIT || 10);
 const STRIKE_EXPIRY = 24 * 60 * 60 * 1000; // 24 horas
 
-// Extrair texto de qualquer tipo de mensagem
+const groupRulesCache = loadGroupRulesCache();
+
+const ADULT_TERMS = [
+    'porno', 'pornografia', 'onlyfans', 'nude', 'nudes', 'xvideos', 'redtube', 'acompanhante', 'gp', 'sexo'
+];
+
+const POLITICS_TERMS = [
+    'eleicao', 'eleicoes', 'politica', 'politico', 'presidente', 'deputado', 'senador', 'governo', 'lula', 'bolsonaro'
+];
+
+const RELIGION_TERMS = [
+    'igreja', 'religiao', 'evangelho', 'pastor', 'jesus', 'deus', 'oracao', 'culto'
+];
+
+const VIOLENCE_TERMS = [
+    'matar', 'morte', 'arma', 'atirar', 'agredir', 'violencia', 'espancar'
+];
+
+function getFirstNonEmptyText(...values) {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+            return value;
+        }
+    }
+    return '';
+}
+
+function extractTextFromContent(content, depth = 0) {
+    if (!content || typeof content !== 'object' || depth > 6) return '';
+
+    const directText = getFirstNonEmptyText(
+        content.conversation,
+        content.extendedTextMessage?.text,
+        content.imageMessage?.caption,
+        content.videoMessage?.caption,
+        content.documentMessage?.caption,
+        content.documentWithCaptionMessage?.message?.documentMessage?.caption,
+        content.buttonsResponseMessage?.selectedDisplayText,
+        content.buttonsResponseMessage?.selectedButtonId,
+        content.templateButtonReplyMessage?.selectedDisplayText,
+        content.templateButtonReplyMessage?.selectedId,
+        content.listResponseMessage?.title,
+        content.listResponseMessage?.singleSelectReply?.selectedRowId
+    );
+
+    if (directText) return directText;
+
+    const wrappedNodes = [
+        content.ephemeralMessage?.message,
+        content.viewOnceMessage?.message,
+        content.viewOnceMessageV2?.message,
+        content.viewOnceMessageV2Extension?.message,
+        content.editedMessage?.message,
+        content.documentWithCaptionMessage?.message
+    ];
+
+    for (const nested of wrappedNodes) {
+        const nestedText = extractTextFromContent(nested, depth + 1);
+        if (nestedText) return nestedText;
+    }
+
+    return '';
+}
+
+// Extrair texto de qualquer tipo comum de mensagem
 export function getText(msg) {
     if (!msg?.message) return '';
-    const content = msg.message;
-    if (content.conversation) return content.conversation;
-    if (content.extendedTextMessage?.text) return content.extendedTextMessage.text;
-    if (content.imageMessage?.caption) return content.imageMessage.caption;
-    if (content.videoMessage?.caption) return content.videoMessage.caption;
-    return '';
+    return extractTextFromContent(msg.message, 0);
+}
+
+function normalizeForMatch(text) {
+    return String(text || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+}
+
+function loadGroupRulesCache() {
+    try {
+        if (!fs.existsSync(GROUP_RULES_FILE)) return {};
+        const raw = fs.readFileSync(GROUP_RULES_FILE, 'utf8');
+        const parsed = raw ? JSON.parse(raw) : {};
+        return (parsed && typeof parsed === 'object') ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function saveGroupRulesCache() {
+    try {
+        fs.writeFileSync(GROUP_RULES_FILE, JSON.stringify(groupRulesCache, null, 2));
+    } catch (e) {
+        console.warn('Falha ao salvar regras por grupo:', e.message);
+    }
+}
+
+function extractCustomBlockedTerms(description) {
+    const text = String(description || '');
+    const lines = text.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+    const out = new Set();
+    const patterns = [
+        /palavras?\s+proibid[^\:]*:\s*(.+)$/i,
+        /termos?\s+proibid[^\:]*:\s*(.+)$/i,
+        /banid[^\:]*:\s*(.+)$/i
+    ];
+
+    for (const line of lines) {
+        for (const p of patterns) {
+            const m = line.match(p);
+            if (!m) continue;
+            const tail = String(m[1] || '');
+            const parts = tail.split(/[;,|/]/g).map((x) => x.trim()).filter(Boolean);
+            for (const part of parts) {
+                const cleaned = normalizeForMatch(part).replace(/[^\p{L}\p{N}\s_-]/gu, '').trim();
+                if (cleaned.length >= 3 && cleaned.length <= 40) {
+                    out.add(cleaned);
+                }
+            }
+        }
+    }
+    return Array.from(out).slice(0, 50);
+}
+
+function deriveGroupPolicy(description) {
+    const normalized = normalizeForMatch(description);
+    return {
+        blockAdult: /(adult|\+18|porn|nude|conteudo adulto|conteudo inadequado)/i.test(normalized),
+        blockPolitics: /(politic|eleic|partid|governo|presidente|deputad|senador)/i.test(normalized),
+        blockReligion: /(relig|igreja|pastor|evangelho|culto|oracao|deus|jesus)/i.test(normalized),
+        blockViolence: /(violen|arma|agress|matar|morte|crime)/i.test(normalized),
+        customBlockedTerms: extractCustomBlockedTerms(description)
+    };
+}
+
+function containsAnyTerm(normalizedMessage, terms) {
+    for (const term of terms) {
+        const t = normalizeForMatch(term).trim();
+        if (!t) continue;
+        if (normalizedMessage.includes(t)) {
+            return t;
+        }
+    }
+    return null;
+}
+
+function checkDescriptionRules(messageText, chatId) {
+    const rules = groupRulesCache[String(chatId || '')];
+    if (!rules || !rules.policy) return { violated: false };
+
+    const normalized = normalizeForMatch(messageText);
+    const policy = rules.policy;
+
+    if (policy.blockAdult) {
+        const hit = containsAnyTerm(normalized, ADULT_TERMS);
+        if (hit) return { violated: true, rule: 'DESC_ADULT', detail: hit };
+    }
+    if (policy.blockPolitics) {
+        const hit = containsAnyTerm(normalized, POLITICS_TERMS);
+        if (hit) return { violated: true, rule: 'DESC_POLITICS', detail: hit };
+    }
+    if (policy.blockReligion) {
+        const hit = containsAnyTerm(normalized, RELIGION_TERMS);
+        if (hit) return { violated: true, rule: 'DESC_RELIGION', detail: hit };
+    }
+    if (policy.blockViolence) {
+        const hit = containsAnyTerm(normalized, VIOLENCE_TERMS);
+        if (hit) return { violated: true, rule: 'DESC_VIOLENCE', detail: hit };
+    }
+    if (Array.isArray(policy.customBlockedTerms) && policy.customBlockedTerms.length > 0) {
+        const hit = containsAnyTerm(normalized, policy.customBlockedTerms);
+        if (hit) return { violated: true, rule: 'DESC_TERM', detail: hit };
+    }
+
+    return { violated: false };
+}
+
+export function syncGroupRules(chatId, groupName, description) {
+    const safeChatId = String(chatId || '').trim();
+    if (!safeChatId) return;
+
+    const safeName = String(groupName || '').trim();
+    const safeDescription = String(description || '').trim();
+    const existing = groupRulesCache[safeChatId];
+    const currentHash = `${safeName}::${safeDescription}`;
+
+    if (existing && existing.hash === currentHash) {
+        return;
+    }
+
+    const policy = deriveGroupPolicy(safeDescription);
+    groupRulesCache[safeChatId] = {
+        groupId: safeChatId,
+        groupName: safeName,
+        description: safeDescription,
+        policy,
+        hash: currentHash,
+        updatedAt: new Date().toISOString()
+    };
+    saveGroupRulesCache();
 }
 
 // Normalizar texto
@@ -38,7 +230,7 @@ function hasLink(text) {
 
 // Limpar timestamps antigos
 function cleanOld(timestamps, now) {
-    return timestamps.filter(t => now - t < WINDOW);
+    return timestamps.filter((t) => now - t < FLOOD_WINDOW_MS);
 }
 
 // Carregar strikes
@@ -105,27 +297,36 @@ export function resetStrikes(chatId, userId) {
 
 // Verificar violação
 export function checkViolation(messageText, chatId, userId, isAdmin) {
-    // Admins são isentos
+    // Admins sao isentos
     if (isAdmin) return { violated: false };
 
     const now = Date.now();
     const normalized = normalize(messageText);
 
-    // REGRA 2: Anti-link
+    // REGRA 1: Anti-link
     if (hasLink(messageText)) {
-        console.log(`🚫 LINK bloqueado: ${userId}`);
+        console.log(`LINK bloqueado: ${userId}`);
         return { violated: true, rule: 'LINK' };
     }
 
-    // REGRA 1: Anti-repeat
     if (!normalized) return { violated: false };
 
     const key = `${chatId}:${userId}`;
     if (!messageCache.has(key)) {
-        messageCache.set(key, { textMap: {} });
+        messageCache.set(key, { textMap: {}, timeline: [] });
     }
 
     const cache = messageCache.get(key);
+    cache.timeline = cleanOld(cache.timeline || [], now);
+    cache.timeline.push(now);
+
+    if (cache.timeline.length >= MAX_MESSAGES_PER_WINDOW) {
+        console.log(`FLOOD VOLUME bloqueado: ${userId} (${cache.timeline.length} msgs/${Math.round(FLOOD_WINDOW_MS / 1000)}s)`);
+        cache.timeline = [];
+        cache.textMap = {};
+        return { violated: true, rule: 'FLOOD_VOLUME' };
+    }
+
     if (!cache.textMap[normalized]) {
         cache.textMap[normalized] = [];
     }
@@ -134,20 +335,37 @@ export function checkViolation(messageText, chatId, userId, isAdmin) {
     const count = cache.textMap[normalized].length + 1;
 
     if (count >= MAX_REPEAT) {
-        console.log(`🔁 REPEAT bloqueado: ${userId} (${count}x)`);
+        console.log(`FLOOD REPEAT bloqueado: ${userId} (${count}x/${Math.round(FLOOD_WINDOW_MS / 1000)}s)`);
         delete cache.textMap[normalized];
-        return { violated: true, rule: 'REPEAT' };
+        return { violated: true, rule: 'FLOOD_REPEAT' };
     }
 
     cache.textMap[normalized].push(now);
+
+    // REGRA 3: regras da descricao por grupo
+    const descViolation = checkDescriptionRules(messageText, chatId);
+    if (descViolation.violated) {
+        console.log(`DESC RULE bloqueado: ${userId} (${descViolation.rule}${descViolation.detail ? `:${descViolation.detail}` : ''})`);
+        return descViolation;
+    }
+
     return { violated: false };
 }
-
 // Notificar admins
 export async function notifyAdmins(sock, chatId, userId, rule, strikeCount, messageText, error = null) {
     try {
         const userNumber = userId.split('@')[0];
-        const ruleText = rule === 'REPEAT' ? 'Repetição de mensagens' : 'Envio de link não autorizado';
+        const ruleMap = {
+            LINK: 'Envio de link nao autorizado',
+            FLOOD_REPEAT: 'Flood de mensagens repetidas (3 iguais em 1 minuto)',
+            FLOOD_VOLUME: 'Flood por volume (10 mensagens em 1 minuto)',
+            DESC_ADULT: 'Conteudo adulto bloqueado pelas regras da descricao',
+            DESC_POLITICS: 'Conteudo politico bloqueado pelas regras da descricao',
+            DESC_RELIGION: 'Conteudo religioso bloqueado pelas regras da descricao',
+            DESC_VIOLENCE: 'Conteudo violento bloqueado pelas regras da descricao',
+            DESC_TERM: 'Termo bloqueado pelas regras da descricao'
+        };
+        const ruleText = ruleMap[rule] || `Regra: ${rule}`;
 
         console.log(`🚨 Anti-Spam Notification (SILENCED)
 User: ${userNumber}
