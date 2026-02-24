@@ -207,6 +207,10 @@ function round2(value) {
 
 function setStatus(text, type) {
     const el = byId('status');
+    if (!el) {
+        return;
+    }
+
     el.textContent = text;
     el.classList.remove('delta-pos', 'delta-neg', 'delta-zero');
 
@@ -629,7 +633,12 @@ function createRealtimeClient() {
 }
 
 function parseInputJson() {
-    const raw = byId('interacoesJson').value.trim();
+    const input = byId('interacoesJson');
+    if (!input) {
+        return [];
+    }
+
+    const raw = input.value.trim();
     if (!raw) {
         throw new Error('Preencha o campo de interacoes com um JSON valido.');
     }
@@ -667,6 +676,10 @@ function extrairGrupos(interacoes) {
 
 function atualizarSeletorGrupos(interacoes) {
     const select = byId('grupoSelecionado');
+    if (!select) {
+        return;
+    }
+
     const valorAtual = select.value;
     const grupos = extrairGrupos(interacoes);
 
@@ -1179,6 +1192,10 @@ function shouldUseSupabaseSource(options) {
 
 async function carregarGruposDoSupabase() {
     const select = byId('grupoSelecionado');
+    if (!select) {
+        return;
+    }
+
     const atual = select.value;
     const grupos = new Set();
     let erroPrincipal = null;
@@ -1374,8 +1391,10 @@ async function gerarDashboard(options = {}) {
 
         const dataInicio = byId('dataInicio').value;
         const dataFim = byId('dataFim').value;
-        const grupoSelecionado = byId('grupoSelecionado').value;
-        const usarSupabase = shouldUseSupabaseSource(options);
+        const grupoSelecionadoEl = byId('grupoSelecionado');
+        const grupoSelecionado = grupoSelecionadoEl ? grupoSelecionadoEl.value : '';
+        const hasManualInput = Boolean(byId('interacoesJson'));
+        const usarSupabase = shouldUseSupabaseSource(options) || !hasManualInput;
 
         if (!dataInicio || !dataFim) {
             throw new Error('Informe data inicio e data fim.');
@@ -1441,7 +1460,12 @@ async function gerarDashboard(options = {}) {
 }
 
 function carregarExemplo() {
-    byId('interacoesJson').value = JSON.stringify(SAMPLE_DATA, null, 2);
+    const input = byId('interacoesJson');
+    if (!input) {
+        return;
+    }
+
+    input.value = JSON.stringify(SAMPLE_DATA, null, 2);
     byId('dataInicio').value = '2026-02-01';
     byId('dataFim').value = '2026-02-05';
     atualizarSeletorGrupos(SAMPLE_DATA);
@@ -1584,9 +1608,12 @@ function init() {
         agendarGeracaoAutomatica();
     });
 
-    byId('grupoSelecionado').addEventListener('change', () => {
-        agendarGeracaoAutomatica();
-    });
+    const grupoSelect = byId('grupoSelecionado');
+    if (grupoSelect) {
+        grupoSelect.addEventListener('change', () => {
+            agendarGeracaoAutomatica();
+        });
+    }
 
     initQuickFilters();
 
