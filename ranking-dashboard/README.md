@@ -12,6 +12,7 @@ node ranking-dashboard/server.cjs
 ## Acessar
 
 - Frontend principal: `http://localhost:3010`
+- Frontend administrativo: `http://localhost:3010/admin.html`
 - Frontend multi-cliente: `http://localhost:3010/multitenant.html`
 - Healthcheck: `http://localhost:3010/api/health`
 - API ranking: `POST http://localhost:3010/api/ranking-texto`
@@ -90,6 +91,8 @@ JWT payload:
 - `GET /api/dashboard/ranking?dataInicio=YYYY-MM-DD&dataFim=YYYY-MM-DD&grupoId=opcional`
 - `GET /api/dashboard/intel-events?limit=20&type=SOCIAL_SPIKE|TOKEN_DOMINANCE|SOCIAL_ONCHAIN_CONFIRM`
 - `POST /api/dashboard/intel-events` (webhook do bot, sem JWT; pode usar segredo)
+- `GET /api/dashboard/bot-control` (status de runtime do bot)
+- `POST /api/dashboard/bot-control` (patch runtime em tempo real)
 
 ### Intelligence Mode (bot -> dashboard)
 

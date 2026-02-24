@@ -9,6 +9,7 @@ const {
     getIntelOpsSummary,
     isIntelWebhookAuthorized
 } = require('../services/intelEventsService.js');
+const { notifyBotSync, fetchBotSyncStatus } = require('../services/botSyncService.js');
 
 function isPath(pathname, candidates) {
     return candidates.includes(pathname);
@@ -20,8 +21,9 @@ async function handleDashboardRoutes(req, res, parsedUrl, helpers) {
     const isRankingPath = isPath(pathname, ['/dashboard/ranking', '/api/dashboard/ranking']);
     const isInteracaoPath = isPath(pathname, ['/dashboard/interacoes', '/api/dashboard/interacoes']);
     const isIntelPath = isPath(pathname, ['/dashboard/intel-events', '/api/dashboard/intel-events']);
+    const isBotControlPath = isPath(pathname, ['/dashboard/bot-control', '/api/dashboard/bot-control']);
 
-    if (!isRankingPath && !isInteracaoPath && !isIntelPath) {
+    if (!isRankingPath && !isInteracaoPath && !isIntelPath && !isBotControlPath) {
         return false;
     }
 
@@ -52,6 +54,47 @@ async function handleDashboardRoutes(req, res, parsedUrl, helpers) {
     }
 
     if (!(await verificarToken(req, res, helpers))) {
+        return true;
+    }
+
+    if (isBotControlPath && req.method === 'GET') {
+        try {
+            const botStatus = await fetchBotSyncStatus();
+            helpers.sendJson(res, 200, {
+                ok: true,
+                botStatus
+            });
+        } catch (error) {
+            helpers.sendJson(res, error.statusCode || 500, {
+                ok: false,
+                error: error.message || 'Erro ao consultar status de controle do bot.'
+            });
+        }
+        return true;
+    }
+
+    if (isBotControlPath && req.method === 'POST') {
+        try {
+            const body = await helpers.readJsonBody(req);
+            const patch = body && body.patch && typeof body.patch === 'object' ? body.patch : {};
+            const botSync = await notifyBotSync({
+                type: 'RUNTIME_FEATURE_FLAGS_PATCH',
+                action: 'RUNTIME_PATCH_REQUESTED',
+                source: 'dashboard-control',
+                runtimeFeatureFlags: patch,
+                triggeredBy: req.auth && req.auth.email
+            });
+
+            helpers.sendJson(res, 200, {
+                ok: true,
+                botSync
+            });
+        } catch (error) {
+            helpers.sendJson(res, error.statusCode || 500, {
+                ok: false,
+                error: error.message || 'Erro ao aplicar controle em tempo real no bot.'
+            });
+        }
         return true;
     }
 

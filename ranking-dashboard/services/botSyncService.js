@@ -41,6 +41,19 @@ function buildEventPayload(eventPayload) {
     };
 }
 
+function buildSyncHeaders(config) {
+    const headers = {
+        'Content-Type': 'application/json'
+    };
+
+    if (config.secret) {
+        headers['X-Dashboard-Sync-Key'] = config.secret;
+        headers.Authorization = `Bearer ${config.secret}`;
+    }
+
+    return headers;
+}
+
 async function notifyBotSync(eventPayload, options = {}) {
     const config = getBotSyncConfig();
     if (!config.webhookUrl) {
@@ -54,14 +67,7 @@ async function notifyBotSync(eventPayload, options = {}) {
     }
 
     const payload = buildEventPayload(eventPayload);
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-
-    if (config.secret) {
-        headers['X-Dashboard-Sync-Key'] = config.secret;
-        headers.Authorization = `Bearer ${config.secret}`;
-    }
+    const headers = buildSyncHeaders(config);
 
     try {
         const response = await fetch(config.webhookUrl, {
@@ -114,7 +120,70 @@ async function notifyBotSync(eventPayload, options = {}) {
     }
 }
 
+async function fetchBotSyncStatus(options = {}) {
+    const config = getBotSyncConfig();
+    if (!config.webhookUrl) {
+        return { ok: false, skipped: true, reason: 'bot_sync_webhook_not_configured' };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+    if (typeof timeout.unref === 'function') {
+        timeout.unref();
+    }
+
+    try {
+        const response = await fetch(config.webhookUrl, {
+            method: 'GET',
+            headers: buildSyncHeaders(config),
+            signal: controller.signal
+        });
+
+        const rawBody = await response.text();
+        let body = null;
+        try {
+            body = rawBody ? JSON.parse(rawBody) : null;
+        } catch (_) {
+            body = rawBody || null;
+        }
+
+        if (!response.ok) {
+            const result = {
+                ok: false,
+                status: response.status,
+                error: typeof body === 'string' ? body : body && body.error,
+                body
+            };
+            if (options.throwOnError) {
+                const error = new Error(result.error || `Bot sync status falhou com status ${response.status}.`);
+                error.statusCode = response.status;
+                throw error;
+            }
+            return result;
+        }
+
+        return {
+            ok: true,
+            status: response.status,
+            body
+        };
+    } catch (error) {
+        const aborted = String(error && error.name) === 'AbortError';
+        const result = {
+            ok: false,
+            error: aborted ? `Timeout ao consultar status do bot (${config.timeoutMs}ms).` : (error && error.message) || 'Falha ao consultar status do bot.'
+        };
+        if (options.throwOnError) {
+            throw error;
+        }
+        return result;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
 module.exports = {
     getBotSyncConfig,
-    notifyBotSync
+    notifyBotSync,
+    fetchBotSyncStatus
 };

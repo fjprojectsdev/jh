@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>iMavy | Painel Administrativo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./admin.css" />
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="brand">
+                <p class="logo">iMAVY</p>
+                <p class="brand-sub">IMAVY DASHBOARD</p>
+            </div>
+
+            <nav class="menu" id="menuNav">
+                <button class="menu-item is-active" data-section="relatorios">Relatorios</button>
+                <button class="menu-item" data-section="grupos">Grupos</button>
+                <button class="menu-item" data-section="membros">Membros</button>
+                <button class="menu-item" data-section="comandos">Comandos</button>
+                <button class="menu-item" data-section="agendamentos">Agendamentos</button>
+                <button class="menu-item" data-section="automacoes">Automacoes & Moderacao</button>
+                <button class="menu-item" data-section="moderacao">Moderacao</button>
+                <button class="menu-item" data-section="incidentes">Incidentes</button>
+                <button class="menu-item" data-section="broadcast">Broadcast</button>
+                <button class="menu-item" data-section="tokens">Tokens</button>
+                <button class="menu-item" data-section="atividade">Atividade</button>
+                <button class="menu-item" data-section="configuracoes">Configuracoes</button>
+            </nav>
+
+            <div class="sidebar-foot">
+                <p>Bot de Alertas Multi-chain</p>
+                <small>Telegram + EVM + Solana</small>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="topbar">
+                <div>
+                    <p class="eyebrow">PAINEL ADMINISTRATIVO</p>
+                    <h1>Relatorios</h1>
+                    <p class="meta-line" id="metaLinha">Carregando dados...</p>
+                </div>
+                <div class="top-actions">
+                    <label>
+                        <span>PERIODO</span>
+                        <select id="periodoSelect">
+                            <option value="7">Ultimos 7 dias</option>
+                            <option value="30" selected>Ultimos 30 dias</option>
+                            <option value="90">Ultimos 90 dias</option>
+                        </select>
+                    </label>
+                    <button id="atualizarBtn" class="btn-primary" type="button">Atualizar</button>
+                    <button id="acoesBtn" class="btn-ghost" type="button">Acoes</button>
+                </div>
+            </header>
+
+            <section class="summary-cards">
+                <article class="summary-card">
+                    <p>Total grupos</p>
+                    <strong id="kpiTotalGrupos">0</strong>
+                </article>
+                <article class="summary-card">
+                    <p>Membros ativos</p>
+                    <strong id="kpiMembrosAtivos">0</strong>
+                </article>
+                <article class="summary-card">
+                    <p>Interacoes no periodo</p>
+                    <strong id="kpiInteracoesPeriodo">0</strong>
+                </article>
+                <article class="summary-card">
+                    <p>Eventos inteligentes (24h)</p>
+                    <strong id="kpiEventosIntel">0</strong>
+                </article>
+            </section>
+
+            <div class="sections">
+                <section class="panel section is-active" id="section-relatorios">
+                    <h2>Relatorios</h2>
+                    <div class="grid-two">
+                        <article class="mini-card">
+                            <p>Grupos ativos</p>
+                            <strong id="rpGruposAtivos">0</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Top participante</p>
+                            <strong id="rpTopNome">-</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Media por participante</p>
+                            <strong id="rpMediaParticipante">0</strong>
+                        </article>
+                        <article class="mini-card">
+                            <p>Incidentes monitorados</p>
+                            <strong id="rpIncidentes">0</strong>
+                        </article>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Participante</th>
+                                    <th>Total</th>
+                                    <th>Participacao</th>
+                                    <th>Crescimento</th>
+                                </tr>
+                            </thead>
+                            <tbody id="relatoriosTopBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="panel section" id="section-grupos">
+                    <h2>Grupos</h2>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Grupo ID</th>
+                                    <th>Nome</th>
+                                </tr>
+                            </thead>
+                            <tbody id="gruposBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="panel section" id="section-membros">
+                    <h2>Membros</h2>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Nome</th>
+                                    <th>Total</th>
+                                    <th>Participacao</th>
+                                </tr>
+                            </thead>
+                            <tbody id="membrosBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="panel section" id="section-comandos">
+                    <h2>Comandos</h2>
+                    <p class="helper">Controle em tempo real das funcoes principais do bot.</p>
+                    <div class="toggles" id="comandosToggles"></div>
+                    <button id="salvarComandosBtn" class="btn-primary" type="button">Salvar em tempo real</button>
+                    <p id="comandosStatus" class="helper"></p>
+                </section>
+
+                <section class="panel section" id="section-agendamentos">
+                    <h2>Agendamentos</h2>
+                    <ul class="list" id="agendamentosList"></ul>
+                </section>
+
+                <section class="panel section" id="section-automacoes">
+                    <h2>Automacoes & Moderacao</h2>
+                    <ul class="list" id="automacoesList"></ul>
+                </section>
+
+                <section class="panel section" id="section-moderacao">
+                    <h2>Moderacao</h2>
+                    <ul class="list" id="moderacaoList"></ul>
+                </section>
+
+                <section class="panel section" id="section-incidentes">
+                    <h2>Incidentes</h2>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Quando</th>
+                                    <th>Tipo</th>
+                                    <th>Token</th>
+                                    <th>Grupo</th>
+                                    <th>Resumo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="incidentesBody"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="panel section" id="section-broadcast">
+                    <h2>Broadcast</h2>
+                    <p class="helper">Modelo rapido para comunicados.</p>
+                    <textarea id="broadcastTemplate" rows="7">Aviso geral: monitoramento ativo, novos eventos e comandos atualizados no painel.</textarea>
+                </section>
+
+                <section class="panel section" id="section-tokens">
+                    <h2>Tokens</h2>
+                    <div id="tokensRows" class="bars"></div>
+                </section>
+
+                <section class="panel section" id="section-atividade">
+                    <h2>Atividade</h2>
+                    <ul id="atividadeList" class="timeline"></ul>
+                </section>
+
+                <section class="panel section" id="section-configuracoes">
+                    <h2>Configuracoes</h2>
+                    <ul class="list" id="configList"></ul>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="./admin.js"></script>
+</body>
+</html>
