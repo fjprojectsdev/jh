@@ -222,8 +222,8 @@ function renderGrupos() {
 
     tbody.innerHTML = state.grupos.map((grupo) => `
         <tr>
-            <td>${escapeHtml(grupo.id)}</td>
-            <td>${escapeHtml(grupo.nome || grupo.id)}</td>
+            <td>${escapeHtml(typeof grupo === 'string' ? grupo : grupo.id)}</td>
+            <td>${escapeHtml(typeof grupo === 'string' ? grupo : (grupo.nome || grupo.id))}</td>
         </tr>
     `).join('');
 }
@@ -443,8 +443,18 @@ async function carregarDados() {
     const range = getPeriodoRange(state.periodoDias);
 
     const requests = await Promise.allSettled([
-        fetchJsonComAuth('/api/grupos', { method: 'GET' }),
-        fetchJsonComAuth(`/api/dashboard/ranking?dataInicio=${encodeURIComponent(range.dataInicio)}&dataFim=${encodeURIComponent(range.dataFim)}`, { method: 'GET' }),
+        fetchJsonComAuth('/api/grupos-texto', { method: 'GET' }),
+        fetchJsonComAuth('/api/ranking-texto', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                dataInicio: range.dataInicio,
+                dataFim: range.dataFim,
+                usarSupabase: true
+            })
+        }),
         fetchJsonComAuth('/api/ops-resumo', { method: 'GET' }),
         fetchJsonComAuth('/api/dashboard/intel-events?limit=120', { method: 'GET' }),
         fetchJsonComAuth('/api/dashboard/bot-control', { method: 'GET' })

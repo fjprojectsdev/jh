@@ -49,6 +49,14 @@ const FORCED_RANKING_GROUPS = [
     'CriptoNoPix é Vellora (1)',
     'CriptoNoPix é Vellora (2)'
 ];
+function isSingleModeEnabled() {
+    const raw = String(process.env.IMAVY_DASHBOARD_SINGLE_MODE || '').trim().toLowerCase();
+    if (!raw) {
+        return true;
+    }
+
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
 
 function sendJson(res, statusCode, payload) {
     const body = JSON.stringify(payload);
@@ -160,12 +168,21 @@ function applyForcedRankingScope(groups) {
 }
 
 async function resolvePermittedGroupNamesFromAuth(auth) {
+    const fallbackGroups = uniqueGroupNames(FORCED_RANKING_GROUPS);
+
     if (!auth || !auth.clienteId) {
+        if (isSingleModeEnabled()) {
+            return fallbackGroups;
+        }
         return [];
     }
 
     const access = await resolveDashboardAccessForCliente(auth.clienteId);
-    return uniqueGroupNames(access.permittedGroupNames);
+    const permitted = uniqueGroupNames(access.permittedGroupNames);
+    if (permitted.length === 0 && isSingleModeEnabled()) {
+        return fallbackGroups;
+    }
+    return permitted;
 }
 
 function isGroupNamePermitted(grupoNome, permittedGroups) {
@@ -382,4 +399,5 @@ server.listen(PORT, HOST, () => {
         console.warn('Aviso: variaveis Supabase nao encontradas no processo do dashboard. O ranking pode nao carregar dados.');
     }
 });
+
 
