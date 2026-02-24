@@ -3,6 +3,8 @@ const AUTH_STORAGE_KEY = 'imavy_multitenant_token';
 const state = {
     tokenPayload: null,
     periodoDias: 30,
+    pollingIntervalMs: 10000,
+    pollingTimerId: null,
     grupos: [],
     ranking: null,
     intelEvents: [],
@@ -10,6 +12,8 @@ const state = {
     opsResumo: null,
     botStatus: null
 };
+let refreshInFlight = false;
+let refreshQueued = false;
 
 function byId(id) {
     return document.getElementById(id);
@@ -156,7 +160,8 @@ function renderMetaLine() {
         `Atualizado ${formatDateTime(Date.now())}`,
         `${rankingResumo.totalGeral || 0} interacoes no periodo`,
         `${intelSummary.totalIntel24h || 0} eventos intel (24h)`,
-        `janela ${range.dataInicio} ate ${range.dataFim}`
+        `janela ${range.dataInicio} ate ${range.dataFim}`,
+        `auto refresh ${Math.round((state.pollingIntervalMs || 10000) / 1000)}s`
     ].join(' | ');
     byId('metaLinha').textContent = text;
 }
@@ -458,6 +463,35 @@ async function carregarDados() {
     }
 }
 
+async function atualizarPainel(options = {}) {
+    const silent = options && options.silent === true;
+    if (refreshInFlight) {
+        refreshQueued = true;
+        return;
+    }
+
+    refreshInFlight = true;
+    const atualizarBtn = byId('atualizarBtn');
+    if (atualizarBtn && !silent) {
+        atualizarBtn.disabled = true;
+    }
+
+    try {
+        await carregarDados();
+        renderAll();
+    } finally {
+        refreshInFlight = false;
+        if (atualizarBtn) {
+            atualizarBtn.disabled = false;
+        }
+    }
+
+    if (refreshQueued) {
+        refreshQueued = false;
+        await atualizarPainel({ silent: true });
+    }
+}
+
 async function salvarComandosRuntime() {
     const patch = {};
     for (const input of document.querySelectorAll('[data-flag]')) {
@@ -483,8 +517,7 @@ async function salvarComandosRuntime() {
             ? 'Patch aplicado no bot com sucesso.'
             : 'Patch enviado, mas o bot nao confirmou aplicacao.';
 
-        await carregarDados();
-        renderAll();
+        await atualizarPainel({ silent: true });
     } catch (error) {
         statusEl.textContent = error.message || 'Erro ao aplicar patch.';
     }
@@ -493,13 +526,11 @@ async function salvarComandosRuntime() {
 function attachActions() {
     byId('periodoSelect').addEventListener('change', async (event) => {
         state.periodoDias = Number(event.target.value) || 30;
-        await carregarDados();
-        renderAll();
+        await atualizarPainel({ silent: true });
     });
 
     byId('atualizarBtn').addEventListener('click', async () => {
-        await carregarDados();
-        renderAll();
+        await atualizarPainel();
     });
 
     byId('acoesBtn').addEventListener('click', () => {
@@ -512,6 +543,23 @@ function attachActions() {
     byId('salvarComandosBtn').addEventListener('click', salvarComandosRuntime);
 }
 
+function stopPolling() {
+    if (state.pollingTimerId) {
+        clearInterval(state.pollingTimerId);
+        state.pollingTimerId = null;
+    }
+}
+
+function startPolling() {
+    stopPolling();
+    state.pollingTimerId = setInterval(() => {
+        if (document.hidden) {
+            return;
+        }
+        atualizarPainel({ silent: true }).catch(() => {});
+    }, Math.max(5000, Number(state.pollingIntervalMs) || 10000));
+}
+
 async function boot() {
     const payload = garantirSessao();
     if (!payload) return;
@@ -519,8 +567,9 @@ async function boot() {
 
     attachMenu();
     attachActions();
-    await carregarDados();
-    renderAll();
+    await atualizarPainel({ silent: true });
+    startPolling();
+    window.addEventListener('beforeunload', stopPolling);
 }
 
 boot().catch((error) => {
