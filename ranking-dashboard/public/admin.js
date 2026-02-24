@@ -13,6 +13,10 @@ const state = {
     opsResumo: null,
     botStatus: null
 };
+const FORCED_GROUPS_FALLBACK = [
+    'CriptoNoPix é Vellora (1)',
+    'CriptoNoPix é Vellora (2)'
+];
 let refreshInFlight = false;
 let refreshQueued = false;
 
@@ -463,6 +467,10 @@ async function carregarDados() {
     state.grupos = requests[0].status === 'fulfilled' ? (requests[0].value.grupos || []) : [];
     state.ranking = requests[1].status === 'fulfilled' ? requests[1].value : { resumo: { totalGeral: 0, totalParticipantes: 0, mediaPorParticipante: 0 }, rankingCompleto: [] };
     state.opsResumo = requests[2].status === 'fulfilled' ? requests[2].value : {};
+
+    if ((!Array.isArray(state.grupos) || state.grupos.length === 0) && Number(state.ranking && state.ranking.resumo && state.ranking.resumo.totalGeral || 0) > 0) {
+        state.grupos = FORCED_GROUPS_FALLBACK.slice();
+    }
 
     if (requests[3].status === 'fulfilled') {
         state.intelEvents = requests[3].value.events || [];
