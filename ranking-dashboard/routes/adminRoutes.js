@@ -10,6 +10,7 @@ const {
     normalizeGroupName,
     isDashboardDeveloperAdminEmail
 } = require('../services/dashboardAccessControlService.js');
+const { notifyBotSync } = require('../services/botSyncService.js');
 
 function isPath(pathname, candidates) {
     return candidates.includes(pathname);
@@ -230,6 +231,12 @@ async function handleAdminRoutes(req, res, parsedUrl, helpers) {
 
             const policy = upsertDashboardAccessPolicy(payload);
             const acesso = await resolveDashboardAccessForCliente(cliente.id);
+            const botSync = await notifyBotSync({
+                type: 'DASHBOARD_ACCESS_UPDATED',
+                action: 'POLICY_UPDATED',
+                clienteId: cliente.id,
+                triggeredBy: req.auth && req.auth.email
+            });
 
             helpers.sendJson(res, 200, {
                 ok: true,
@@ -237,7 +244,8 @@ async function handleAdminRoutes(req, res, parsedUrl, helpers) {
                 policy,
                 gruposDisponiveis: acesso.gruposDisponiveis,
                 gruposVisiveis: acesso.gruposVisiveis,
-                permittedGroupNames: acesso.permittedGroupNames
+                permittedGroupNames: acesso.permittedGroupNames,
+                botSync
             });
         } catch (error) {
             helpers.sendJson(res, error.statusCode || 500, {
@@ -261,6 +269,12 @@ async function handleAdminRoutes(req, res, parsedUrl, helpers) {
 
             clearDashboardAccessPolicy(cliente.id);
             const acesso = await resolveDashboardAccessForCliente(cliente.id);
+            const botSync = await notifyBotSync({
+                type: 'DASHBOARD_ACCESS_UPDATED',
+                action: 'POLICY_RESET',
+                clienteId: cliente.id,
+                triggeredBy: req.auth && req.auth.email
+            });
 
             helpers.sendJson(res, 200, {
                 ok: true,
@@ -268,7 +282,8 @@ async function handleAdminRoutes(req, res, parsedUrl, helpers) {
                 policy: acesso.policy,
                 gruposDisponiveis: acesso.gruposDisponiveis,
                 gruposVisiveis: acesso.gruposVisiveis,
-                permittedGroupNames: acesso.permittedGroupNames
+                permittedGroupNames: acesso.permittedGroupNames,
+                botSync
             });
         } catch (error) {
             helpers.sendJson(res, error.statusCode || 500, {

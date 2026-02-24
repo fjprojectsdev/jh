@@ -7,6 +7,7 @@ const {
 } = require('../services/grupoService.js');
 const { sanitizeText } = require('../services/supabaseTenantClient.js');
 const { resolveDashboardAccessForCliente } = require('../services/dashboardAccessControlService.js');
+const { notifyBotSync } = require('../services/botSyncService.js');
 
 function isPath(pathname, candidates) {
     return candidates.includes(pathname);
@@ -57,7 +58,16 @@ async function handleGrupoRoutes(req, res, parsedUrl, helpers) {
                 id: sanitizeText(body && body.id, 160),
                 nome: sanitizeText(body && body.nome, 180)
             });
-            helpers.sendJson(res, 201, { ok: true, grupo });
+            const botSync = await notifyBotSync({
+                type: 'GROUPS_UPDATED',
+                action: 'GROUP_CREATED',
+                clienteId: req.auth.clienteId,
+                grupoId: grupo.id,
+                grupoNome: grupo.nome,
+                triggeredBy: req.auth && req.auth.email
+            });
+
+            helpers.sendJson(res, 201, { ok: true, grupo, botSync });
         } catch (error) {
             helpers.sendJson(res, error.statusCode || 500, { ok: false, error: error.message || 'Erro ao criar grupo.' });
         }
@@ -79,7 +89,16 @@ async function handleGrupoRoutes(req, res, parsedUrl, helpers) {
             const grupo = await editarGrupoDoCliente(req.auth.clienteId, grupoId, {
                 nome: sanitizeText(body && body.nome, 180)
             });
-            helpers.sendJson(res, 200, { ok: true, grupo });
+            const botSync = await notifyBotSync({
+                type: 'GROUPS_UPDATED',
+                action: 'GROUP_UPDATED',
+                clienteId: req.auth.clienteId,
+                grupoId: grupo.id,
+                grupoNome: grupo.nome,
+                triggeredBy: req.auth && req.auth.email
+            });
+
+            helpers.sendJson(res, 200, { ok: true, grupo, botSync });
         } catch (error) {
             helpers.sendJson(res, error.statusCode || 500, { ok: false, error: error.message || 'Erro ao editar grupo.' });
         }
@@ -97,8 +116,18 @@ async function handleGrupoRoutes(req, res, parsedUrl, helpers) {
         }
 
         try {
+            const grupoAtual = req.grupo || null;
             await removerGrupoDoCliente(req.auth.clienteId, grupoId);
-            helpers.sendJson(res, 200, { ok: true });
+            const botSync = await notifyBotSync({
+                type: 'GROUPS_UPDATED',
+                action: 'GROUP_REMOVED',
+                clienteId: req.auth.clienteId,
+                grupoId,
+                grupoNome: grupoAtual && grupoAtual.nome,
+                triggeredBy: req.auth && req.auth.email
+            });
+
+            helpers.sendJson(res, 200, { ok: true, botSync });
         } catch (error) {
             helpers.sendJson(res, error.statusCode || 500, { ok: false, error: error.message || 'Erro ao remover grupo.' });
         }

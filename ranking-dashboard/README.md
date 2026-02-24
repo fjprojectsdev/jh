@@ -102,6 +102,20 @@ No dashboard (`.env`/ambiente):
 
 - `INTEL_WEBHOOK_SECRET=seu-segredo-forte` (mesmo valor do bot)
 
+### Sync Bidirecional (dashboard -> bot)
+
+No bot (`.env`):
+
+- `DASHBOARD_SYNC_SECRET=seu-segredo-forte`
+
+No dashboard (`.env`/ambiente):
+
+- `BOT_SYNC_WEBHOOK_URL=http://SEU_BOT:3000/dashboard-sync`
+- `DASHBOARD_SYNC_SECRET=seu-segredo-forte` (mesmo valor do bot)
+- `BOT_SYNC_TIMEOUT_MS=5000` (opcional)
+
+Com isso, alteracoes em grupos e politicas de acesso no dashboard disparam webhook imediato para o bot atualizar cache/config em tempo real.
+
 ### Ingestao do bot para multi-cliente
 
 - O bot segue escrevendo em `interacoes_texto` (realtime global) sem impacto.
