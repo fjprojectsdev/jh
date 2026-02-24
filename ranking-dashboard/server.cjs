@@ -14,6 +14,7 @@ const {
     fetchGroupsFromSupabase
 } = require('./realtimeSupabaseSource.cjs');
 const { getOpsResumo } = require('./services/opsResumoService.cjs');
+const { getAgendamentosStatus } = require('./services/agendamentosStatusService.cjs');
 const { handleAuthRoutes } = require('./routes/authRoutes.js');
 const { handleGrupoRoutes } = require('./routes/grupoRoutes.js');
 const { handleAdminRoutes } = require('./routes/adminRoutes.js');
@@ -339,6 +340,24 @@ async function handleApi(req, res, parsedUrl) {
             sendJson(res, 500, {
                 ok: false,
                 error: error.message || 'Erro ao carregar resumo operacional.'
+            });
+            return;
+        }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/agendamentos-status') {
+        if (!(await verificarToken(req, res, authHelpers))) {
+            return;
+        }
+
+        try {
+            const payload = getAgendamentosStatus();
+            sendJson(res, 200, payload);
+            return;
+        } catch (error) {
+            sendJson(res, 500, {
+                ok: false,
+                error: error.message || 'Erro ao carregar status de agendamentos.'
             });
             return;
         }

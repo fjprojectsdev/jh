@@ -3,6 +3,7 @@ const LEGACY_AUTH_STORAGE_KEY = 'imavy_multitenant_token';
 
 const state = {
     tokenPayload: null,
+    activeSection: 'relatorios',
     periodoDias: 30,
     pollingIntervalMs: 10000,
     pollingTimerId: null,
@@ -11,6 +12,7 @@ const state = {
     intelEvents: [],
     intelSummary: null,
     opsResumo: null,
+    agendamentosStatus: null,
     botStatus: null
 };
 const FORCED_GROUPS_FALLBACK = [
@@ -176,6 +178,15 @@ function renderMetaLine() {
     byId('metaLinha').textContent = text;
 }
 
+function updateSummaryVisibility() {
+    const cards = document.querySelector('.summary-cards');
+    if (!cards) {
+        return;
+    }
+
+    cards.style.display = state.activeSection === 'relatorios' ? '' : 'none';
+}
+
 function renderSummaryCards() {
     const rankingResumo = state.ranking && state.ranking.resumo ? state.ranking.resumo : {};
     const intelSummary = state.intelSummary || {};
@@ -282,12 +293,38 @@ function renderComandos() {
 
 function renderAgendamentos() {
     const ops = state.opsResumo || {};
+    const ag = state.agendamentosStatus || {};
+    const summary = ag.summary || {};
     const list = byId('agendamentosList');
     const items = [
-        `Lembretes ativos: ${Number(ops.lembretesAtivos || 0)}`,
+        `Lembretes ativos: ${Number(summary.totalLembretes || ops.lembretesAtivos || 0)}`,
+        `Lembretes fixos (grupos): ${Number(summary.totalDailyGroups || 0)}`,
+        `Lembretes por intervalo (grupos): ${Number(summary.totalIntervalGroups || 0)}`,
+        `Mensagens agendadas pendentes: ${Number(summary.totalMensagensAgendadas || 0)}`,
         `Comandos aceitos (24h): ${Number(ops.comandosAceitos24h || 0)}`,
-        `Ultima atualizacao: ${formatDateTime(ops.atualizacao)}`
+        `Ultima atualizacao: ${formatDateTime((ag.updatedAt || ops.atualizacao))}`
     ];
+
+    const lembretes = Array.isArray(ag.lembretes) ? ag.lembretes.slice(0, 6) : [];
+    for (const lembrete of lembretes) {
+        if (lembrete.type === 'daily') {
+            const horarios = Array.isArray(lembrete.horarios) && lembrete.horarios.length
+                ? lembrete.horarios.join(', ')
+                : '-';
+            items.push(`Fixo | ${lembrete.groupId || '-'} | horarios: ${horarios}`);
+            continue;
+        }
+
+        if (lembrete.type === 'interval') {
+            items.push(`Intervalo | ${lembrete.groupId || '-'} | ${Number(lembrete.intervalHours || 0)}h`);
+        }
+    }
+
+    const agendados = Array.isArray(ag.agendados) ? ag.agendados.slice(0, 3) : [];
+    for (const item of agendados) {
+        items.push(`Agendado | ${item.groupId || '-'} | ${item.time || formatDateTime(item.timestamp)}`);
+    }
+
     list.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join('');
 }
 
@@ -387,6 +424,7 @@ function renderConfiguracoes() {
 }
 
 function renderAll() {
+    updateSummaryVisibility();
     renderMetaLine();
     renderSummaryCards();
     renderRelatoriosTabela();
@@ -410,6 +448,7 @@ function attachMenu() {
 
         const section = String(btn.getAttribute('data-section') || '').trim();
         if (!section) return;
+        state.activeSection = section;
 
         for (const node of nav.querySelectorAll('.menu-item')) {
             node.classList.toggle('is-active', node === btn);
@@ -440,6 +479,7 @@ function attachMenu() {
         };
         const title = titleMap[section] || 'Painel';
         document.querySelector('h1').textContent = title;
+        updateSummaryVisibility();
     });
 }
 
@@ -460,6 +500,7 @@ async function carregarDados() {
             })
         }),
         fetchJsonComAuth('/api/ops-resumo', { method: 'GET' }),
+        fetchJsonComAuth('/api/agendamentos-status', { method: 'GET' }),
         fetchJsonComAuth('/api/dashboard/intel-events?limit=120', { method: 'GET' }),
         fetchJsonComAuth('/api/dashboard/bot-control', { method: 'GET' })
     ]);
@@ -473,15 +514,21 @@ async function carregarDados() {
     }
 
     if (requests[3].status === 'fulfilled') {
-        state.intelEvents = requests[3].value.events || [];
-        state.intelSummary = requests[3].value.summary || {};
+        state.agendamentosStatus = requests[3].value || null;
+    } else {
+        state.agendamentosStatus = null;
+    }
+
+    if (requests[4].status === 'fulfilled') {
+        state.intelEvents = requests[4].value.events || [];
+        state.intelSummary = requests[4].value.summary || {};
     } else {
         state.intelEvents = [];
         state.intelSummary = {};
     }
 
-    if (requests[4].status === 'fulfilled') {
-        const status = requests[4].value.botStatus || {};
+    if (requests[5].status === 'fulfilled') {
+        const status = requests[5].value.botStatus || {};
         state.botStatus = status && status.body ? { ok: status.ok, ...status.body, statusCode: status.status } : status;
     } else {
         state.botStatus = { ok: false, skipped: true, reason: 'unavailable' };
