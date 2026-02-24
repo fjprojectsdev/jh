@@ -27,7 +27,10 @@ function extractGrupoId(pathname) {
 async function handleGrupoRoutes(req, res, parsedUrl, helpers) {
     const pathname = parsedUrl.pathname;
 
-    if (!pathname.startsWith('/grupos') && !pathname.startsWith('/api/grupos')) {
+    const isCollectionPath = isPath(pathname, ['/grupos', '/api/grupos']);
+    const isItemPath = /^\/grupos\/[^/]+$/.test(pathname) || /^\/api\/grupos\/[^/]+$/.test(pathname);
+
+    if (!isCollectionPath && !isItemPath) {
         return false;
     }
 
@@ -35,7 +38,7 @@ async function handleGrupoRoutes(req, res, parsedUrl, helpers) {
         return true;
     }
 
-    if (req.method === 'GET' && isPath(pathname, ['/grupos', '/api/grupos'])) {
+    if (req.method === 'GET' && isCollectionPath) {
         try {
             const acesso = await resolveDashboardAccessForCliente(req.auth.clienteId);
             const plano = await validarLimitePlano(req.auth.clienteId);
@@ -51,7 +54,7 @@ async function handleGrupoRoutes(req, res, parsedUrl, helpers) {
         return true;
     }
 
-    if (req.method === 'POST' && isPath(pathname, ['/grupos', '/api/grupos'])) {
+    if (req.method === 'POST' && isCollectionPath) {
         try {
             const body = await helpers.readJsonBody(req);
             const grupo = await criarGrupoParaCliente(req.auth.clienteId, {
