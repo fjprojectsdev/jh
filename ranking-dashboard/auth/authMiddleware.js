@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { findGrupoById } = require('../models/grupo.js');
+const { listClientes } = require('../models/cliente.js');
 const { sanitizeEmail } = require('../services/supabaseTenantClient.js');
 const { isDashboardDeveloperAdminEmail, resolveDashboardAccessForCliente } = require('../services/dashboardAccessControlService.js');
 
@@ -42,9 +43,78 @@ function parseBearerToken(req) {
     return parts[1].trim();
 }
 
+function isSingleModeEnabled() {
+    const raw = String(process.env.IMAVY_DASHBOARD_SINGLE_MODE || '').trim().toLowerCase();
+    if (!raw) {
+        return true;
+    }
+
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+}
+
+let singleModeAuthCache = {
+    expiresAt: 0,
+    payload: null
+};
+
+async function resolveSingleModeAuth() {
+    const now = Date.now();
+    if (singleModeAuthCache.payload && singleModeAuthCache.expiresAt > now) {
+        return singleModeAuthCache.payload;
+    }
+
+    let clienteId = String(process.env.IMAVY_DASHBOARD_DEFAULT_CLIENTE_ID || '').trim();
+    if (!clienteId) {
+        try {
+            const clientes = await listClientes(1);
+            const first = Array.isArray(clientes) && clientes.length > 0 ? clientes[0] : null;
+            clienteId = first && first.id ? String(first.id).trim() : '';
+        } catch (_) {
+            clienteId = '';
+        }
+    }
+
+    if (!clienteId) {
+        return null;
+    }
+
+    const payload = {
+        clienteId,
+        plano: String(process.env.IMAVY_DASHBOARD_SINGLE_PLAN || 'enterprise').trim() || 'enterprise',
+        exp: null,
+        email: sanitizeEmail(process.env.IMAVY_DASHBOARD_SINGLE_EMAIL || 'dashboard@local.imavy'),
+        dashboardRole: 'developer_admin',
+        isDashboardAdmin: true,
+        singleMode: true
+    };
+
+    singleModeAuthCache = {
+        payload,
+        expiresAt: now + 60 * 1000
+    };
+
+    return payload;
+}
+
 async function verificarToken(req, res, helpers) {
     const token = parseBearerToken(req);
+    const singleMode = isSingleModeEnabled();
+
     if (!token) {
+        if (singleMode) {
+            const auth = await resolveSingleModeAuth();
+            if (!auth) {
+                helpers.sendJson(res, 503, {
+                    ok: false,
+                    error: 'Modo unico ativo, mas nenhum cliente padrao foi encontrado.'
+                });
+                return false;
+            }
+
+            req.auth = auth;
+            return true;
+        }
+
         helpers.sendJson(res, 401, { ok: false, error: 'Token ausente.' });
         return false;
     }
@@ -67,6 +137,20 @@ async function verificarToken(req, res, helpers) {
 
         return true;
     } catch (_) {
+        if (singleMode) {
+            const auth = await resolveSingleModeAuth();
+            if (!auth) {
+                helpers.sendJson(res, 503, {
+                    ok: false,
+                    error: 'Modo unico ativo, mas nenhum cliente padrao foi encontrado.'
+                });
+                return false;
+            }
+
+            req.auth = auth;
+            return true;
+        }
+
         helpers.sendJson(res, 401, { ok: false, error: 'Token invalido ou expirado.' });
         return false;
     }

@@ -13,7 +13,8 @@ const state = {
 };
 
 const realtimeConfig = window.ImavyRealtimeConfig || {};
-const AUTH_STORAGE_KEY = 'imavy_multitenant_token';
+const AUTH_STORAGE_KEY = 'imavy_dashboard_token';
+const LEGACY_AUTH_STORAGE_KEY = 'imavy_multitenant_token';
 
 const SAMPLE_DATA = [
     { nome: 'Joao', data: '2026-02-01', grupo: 'Vendas' },
@@ -114,7 +115,7 @@ function formatParticipantLabel(participante) {
 
 function getAuthToken() {
     try {
-        return localStorage.getItem(AUTH_STORAGE_KEY) || '';
+        return localStorage.getItem(AUTH_STORAGE_KEY) || localStorage.getItem(LEGACY_AUTH_STORAGE_KEY) || '';
     } catch (_) {
         return '';
     }
@@ -164,19 +165,19 @@ function isTokenAtivo(token) {
     return (payload.exp * 1000) > Date.now();
 }
 
-function redirectToLoginMultiCliente() {
-    const next = encodeURIComponent(`${window.location.pathname}${window.location.search || ''}`);
-    window.location.replace(`./multitenant.html?next=${next}`);
-}
-
 function garantirSessaoAutenticada() {
     const token = getAuthToken();
-    if (!isTokenAtivo(token)) {
-        redirectToLoginMultiCliente();
-        return null;
+    if (isTokenAtivo(token)) {
+        return decodeJwtPayload(token);
     }
 
-    return decodeJwtPayload(token);
+    return {
+        plano: 'single',
+        clienteId: 'default',
+        dashboardRole: 'developer_admin',
+        isDashboardAdmin: true,
+        singleMode: true
+    };
 }
 
 function preencherSessaoInfo(payload) {
@@ -185,16 +186,18 @@ function preencherSessaoInfo(payload) {
         return;
     }
 
-    const plano = payload && payload.plano ? payload.plano : 'desconhecido';
-    el.textContent = `Sessao autenticada (${plano}).`;
+    const plano = payload && payload.plano ? payload.plano : 'single';
+    const mode = payload && payload.singleMode ? 'Modo unico' : 'Sessao autenticada';
+    el.textContent = `${mode} (${plano}).`;
 }
 
 function logoutPrincipal() {
     try {
         localStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem(LEGACY_AUTH_STORAGE_KEY);
     } catch (_) {}
 
-    window.location.replace('./multitenant.html');
+    window.location.reload();
 }
 
 function byId(id) {
