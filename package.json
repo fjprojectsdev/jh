@@ -8,7 +8,7 @@
     "health": "node health-check.js",
     "test-preview": "node scripts/test_preview.js",
     "test-adreply": "node scripts/test_adreply.js",
-    "test-contracts": "node --check scripts/test-contracts.js"
+    "test-contracts": "node scripts/test-contracts.js"
   },
   "dependencies": {
     "@huggingface/inference": "^4.13.2",

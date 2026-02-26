@@ -10,6 +10,10 @@ function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
 }
 
+async function toPngBuffer(image) {
+  return image.getBuffer('image/png');
+}
+
 export async function renderSparklinePng(points, options = {}) {
   const {
     width = 700,
@@ -23,7 +27,7 @@ export async function renderSparklinePng(points, options = {}) {
 
   // Sem pontos suficientes, devolve uma imagem "vazia" com nota
   if (!Array.isArray(points) || points.length < 2) {
-    return await img.getBufferAsync(Jimp.MIME_PNG);
+    return await toPngBuffer(img);
   }
 
   // Extrair preços válidos
@@ -32,7 +36,7 @@ export async function renderSparklinePng(points, options = {}) {
     .filter(n => Number.isFinite(n));
 
   if (prices.length < 2) {
-    return await img.getBufferAsync(Jimp.MIME_PNG);
+    return await toPngBuffer(img);
   }
 
   let min = Math.min(...prices);
@@ -88,5 +92,5 @@ export async function renderSparklinePng(points, options = {}) {
     prevY = y;
   }
 
-  return await img.getBufferAsync(Jimp.MIME_PNG);
+  return await toPngBuffer(img);
 }

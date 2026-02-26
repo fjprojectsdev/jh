@@ -1,14 +1,17 @@
-import Jimp from 'jimp';
+import { createRequire } from 'module';
 
-console.log('Jimp Default importado:', Jimp);
+const require = createRequire(import.meta.url);
+const { Jimp } = require('jimp');
 
-try {
-    // Teste básico de criação (mockado ou real se possível sem IO)
-    // Jimp v1 geralmente usa callbacks ou promises, o construtor new Jimp(w, h, cb) funciona
-    new Jimp(100, 100, (err, image) => {
-        if (err) console.error('Erro no callback:', err);
-        else console.log('Imagem criada com sucesso via Default Export');
-    });
-} catch (error) {
-    console.error('Erro ao instanciar Jimp Default:', error);
+async function test() {
+    try {
+        const image = new Jimp({ width: 100, height: 100, color: 0xffffffff });
+        const buffer = await image.getBuffer('image/png');
+        console.log('✅ Jimp inicializado e buffer PNG gerado:', buffer.length);
+    } catch (error) {
+        console.error('❌ Erro ao testar Jimp:', error);
+        process.exitCode = 1;
+    }
 }
+
+await test();
