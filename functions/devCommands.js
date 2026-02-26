@@ -38,6 +38,7 @@ function loadAdminIds() {
 
 // Modo desenvolvedor ativo por usuário
 const devModeActive = new Map();
+const devModeForcedOff = new Set();
 const conversationHistory = new Map();
 
 export function isDev(userId) {
@@ -64,18 +65,22 @@ export function isDev(userId) {
 }
 
 export function isDevModeActive(userId) {
-    if (GLOBAL_DEV_MODE && isDev(userId)) {
+    if (GLOBAL_DEV_MODE && isDev(userId) && !devModeForcedOff.has(userId)) {
         return true;
     }
     return devModeActive.get(userId) === true;
 }
 
 export function activateDevMode(userId) {
+    devModeForcedOff.delete(userId);
     devModeActive.set(userId, true);
     conversationHistory.set(userId, []);
 }
 
 export function deactivateDevMode(userId) {
+    if (GLOBAL_DEV_MODE) {
+        devModeForcedOff.add(userId);
+    }
     devModeActive.delete(userId);
     conversationHistory.delete(userId);
 }
@@ -154,17 +159,22 @@ export async function handleDevCommand(sock, message, text) {
     } else if (subCmd === 'status') {
         const uptime = process.uptime();
         const memory = process.memoryUsage();
-        const status = `📊 STATUS DO BOT\n\n⏱️ Uptime: ${Math.floor(uptime / 60)}min\n💾 Memória: ${Math.floor(memory.heapUsed / 1024 / 1024)}MB\n🔢 PID: ${process.pid}\n🛠️ Dev global: ${GLOBAL_DEV_MODE ? 'ATIVO' : 'DESATIVADO'}`;
+        const status = `STATUS DO BOT\n\nUptime: ${Math.floor(uptime / 60)}min\nMemoria: ${Math.floor(memory.heapUsed / 1024 / 1024)}MB\nPID: ${process.pid}\nDev global: ${GLOBAL_DEV_MODE ? 'ATIVO' : 'DESATIVADO'}\nDev atual: ${isDevModeActive(senderId) ? 'ATIVO' : 'DESATIVADO'}`;
         await sendSafeMessage(sock, chatId, { text: status });
     } else if (subCmd === 'backup') {
-        await sendSafeMessage(sock, chatId, { text: '💾 Criando backup...' });
-        // Implementar backup manual
-        await sendSafeMessage(sock, chatId, { text: '✅ Backup criado!' });
+        await sendSafeMessage(sock, chatId, { text: 'Criando backup...' });
+        await sendSafeMessage(sock, chatId, { text: 'Backup criado!' });
+    } else if (subCmd === 'on') {
+        activateDevMode(senderId);
+        await sendSafeMessage(sock, chatId, { text: 'Modo desenvolvedor ativado para este chat.' });
     } else if (subCmd === 'off') {
         deactivateDevMode(senderId);
-        await sendSafeMessage(sock, chatId, { text: '✅ Modo desenvolvedor desativado.' });
+        const offMsg = GLOBAL_DEV_MODE
+            ? 'Modo desenvolvedor desativado para voce neste chat (override local aplicado).'
+            : 'Modo desenvolvedor desativado.';
+        await sendSafeMessage(sock, chatId, { text: offMsg });
     } else {
-        const help = `🛠️ COMANDOS DEV\n\n/dev - Ativar modo IA (privado)\n/dev off - Desativar modo\n/dev eval [código] - Executa JS\n/dev restart - Reinicia bot\n/dev logs - Últimos logs\n/dev status - Status do sistema\n/dev backup - Backup manual`;
+        const help = `COMANDOS DEV\n\n/dev - Ativar modo IA (privado)\n/dev on - Ativar modo neste chat\n/dev off - Desativar modo neste chat\n/dev eval [codigo] - Executa JS\n/dev restart - Reinicia bot\n/dev logs - Ultimos logs\n/dev status - Status do sistema\n/dev backup - Backup manual`;
         await sendSafeMessage(sock, chatId, { text: help });
     }
 }
