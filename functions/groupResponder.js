@@ -30,6 +30,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEMBRETES_FILE = path.join(__dirname, '..', 'lembretes.json');
+const BOT_LOG_FILE = path.join(__dirname, '..', 'bot.log');
 const BOT_TRIGGER = 'bot';
 
 // Configuração dos tokens do projeto (Centralizada)
@@ -232,6 +233,27 @@ function buildCryptoText({ label, chain, pairAddress, snap }) {
 🕒 24h: ${changeTxt}
 💧 Liquidez: ${formatUsdCompact(snap.liquidityUsd)}
 🔗 ${link}`;
+}
+
+function readRecentLogs(lines = 20) {
+    if (!fs.existsSync(BOT_LOG_FILE)) {
+        return { ok: false, message: 'Arquivo bot.log não encontrado.' };
+    }
+
+    const safeLines = Math.min(80, Math.max(5, Number(lines) || 20));
+    const allLines = fs.readFileSync(BOT_LOG_FILE, 'utf8').split(/\r?\n/);
+    const recentLines = allLines.slice(-safeLines).join('\n').trim();
+
+    if (!recentLines) {
+        return { ok: false, message: 'bot.log está vazio.' };
+    }
+
+    const maxChars = 3400;
+    const clipped = recentLines.length > maxChars
+        ? `...${recentLines.slice(-(maxChars - 3))}`
+        : recentLines;
+
+    return { ok: true, text: clipped, safeLines };
 }
 
 let lembretesAtivos = {};
@@ -540,6 +562,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 * 🔓 /abrir - Abre o grupo
 * 🚫 /banir @membro - Bane membro
 * 📢 /aviso [mensagem] - Menciona todos
+* 📋 /logs [linhas] - Mostra os últimos logs do bot
 * 📢 /lembrete + mensagem 1h 24h - Lembrete automático
 * 🛑 /stoplembrete - Para lembrete
 * ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo diário
@@ -1111,7 +1134,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -1226,6 +1249,19 @@ Desejamos a todos um excelente dia.`;
 
 📅 Data: ${data}
 ⏰ Hora: ${hora}`
+                });
+            } else if (normalizedText.startsWith('/logs')) {
+                const linesRaw = text.replace(/^\/logs/i, '').trim();
+                const requestedLines = Number.parseInt(linesRaw, 10);
+                const logs = readRecentLogs(Number.isFinite(requestedLines) ? requestedLines : 20);
+
+                if (!logs.ok) {
+                    await sendSafeMessage(sock, groupId, { text: `❌ ${logs.message}` });
+                    return;
+                }
+
+                await sendSafeMessage(sock, groupId, {
+                    text: `📋 *Últimos logs (${logs.safeLines} linhas)*\n\n\`\`\`\n${logs.text}\n\`\`\``
                 });
             } else if (normalizedText.startsWith('/fixar')) {
                 const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
@@ -1820,6 +1856,7 @@ _iMavyAgent | Sistema de Lembretes_`;
 * 🔓 /abrir - Abre o grupo
 * 🚫 /banir @membro - Bane membro
 * 📢 /aviso [mensagem] - Menciona todos
+* 📋 /logs [linhas] - Mostra os últimos logs do bot
 * 📢 /lembrete + mensagem 1h 24h - Lembrete automático
 * 🛑 /stoplembrete - Para lembrete
 * ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo diário

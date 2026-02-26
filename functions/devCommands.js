@@ -4,8 +4,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import Groq from 'groq-sdk';
 import { sendSafeMessage } from './messageHandler.js';
+import { getNumberFromJid } from './utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const GLOBAL_DEV_MODE = String(process.env.IMAVY_DEV_MODE || 'false').toLowerCase() === 'true';
 
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY || 'your-groq-api-key-here'
@@ -13,6 +15,26 @@ const groq = new Groq({
 
 // IDs dos desenvolvedores autorizados
 const DEV_IDS = (process.env.DEV_IDS || '').split(',').filter(Boolean);
+function loadAdminIds() {
+    const fromEnv = (process.env.AUTHORIZED_IDS || '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
+
+    const adminsPath = path.join(__dirname, '..', 'admins.json');
+    let fromFile = [];
+
+    try {
+        if (fs.existsSync(adminsPath)) {
+            const parsed = JSON.parse(fs.readFileSync(adminsPath, 'utf8'));
+            fromFile = Array.isArray(parsed?.admins) ? parsed.admins : [];
+        }
+    } catch (error) {
+        console.warn('Falha ao ler admins.json para permissao DEV:', error.message || String(error));
+    }
+
+    return [...fromEnv, ...fromFile];
+}
 
 // Modo desenvolvedor ativo por usuário
 const devModeActive = new Map();
@@ -20,15 +42,31 @@ const conversationHistory = new Map();
 
 export function isDev(userId) {
     const cleanId = userId.replace('@s.whatsapp.net', '').replace('@lid', '');
-    console.log('🔍 DEBUG DEV - userId:', userId);
-    console.log('🔍 DEBUG DEV - cleanId:', cleanId);
-    console.log('🔍 DEBUG DEV - DEV_IDS:', DEV_IDS);
-    const isAuthorized = DEV_IDS.some(devId => cleanId.includes(devId.trim()));
-    console.log('🔍 DEBUG DEV - isAuthorized:', isAuthorized);
+    const userNumber = getNumberFromJid(userId);
+    const adminIds = loadAdminIds();
+    console.log('DEBUG DEV - userId:', userId);
+    console.log('DEBUG DEV - cleanId:', cleanId);
+    console.log('DEBUG DEV - DEV_IDS:', DEV_IDS);
+    const isExplicitDev = DEV_IDS.some((devId) => {
+        const trimmed = devId.trim();
+        if (!trimmed) return false;
+        if (cleanId.includes(trimmed)) return true;
+        return userNumber && userNumber === getNumberFromJid(trimmed);
+    });
+    const isAdmin = adminIds.some((adminId) => {
+        if (userId === adminId) return true;
+        const adminNumber = getNumberFromJid(adminId);
+        return Boolean(userNumber) && Boolean(adminNumber) && userNumber === adminNumber;
+    });
+    const isAuthorized = isExplicitDev || isAdmin;
+    console.log('DEBUG DEV - isAuthorized:', isAuthorized);
     return isAuthorized;
 }
 
 export function isDevModeActive(userId) {
+    if (GLOBAL_DEV_MODE && isDev(userId)) {
+        return true;
+    }
     return devModeActive.get(userId) === true;
 }
 
@@ -116,7 +154,7 @@ export async function handleDevCommand(sock, message, text) {
     } else if (subCmd === 'status') {
         const uptime = process.uptime();
         const memory = process.memoryUsage();
-        const status = `📊 STATUS DO BOT\n\n⏱️ Uptime: ${Math.floor(uptime / 60)}min\n💾 Memória: ${Math.floor(memory.heapUsed / 1024 / 1024)}MB\n🔢 PID: ${process.pid}`;
+        const status = `📊 STATUS DO BOT\n\n⏱️ Uptime: ${Math.floor(uptime / 60)}min\n💾 Memória: ${Math.floor(memory.heapUsed / 1024 / 1024)}MB\n🔢 PID: ${process.pid}\n🛠️ Dev global: ${GLOBAL_DEV_MODE ? 'ATIVO' : 'DESATIVADO'}`;
         await sendSafeMessage(sock, chatId, { text: status });
     } else if (subCmd === 'backup') {
         await sendSafeMessage(sock, chatId, { text: '💾 Criando backup...' });
