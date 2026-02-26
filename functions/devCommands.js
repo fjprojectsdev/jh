@@ -313,6 +313,7 @@ export async function handleNome(sock, message, text) {
 
             const filePath = path.join(customDir, fileName);
             fs.writeFileSync(filePath, result.code);
+            ensureCommandHandlerExport(filePath, result.commandName);
 
             // Auto-integrar ao groupResponder
             await integrateCommand(result.commandName, result.commandTrigger, result.isPublic);
@@ -371,4 +372,25 @@ async function integrateCommand(commandName, trigger, isPublic) {
 
 function capitalize(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+function ensureCommandHandlerExport(filePath, commandName) {
+    const expectedHandler = `handle${capitalize(commandName)}`;
+    let code = fs.readFileSync(filePath, 'utf8');
+
+    if (new RegExp(`export\\s+(?:async\\s+)?function\\s+${expectedHandler}\\b`).test(code)) {
+        return;
+    }
+    if (new RegExp(`export\\s+const\\s+${expectedHandler}\\b`).test(code)) {
+        return;
+    }
+
+    const match = code.match(/export\s+(?:async\s+)?function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if (!match || !match[1]) {
+        return;
+    }
+
+    const sourceHandler = match[1];
+    code += `\n\nexport async function ${expectedHandler}(sock, message, text) {\n    return ${sourceHandler}(sock, message, text);\n}\n`;
+    fs.writeFileSync(filePath, code, 'utf8');
 }
