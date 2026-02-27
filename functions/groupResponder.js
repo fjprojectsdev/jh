@@ -35,6 +35,7 @@ const BOT_LOG_FILE = path.join(__dirname, '..', 'bot.log');
 const LAMINAS_FILE = path.join(__dirname, '..', 'laminas.json');
 const LAMINA_SCHEDULES_FILE = path.join(__dirname, '..', 'lamina_schedules.json');
 const LAMINA_CONVERSATIONS_FILE = path.join(__dirname, '..', 'lamina_conversations.json');
+const PRIVATE_WIZARDS_FILE = path.join(__dirname, '..', 'private_wizards_state.json');
 const BOT_TRIGGER = 'bot';
 const addGroupWizardState = new Map();
 const laminaWizardState = new Map();
@@ -199,6 +200,7 @@ function getWizard(senderId) {
 
 function clearWizard(senderId) {
     addGroupWizardState.delete(senderId);
+    persistPrivateWizardsState();
 }
 
 function getLaminaWizard(senderId) {
@@ -207,6 +209,7 @@ function getLaminaWizard(senderId) {
 
 function clearLaminaWizard(senderId) {
     laminaWizardState.delete(senderId);
+    persistPrivateWizardsState();
 }
 
 function getAgendarLaminaWizard(senderId) {
@@ -215,6 +218,85 @@ function getAgendarLaminaWizard(senderId) {
 
 function clearAgendarLaminaWizard(senderId) {
     agendarLaminaWizardState.delete(senderId);
+    persistPrivateWizardsState();
+}
+
+function toSerializableLaminaState(state = {}) {
+    const copy = { ...state };
+    if (Buffer.isBuffer(copy.imageBuffer)) {
+        copy.imageBase64 = copy.imageBuffer.toString('base64');
+        delete copy.imageBuffer;
+    } else if (!copy.imageBuffer) {
+        delete copy.imageBuffer;
+    }
+    return copy;
+}
+
+function fromSerializableLaminaState(state = {}) {
+    const copy = { ...state };
+    if (copy.imageBase64) {
+        try {
+            copy.imageBuffer = Buffer.from(copy.imageBase64, 'base64');
+        } catch {
+            copy.imageBuffer = null;
+        }
+    }
+    delete copy.imageBase64;
+    if (!copy.imageBuffer) copy.imageBuffer = null;
+    return copy;
+}
+
+function persistPrivateWizardsState() {
+    try {
+        const payload = {
+            updatedAt: new Date().toISOString(),
+            addGroup: Array.from(addGroupWizardState.entries()),
+            lamina: Array.from(laminaWizardState.entries()).map(([senderId, state]) => [senderId, toSerializableLaminaState(state)]),
+            agendarLamina: Array.from(agendarLaminaWizardState.entries())
+        };
+        fs.writeFileSync(PRIVATE_WIZARDS_FILE, JSON.stringify(payload, null, 2), 'utf8');
+    } catch (error) {
+        console.error('Falha ao persistir estado de wizards privados:', error.message || String(error));
+    }
+}
+
+function loadPrivateWizardsState() {
+    try {
+        if (!fs.existsSync(PRIVATE_WIZARDS_FILE)) return;
+        const parsed = JSON.parse(fs.readFileSync(PRIVATE_WIZARDS_FILE, 'utf8'));
+        if (Array.isArray(parsed?.addGroup)) {
+            for (const [senderId, state] of parsed.addGroup) {
+                if (senderId && state && typeof state === 'object') addGroupWizardState.set(senderId, state);
+            }
+        }
+        if (Array.isArray(parsed?.lamina)) {
+            for (const [senderId, state] of parsed.lamina) {
+                if (senderId && state && typeof state === 'object') laminaWizardState.set(senderId, fromSerializableLaminaState(state));
+            }
+        }
+        if (Array.isArray(parsed?.agendarLamina)) {
+            for (const [senderId, state] of parsed.agendarLamina) {
+                if (senderId && state && typeof state === 'object') agendarLaminaWizardState.set(senderId, state);
+            }
+        }
+    } catch (error) {
+        console.error('Falha ao carregar estado de wizards privados:', error.message || String(error));
+    }
+}
+
+function setAddGroupWizard(senderId, state) {
+    addGroupWizardState.set(senderId, state);
+    persistPrivateWizardsState();
+}
+
+function setLaminaWizard(senderId, state) {
+    laminaWizardState.set(senderId, state);
+    persistPrivateWizardsState();
+}
+
+function setAgendarLaminaWizard(senderId, state) {
+    agendarLaminaWizardState.set(senderId, state);
+    persistPrivateWizardsState();
 }
 
 function getRequiredPermissionForAdminCommand(commandToken) {
@@ -1028,6 +1110,8 @@ const RESPONSES = {
     '/valyrafi': VALYRAFI_MESSAGE
 };
 
+loadPrivateWizardsState();
+
 // Inicialização movida para index.js
 // if (!global.lembretesLoaded) {
 //     global.lembretesLoaded = true;
@@ -1197,7 +1281,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 agendarState.templateTitle = resolved.lamina.title;
                 agendarState.step = 'time';
-                agendarLaminaWizardState.set(senderId, agendarState);
+                setAgendarLaminaWizard(senderId, agendarState);
                 await sendSafeMessage(sock, senderId, { text: `Lamina selecionada: ${resolved.lamina.title}\n\nQual horario diario? (HH:MM, America/Sao_Paulo)` });
                 return;
             }
@@ -1210,7 +1294,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 agendarState.time = parsedTime;
                 agendarState.step = 'confirm';
-                agendarLaminaWizardState.set(senderId, agendarState);
+                setAgendarLaminaWizard(senderId, agendarState);
                 await sendSafeMessage(sock, senderId, {
                     text: `Confirma agendamento diario?\n\nLamina: ${agendarState.templateTitle}\nHorario: ${agendarState.time} (America/Sao_Paulo)\n\nResponda APROVAR ou CANCELAR.`
                 });
@@ -1258,7 +1342,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 laminaState.groups = resolved.groups;
                 laminaState.step = 'image';
-                laminaWizardState.set(senderId, laminaState);
+                setLaminaWizard(senderId, laminaState);
                 await sendSafeMessage(sock, senderId, {
                     text: 'Qual imagem deseja enviar junto? Envie a imagem aqui no PV, ou URL HTTP/HTTPS, ou caminho local (ex: assets/minha.jpg), ou digite NENHUMA.'
                 });
@@ -1292,7 +1376,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     }
                 }
                 laminaState.step = 'text';
-                laminaWizardState.set(senderId, laminaState);
+                setLaminaWizard(senderId, laminaState);
                 await sendSafeMessage(sock, senderId, { text: 'Agora envie o texto completo da lamina.' });
                 return;
             }
@@ -1305,7 +1389,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 laminaState.textBody = body;
                 laminaState.step = 'confirm';
-                laminaWizardState.set(senderId, laminaState);
+                setLaminaWizard(senderId, laminaState);
                 await sendLaminaPreview(sock, senderId, laminaState);
                 await sendSafeMessage(sock, senderId, { text: buildLaminaPreview(laminaState) });
                 return;
@@ -1330,7 +1414,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                         return;
                     }
                     laminaState.step = 'savePrompt';
-                    laminaWizardState.set(senderId, laminaState);
+                    setLaminaWizard(senderId, laminaState);
                     await sendSafeMessage(sock, senderId, { text: 'Deseja salvar essa lamina para usar depois? (sim/nao)' });
                     return;
                 }
@@ -1341,7 +1425,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     laminaState.imageSource = '';
                     laminaState.imageBuffer = null;
                     laminaState.textBody = '';
-                    laminaWizardState.set(senderId, laminaState);
+                    setLaminaWizard(senderId, laminaState);
                     await sendSafeMessage(sock, senderId, { text: 'Vamos refazer. Para qual grupo ou grupos enviar o texto?' });
                     return;
                 }
@@ -1362,7 +1446,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     return;
                 }
                 laminaState.step = 'saveTitle';
-                laminaWizardState.set(senderId, laminaState);
+                setLaminaWizard(senderId, laminaState);
                 await sendSafeMessage(sock, senderId, { text: 'Qual titulo deseja para essa lamina salva?' });
                 return;
             }
@@ -1382,7 +1466,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         if (textLower.startsWith('/lamina')) {
             trackLaminaConversation(senderId, 'lamina_start', text);
-            laminaWizardState.set(senderId, {
+            setLaminaWizard(senderId, {
                 step: 'group',
                 groups: [],
                 imageSource: '',
@@ -1408,7 +1492,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
             }
             trackLaminaConversation(senderId, 'agendar_start', text);
             const options = list.map((item, idx) => `${idx + 1}. ${item.title}`).join('\n');
-            agendarLaminaWizardState.set(senderId, { step: 'choose', templateTitle: '', time: '' });
+            setAgendarLaminaWizard(senderId, { step: 'choose', templateTitle: '', time: '' });
             await sendSafeMessage(sock, senderId, {
                 text: `Qual lamina deseja agendar?\n\n${options}\n\nResponda com numero ou titulo.`
             });
@@ -1431,7 +1515,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 wizard.groupName = name;
                 wizard.step = 'openClose';
-                addGroupWizardState.set(senderId, wizard);
+                setAddGroupWizard(senderId, wizard);
                 await sendSafeMessage(sock, senderId, { text: 'Permitir abertura/fechamento automatico? (sim/nao)' });
                 return;
             }
@@ -1444,7 +1528,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 wizard.permissions.openClose = value;
                 wizard.step = 'spam';
-                addGroupWizardState.set(senderId, wizard);
+                setAddGroupWizard(senderId, wizard);
                 await sendSafeMessage(sock, senderId, { text: 'Permitir anti-spam neste grupo? (sim/nao)' });
                 return;
             }
@@ -1457,7 +1541,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 wizard.permissions.spam = value;
                 wizard.step = 'reminders';
-                addGroupWizardState.set(senderId, wizard);
+                setAddGroupWizard(senderId, wizard);
                 await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de lembrete neste grupo? (sim/nao)' });
                 return;
             }
@@ -1470,7 +1554,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 wizard.permissions.reminders = value;
                 wizard.step = 'promo';
-                addGroupWizardState.set(senderId, wizard);
+                setAddGroupWizard(senderId, wizard);
                 await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de promo neste grupo? (sim/nao)' });
                 return;
             }
@@ -1483,7 +1567,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 wizard.permissions.promo = value;
                 wizard.step = 'moderation';
-                addGroupWizardState.set(senderId, wizard);
+                setAddGroupWizard(senderId, wizard);
                 await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de moderacao (ban/termos)? (sim/nao)' });
                 return;
             }
@@ -1496,7 +1580,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
                 wizard.permissions.moderation = value;
                 wizard.step = 'confirm';
-                addGroupWizardState.set(senderId, wizard);
+                setAddGroupWizard(senderId, wizard);
                 const summary = `Confirma cadastro do grupo?\n\nGrupo: ${wizard.groupName}\nAbertura/fechamento: ${wizard.permissions.openClose ? 'SIM' : 'NAO'}\nAnti-spam: ${wizard.permissions.spam ? 'SIM' : 'NAO'}\nLembretes: ${wizard.permissions.reminders ? 'SIM' : 'NAO'}\nPromo: ${wizard.permissions.promo ? 'SIM' : 'NAO'}\nModeracao: ${wizard.permissions.moderation ? 'SIM' : 'NAO'}\n\nResponda sim para confirmar ou nao para cancelar.`;
                 await sendSafeMessage(sock, senderId, { text: summary });
                 return;
@@ -1528,7 +1612,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
                 if (normalizedText.startsWith('/adicionargrupo')) {
                     let param = text.replace(/\/adicionargrupo/i, '').trim();
-                    addGroupWizardState.set(senderId, {
+                    setAddGroupWizard(senderId, {
                         step: param ? 'openClose' : 'name',
                         groupName: param || '',
                         permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true }
@@ -2356,7 +2440,7 @@ Um membro foi banido do grupo:
                     const gm = await sock.groupMetadata(groupId);
                     param = gm.subject || '';
                 }
-                addGroupWizardState.set(senderId, {
+                setAddGroupWizard(senderId, {
                     step: 'openClose',
                     groupName: param,
                     permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true }
@@ -2834,3 +2918,5 @@ _iMavyAgent | Sistema de Lembretes_`;
 export function hasPendingPrivateWizard(senderId) {
     return addGroupWizardState.has(senderId) || laminaWizardState.has(senderId) || agendarLaminaWizardState.has(senderId);
 }
+
+
