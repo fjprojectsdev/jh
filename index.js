@@ -773,8 +773,9 @@ async function startBot() {
             const chatId = message.key.remoteJid;
 
             // Extrair texto apenas de conversation/extendedTextMessage.text
-            const messageText = extractProcessableIncomingText(message);
-            if (!messageText) continue;
+            const messageText = extractProcessableIncomingText(message) || '';
+            const hasText = messageText.trim().length > 0;
+            if (!hasText && (isGroup || !hasPendingPrivateWizard(senderId))) continue;
 
             const processingStart = Date.now();
             const messageId = message?.key?.id || null;
