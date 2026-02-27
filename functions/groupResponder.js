@@ -33,6 +33,7 @@ const LEMBRETES_FILE = path.join(__dirname, '..', 'lembretes.json');
 const BOT_LOG_FILE = path.join(__dirname, '..', 'bot.log');
 const BOT_TRIGGER = 'bot';
 const addGroupWizardState = new Map();
+const laminaWizardState = new Map();
 
 // Configuração dos tokens do projeto (Centralizada)
 const PROJECT_TOKENS = {
@@ -194,6 +195,14 @@ function clearWizard(senderId) {
     addGroupWizardState.delete(senderId);
 }
 
+function getLaminaWizard(senderId) {
+    return laminaWizardState.get(senderId);
+}
+
+function clearLaminaWizard(senderId) {
+    laminaWizardState.delete(senderId);
+}
+
 function getRequiredPermissionForAdminCommand(commandToken) {
     const token = String(commandToken || '').toLowerCase();
     if (token === '/fechar' || token === '/abrir') return 'openClose';
@@ -209,6 +218,89 @@ function getPermissionLabel(permissionKey) {
     if (permissionKey === 'promo') return 'promo';
     if (permissionKey === 'moderation') return 'moderacao';
     return permissionKey || 'desconhecida';
+}
+
+function normalizeGroupSearch(value) {
+    return String(value || '')
+        .normalize('NFKC')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+async function resolveGroupByInput(sock, input) {
+    const query = String(input || '').trim();
+    if (!query) {
+        return { ok: false, message: 'Informe o nome ou ID do grupo.' };
+    }
+
+    let groups;
+    try {
+        groups = await sock.groupFetchAllParticipating();
+    } catch (error) {
+        return { ok: false, message: `Falha ao listar grupos: ${error.message}` };
+    }
+
+    const list = Object.entries(groups || {}).map(([id, data]) => ({
+        id,
+        subject: String(data?.subject || '')
+    }));
+
+    if (query.endsWith('@g.us')) {
+        const found = list.find((g) => g.id === query);
+        if (!found) return { ok: false, message: 'Grupo por ID nao encontrado.' };
+        return { ok: true, group: found };
+    }
+
+    const normalizedQuery = normalizeGroupSearch(query);
+    const exact = list.filter((g) => normalizeGroupSearch(g.subject) === normalizedQuery);
+    if (exact.length === 1) return { ok: true, group: exact[0] };
+    if (exact.length > 1) {
+        return { ok: false, message: 'Mais de um grupo com esse nome. Informe o ID @g.us.' };
+    }
+
+    const partial = list.filter((g) => normalizeGroupSearch(g.subject).includes(normalizedQuery));
+    if (partial.length === 1) return { ok: true, group: partial[0] };
+    if (partial.length > 1) {
+        const opts = partial.slice(0, 8).map((g) => `- ${g.subject} | ${g.id}`).join('\n');
+        return { ok: false, message: `Encontrei varios grupos. Seja mais especifico:\n${opts}` };
+    }
+
+    return { ok: false, message: 'Grupo nao encontrado.' };
+}
+
+function isNoneText(value) {
+    const t = String(value || '').trim().toLowerCase();
+    return t === 'nenhuma' || t === 'nenhum' || t === 'nao' || t === 'não' || t === 'sem';
+}
+
+function isLikelyHttpUrl(value) {
+    return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+function buildLaminaPreview(state) {
+    return `PREVIA /lamina\n\nGrupo: ${state.groupName}\nID: ${state.groupId}\nImagem: ${state.imageSource ? state.imageSource : 'nenhuma'}\n\nTexto:\n${state.textBody}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
+}
+
+async function sendLaminaToGroup(sock, state) {
+    const targetId = state.groupId;
+    if (!state.imageSource) {
+        await sendSafeMessage(sock, targetId, { text: state.textBody });
+        return;
+    }
+
+    const raw = String(state.imageSource || '').trim();
+    if (isLikelyHttpUrl(raw)) {
+        await sendSafeMessage(sock, targetId, { image: { url: raw }, caption: state.textBody });
+        return;
+    }
+
+    const absPath = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+    if (!fs.existsSync(absPath)) {
+        throw new Error(`Imagem nao encontrada no caminho: ${absPath}`);
+    }
+    const imageBuffer = fs.readFileSync(absPath);
+    await sendSafeMessage(sock, targetId, { image: imageBuffer, caption: state.textBody });
 }
 
 function stripImavyMention(text) {
@@ -652,6 +744,103 @@ export async function handleGroupMessages(sock, message, context = {}) {
         const textLower = (text || '').trim().toLowerCase();
         if (textLower && RESPONSES[textLower]) {
             await sendSafeMessage(sock, senderId, { text: RESPONSES[textLower] });
+            return;
+        }
+
+        const laminaState = getLaminaWizard(senderId);
+        if (laminaState) {
+            if (textLower === '/cancelar' || textLower === 'cancelar') {
+                clearLaminaWizard(senderId);
+                await sendSafeMessage(sock, senderId, { text: 'Fluxo /lamina cancelado.' });
+                return;
+            }
+
+            if (laminaState.step === 'group') {
+                const resolved = await resolveGroupByInput(sock, text);
+                if (!resolved.ok) {
+                    await sendSafeMessage(sock, senderId, { text: `${resolved.message}\n\nInforme nome ou ID do grupo (@g.us).` });
+                    return;
+                }
+                laminaState.groupId = resolved.group.id;
+                laminaState.groupName = resolved.group.subject || resolved.group.id;
+                laminaState.step = 'image';
+                laminaWizardState.set(senderId, laminaState);
+                await sendSafeMessage(sock, senderId, {
+                    text: 'Qual imagem deseja enviar junto? Envie URL HTTP/HTTPS, caminho local (ex: assets/minha.jpg) ou digite NENHUMA.'
+                });
+                return;
+            }
+
+            if (laminaState.step === 'image') {
+                const raw = String(text || '').trim();
+                if (isNoneText(raw)) {
+                    laminaState.imageSource = '';
+                } else {
+                    laminaState.imageSource = raw;
+                }
+                laminaState.step = 'text';
+                laminaWizardState.set(senderId, laminaState);
+                await sendSafeMessage(sock, senderId, { text: 'Agora envie o texto completo da lamina.' });
+                return;
+            }
+
+            if (laminaState.step === 'text') {
+                const body = String(text || '').trim();
+                if (!body) {
+                    await sendSafeMessage(sock, senderId, { text: 'Texto vazio. Envie o texto da lamina.' });
+                    return;
+                }
+                laminaState.textBody = body;
+                laminaState.step = 'confirm';
+                laminaWizardState.set(senderId, laminaState);
+                await sendSafeMessage(sock, senderId, { text: buildLaminaPreview(laminaState) });
+                return;
+            }
+
+            if (laminaState.step === 'confirm') {
+                if (/^(aprovar|aprovado|aprovo|sim|ok|confirmo)$/i.test(textLower)) {
+                    try {
+                        await sendLaminaToGroup(sock, laminaState);
+                        await sendSafeMessage(sock, senderId, {
+                            text: `Lamina enviada com sucesso para ${laminaState.groupName} (${laminaState.groupId}).`
+                        });
+                    } catch (error) {
+                        await sendSafeMessage(sock, senderId, { text: `Falha ao enviar lamina: ${error.message}` });
+                    }
+                    clearLaminaWizard(senderId);
+                    return;
+                }
+
+                if (/^(refazer|refaco|refaço|editar|nao|não)$/i.test(textLower)) {
+                    laminaState.step = 'group';
+                    laminaState.groupId = '';
+                    laminaState.groupName = '';
+                    laminaState.imageSource = '';
+                    laminaState.textBody = '';
+                    laminaWizardState.set(senderId, laminaState);
+                    await sendSafeMessage(sock, senderId, { text: 'Vamos refazer. Para qual grupo enviar o texto?' });
+                    return;
+                }
+
+                await sendSafeMessage(sock, senderId, { text: 'Responda APROVAR, REFAZER ou CANCELAR.' });
+                return;
+            }
+        }
+
+        if (textLower.startsWith('/lamina')) {
+            const authorized = await isAuthorized(senderId);
+            if (!authorized) {
+                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
+                return;
+            }
+            laminaWizardState.set(senderId, {
+                step: 'group',
+                groupId: '',
+                groupName: '',
+                imageSource: '',
+                textBody: ''
+            });
+            await sendSafeMessage(sock, senderId, { text: 'Fluxo /lamina iniciado.\n\nPara qual grupo enviar o texto?' });
             return;
         }
 
