@@ -101,6 +101,7 @@ function isAllowedCommandForRestrictedGroup(commandToken) {
     if (!commandToken || !commandToken.startsWith('/')) return false;
     if (commandToken === '/aviso') return true;
     if (commandToken === '/lembrete') return true;
+    if (commandToken === '/ranking') return true;
     if (commandToken === '/valyrafi') return true;
     return isCryptoCommandToken(commandToken);
 }
