@@ -194,6 +194,23 @@ function clearWizard(senderId) {
     addGroupWizardState.delete(senderId);
 }
 
+function getRequiredPermissionForAdminCommand(commandToken) {
+    const token = String(commandToken || '').toLowerCase();
+    if (token === '/fechar' || token === '/abrir') return 'openClose';
+    if (token === '/lembrete' || token === '/lembretefixo' || token === '/stoplembrete' || token === '/stoplembretefixo' || token === '/testelembrete') return 'reminders';
+    if (token === '/promo' || token === '/sethorario') return 'promo';
+    if (token === '/banir' || token === '/adicionartermo' || token === '/removertermo' || token === '/listartermos') return 'moderation';
+    return null;
+}
+
+function getPermissionLabel(permissionKey) {
+    if (permissionKey === 'openClose') return 'abertura/fechamento';
+    if (permissionKey === 'reminders') return 'lembretes';
+    if (permissionKey === 'promo') return 'promo';
+    if (permissionKey === 'moderation') return 'moderacao';
+    return permissionKey || 'desconhecida';
+}
+
 function stripImavyMention(text) {
     return String(text || '')
         .replace(/^@?(imavy|imavyagent)\b[\s,:-]*/i, '')
@@ -679,9 +696,48 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     return;
                 }
                 wizard.permissions.spam = value;
+                wizard.step = 'reminders';
+                addGroupWizardState.set(senderId, wizard);
+                await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de lembrete neste grupo? (sim/nao)' });
+                return;
+            }
+
+            if (wizard.step === 'reminders') {
+                const value = parseYesNo(textLower);
+                if (value === null) {
+                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
+                    return;
+                }
+                wizard.permissions.reminders = value;
+                wizard.step = 'promo';
+                addGroupWizardState.set(senderId, wizard);
+                await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de promo neste grupo? (sim/nao)' });
+                return;
+            }
+
+            if (wizard.step === 'promo') {
+                const value = parseYesNo(textLower);
+                if (value === null) {
+                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
+                    return;
+                }
+                wizard.permissions.promo = value;
+                wizard.step = 'moderation';
+                addGroupWizardState.set(senderId, wizard);
+                await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de moderacao (ban/termos)? (sim/nao)' });
+                return;
+            }
+
+            if (wizard.step === 'moderation') {
+                const value = parseYesNo(textLower);
+                if (value === null) {
+                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
+                    return;
+                }
+                wizard.permissions.moderation = value;
                 wizard.step = 'confirm';
                 addGroupWizardState.set(senderId, wizard);
-                const summary = `Confirma cadastro do grupo?\n\nGrupo: ${wizard.groupName}\nAbertura/fechamento: ${wizard.permissions.openClose ? 'SIM' : 'NAO'}\nAnti-spam: ${wizard.permissions.spam ? 'SIM' : 'NAO'}\n\nResponda sim para confirmar ou nao para cancelar.`;
+                const summary = `Confirma cadastro do grupo?\n\nGrupo: ${wizard.groupName}\nAbertura/fechamento: ${wizard.permissions.openClose ? 'SIM' : 'NAO'}\nAnti-spam: ${wizard.permissions.spam ? 'SIM' : 'NAO'}\nLembretes: ${wizard.permissions.reminders ? 'SIM' : 'NAO'}\nPromo: ${wizard.permissions.promo ? 'SIM' : 'NAO'}\nModeracao: ${wizard.permissions.moderation ? 'SIM' : 'NAO'}\n\nResponda sim para confirmar ou nao para cancelar.`;
                 await sendSafeMessage(sock, senderId, { text: summary });
                 return;
             }
@@ -715,7 +771,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     addGroupWizardState.set(senderId, {
                         step: param ? 'openClose' : 'name',
                         groupName: param || '',
-                        permissions: { openClose: true, spam: true }
+                        permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true }
                     });
                     if (!param) {
                         await sendSafeMessage(sock, senderId, { text: 'Qual o nome/ID do grupo que deseja adicionar?' });
@@ -1253,6 +1309,14 @@ export async function handleGroupMessages(sock, message, context = {}) {
             }
 
             registrarComandoAceitoAtual(commandToken);
+            const groupPerms = await getAllowedGroupPermissions(groupSubject);
+            const requiredPermission = getRequiredPermissionForAdminCommand(commandToken);
+            if (requiredPermission && !groupPerms[requiredPermission]) {
+                await sendSafeMessage(sock, groupId, {
+                    text: `Este grupo esta sem permissao para ${getPermissionLabel(requiredPermission)}.`
+                });
+                return;
+            }
 
             if (normalizedText.startsWith('/descricao')) {
                 try {
@@ -1310,11 +1374,6 @@ _Use o comando /comandos ou marque um administrador._ 💬
                     console.error('Erro ao enviar regras:', e);
                 }
             } else if (normalizedText.startsWith('/fechar')) {
-                const perms = await getAllowedGroupPermissions(groupSubject);
-                if (!perms.openClose) {
-                    await sendSafeMessage(sock, groupId, { text: 'Este grupo esta sem permissao para comandos de abrir/fechar.' });
-                    return;
-                }
                 await sock.groupSettingUpdate(groupId, 'announcement');
                 const closeMessage = `Grupo Temporariamente Fechado
 
@@ -1323,11 +1382,6 @@ O envio de mensagens está desativado até 08:00.
                 A funcionalidade será reativada automaticamente no horário programado.`;
                 await sendSafeMessage(sock, groupId, { text: closeMessage });
             } else if (normalizedText.startsWith('/abrir')) {
-                const perms = await getAllowedGroupPermissions(groupSubject);
-                if (!perms.openClose) {
-                    await sendSafeMessage(sock, groupId, { text: 'Este grupo esta sem permissao para comandos de abrir/fechar.' });
-                    return;
-                }
                 await sock.groupSettingUpdate(groupId, 'not_announcement');
                 const openMessage = `Grupo Aberto
 
@@ -1545,7 +1599,7 @@ Um membro foi banido do grupo:
                 addGroupWizardState.set(senderId, {
                     step: 'openClose',
                     groupName: param,
-                    permissions: { openClose: true, spam: true }
+                    permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true }
                 });
                 await sendSafeMessage(sock, senderId, {
                     text: `Configurando grupo: ${param}\nPermitir abertura/fechamento automatico? (sim/nao)\n\nResponda no privado.`

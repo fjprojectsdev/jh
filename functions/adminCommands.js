@@ -13,7 +13,10 @@ export { isAuthorized, checkAuth };
 function buildDefaultPermissions() {
     return {
         openClose: true,
-        spam: true
+        spam: true,
+        reminders: true,
+        promo: true,
+        moderation: true
     };
 }
 
@@ -21,7 +24,10 @@ function normalizePermissions(perms = {}) {
     const defaults = buildDefaultPermissions();
     return {
         openClose: typeof perms.openClose === 'boolean' ? perms.openClose : defaults.openClose,
-        spam: typeof perms.spam === 'boolean' ? perms.spam : defaults.spam
+        spam: typeof perms.spam === 'boolean' ? perms.spam : defaults.spam,
+        reminders: typeof perms.reminders === 'boolean' ? perms.reminders : defaults.reminders,
+        promo: typeof perms.promo === 'boolean' ? perms.promo : defaults.promo,
+        moderation: typeof perms.moderation === 'boolean' ? perms.moderation : defaults.moderation
     };
 }
 
@@ -116,7 +122,7 @@ export async function addAllowedGroup(senderId, groupName, options = {}) {
 
         return {
             success: true,
-            message: `Grupo "${name}" adicionado com sucesso.\n\nPermissoes:\n- abertura/fechamento: ${permissions.openClose ? 'SIM' : 'NAO'}\n- anti-spam: ${permissions.spam ? 'SIM' : 'NAO'}`
+            message: `Grupo "${name}" adicionado com sucesso.\n\nPermissoes:\n- abertura/fechamento: ${permissions.openClose ? 'SIM' : 'NAO'}\n- anti-spam: ${permissions.spam ? 'SIM' : 'NAO'}\n- lembretes: ${permissions.reminders ? 'SIM' : 'NAO'}\n- promo: ${permissions.promo ? 'SIM' : 'NAO'}\n- moderacao: ${permissions.moderation ? 'SIM' : 'NAO'}`
         };
     } catch (e) {
         console.error('Erro ao adicionar permitido:', e);
@@ -131,7 +137,7 @@ export async function listAllowedGroups() {
     const combined = [];
     for (const g of groups) {
         combined.push(
-            `Grupo: ${g.name} | abrir/fechar=${g.permissions.openClose ? 'SIM' : 'NAO'} | spam=${g.permissions.spam ? 'SIM' : 'NAO'}`
+            `Grupo: ${g.name} | abrir/fechar=${g.permissions.openClose ? 'SIM' : 'NAO'} | spam=${g.permissions.spam ? 'SIM' : 'NAO'} | lembretes=${g.permissions.reminders ? 'SIM' : 'NAO'} | promo=${g.permissions.promo ? 'SIM' : 'NAO'} | moderacao=${g.permissions.moderation ? 'SIM' : 'NAO'}`
         );
     }
     for (const u of users) combined.push(`Usuario: ${u}`);
