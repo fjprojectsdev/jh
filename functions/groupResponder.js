@@ -24,6 +24,7 @@ import { generateImavyCryptoReply } from './crypto/imavyAnalyst.js';
 import { askChatGPT } from './chatgpt.js';
 import { isRestrictedGroupName } from './groupPolicy.js';
 import { registrarComandoAceito } from './commandMetrics.js';
+import { getGroupTopRanking } from './groupRanking.js';
 import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
@@ -2155,7 +2156,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -2167,8 +2168,8 @@ export async function handleGroupMessages(sock, message, context = {}) {
         let commandMessageKey = message.key;
 
         try {
-            const isRulesCommand = normalizedText.includes('/regras');
-            const requiresAuth = !isRulesCommand;
+            const isPublicInfoCommand = normalizedText.startsWith('/regras') || normalizedText.startsWith('/ranking');
+            const requiresAuth = !isPublicInfoCommand;
 
             // Se requer autorização, verificar se o usuário é admin
             if (requiresAuth) {
@@ -2265,6 +2266,27 @@ Desejamos a todos um excelente dia.`;
             } else if (normalizedText.startsWith('/status')) {
                 const statusMessage = await getGroupStatus(sock, groupId);
                 await sendSafeMessage(sock, groupId, { text: statusMessage });
+            } else if (normalizedText.startsWith('/ranking')) {
+                const ranking = getGroupTopRanking(groupId, 10);
+                if (!ranking.top.length) {
+                    await sendSafeMessage(sock, groupId, { text: '📊 Ainda nao ha mensagens suficientes para gerar ranking neste grupo.' });
+                    return;
+                }
+
+                const medals = ['🥇', '🥈', '🥉'];
+                let rankingMsg = `🏆 *RANKING TOP 10*\n`;
+                rankingMsg += `📌 Grupo: ${ranking.groupName}\n`;
+                rankingMsg += `💬 Mensagens totais: ${ranking.totalMessages}\n\n`;
+
+                ranking.top.forEach((item, index) => {
+                    const medal = medals[index] || '🏅';
+                    rankingMsg += `${medal} *${item.senderName}*\n`;
+                    rankingMsg += `⭐ Nivel: ${item.level}\n`;
+                    rankingMsg += `🔥 Grau: ${item.grade}\n`;
+                    rankingMsg += `💭 Mensagens: ${item.messages}\n\n`;
+                });
+
+                await sendSafeMessage(sock, groupId, { text: rankingMsg.trim() });
             } else if (normalizedText.startsWith('/stats')) {
                 const statsMessage = formatStats();
                 await sendSafeMessage(sock, groupId, { text: statsMessage });
@@ -2906,6 +2928,7 @@ _iMavyAgent | Sistema de Lembretes_`;
 📊 *COMANDOS DE INFORMAÇÃO:*
 
 * 📊 /status - Status e estatísticas
+* 🏆 /ranking - Top 10 de mensagens do grupo
 * 📋 /regras - Regras do grupo
 * 🔗 /link - Link do grupo
 * 🕒 /hora - Horário do bot

@@ -39,6 +39,7 @@ import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js'
 import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
 import { createIntelEngine, getIntelEventBuffer, storeIntelEvent } from './src/intelligence/intelEngine.js';
 import { createLeadEngine } from './src/intelligence/leadEngine.js';
+import { trackGroupMessage } from './functions/groupRanking.js';
 
 console.log('[IA] Moderacao:', isAIEnabled() ? 'ATIVA (Groq)' : 'Desabilitada');
 console.log('[IA] Vendas:', isAISalesEnabled() ? 'ATIVA (Groq)' : 'Desabilitada');
@@ -941,9 +942,19 @@ async function startBot() {
 
                 // Salva toda mensagem de texto de grupos autorizados (incluindo comandos).
                 publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
+                const trimmedText = String(messageText || '').trimStart();
+                if (trimmedText && !trimmedText.startsWith('/')) {
+                    trackGroupMessage({
+                        groupId: chatId,
+                        groupName: groupSubject || chatId,
+                        senderId,
+                        senderName: resolveParticipantName(message, senderId),
+                        timestamp: messageTimestamp
+                    });
+                }
 
                 // 4.1. COMANDOS (prioridade maxima - moderacao sempre roda)
-                const isCommand = String(messageText || '').trimStart().startsWith('/');
+                const isCommand = trimmedText.startsWith('/');
                 console.log(`[DEBUG] isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
 
                 if (isCommand) {
