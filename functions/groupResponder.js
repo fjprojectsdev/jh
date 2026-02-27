@@ -41,6 +41,7 @@ const BOT_TRIGGER = 'bot';
 const addGroupWizardState = new Map();
 const laminaWizardState = new Map();
 const agendarLaminaWizardState = new Map();
+const rankingWizardState = new Map();
 let laminaSchedulerTimer = null;
 
 // Configuração dos tokens do projeto (Centralizada)
@@ -223,6 +224,15 @@ function clearAgendarLaminaWizard(senderId) {
     persistPrivateWizardsState();
 }
 
+function getRankingWizard(senderId) {
+    return rankingWizardState.get(senderId);
+}
+
+function clearRankingWizard(senderId) {
+    rankingWizardState.delete(senderId);
+    persistPrivateWizardsState();
+}
+
 function toSerializableLaminaState(state = {}) {
     const copy = { ...state };
     if (Buffer.isBuffer(copy.imageBuffer)) {
@@ -254,7 +264,8 @@ function persistPrivateWizardsState() {
             updatedAt: new Date().toISOString(),
             addGroup: Array.from(addGroupWizardState.entries()),
             lamina: Array.from(laminaWizardState.entries()).map(([senderId, state]) => [senderId, toSerializableLaminaState(state)]),
-            agendarLamina: Array.from(agendarLaminaWizardState.entries())
+            agendarLamina: Array.from(agendarLaminaWizardState.entries()),
+            ranking: Array.from(rankingWizardState.entries())
         };
         fs.writeFileSync(PRIVATE_WIZARDS_FILE, JSON.stringify(payload, null, 2), 'utf8');
     } catch (error) {
@@ -281,6 +292,11 @@ function loadPrivateWizardsState() {
                 if (senderId && state && typeof state === 'object') agendarLaminaWizardState.set(senderId, state);
             }
         }
+        if (Array.isArray(parsed?.ranking)) {
+            for (const [senderId, state] of parsed.ranking) {
+                if (senderId && state && typeof state === 'object') rankingWizardState.set(senderId, state);
+            }
+        }
     } catch (error) {
         console.error('Falha ao carregar estado de wizards privados:', error.message || String(error));
     }
@@ -298,6 +314,11 @@ function setLaminaWizard(senderId, state) {
 
 function setAgendarLaminaWizard(senderId, state) {
     agendarLaminaWizardState.set(senderId, state);
+    persistPrivateWizardsState();
+}
+
+function setRankingWizard(senderId, state) {
+    rankingWizardState.set(senderId, state);
     persistPrivateWizardsState();
 }
 
@@ -404,6 +425,48 @@ async function resolveGroupsByInput(sock, input) {
     }
 
     return { ok: true, groups: selected };
+}
+
+function buildRankingMessageForGroup(ranking, title = 'RANKING TOP 10') {
+    if (!ranking?.top?.length) {
+        return '📊 Ainda nao ha mensagens suficientes para gerar ranking neste grupo.';
+    }
+
+    const medals = ['🥇', '🥈', '🥉'];
+    let rankingMsg = `🏆 *${title}*\n`;
+    rankingMsg += `📌 Grupo: ${ranking.groupName}\n`;
+    rankingMsg += `💬 Mensagens totais: ${ranking.totalMessages}\n\n`;
+
+    ranking.top.forEach((item, index) => {
+        const medal = medals[index] || '🏅';
+        rankingMsg += `${medal} *${item.senderName}*\n`;
+        rankingMsg += `🔥 Grau: ${item.grade}\n`;
+        rankingMsg += `💭 Total de mensagens: ${item.messages}\n\n`;
+    });
+
+    return rankingMsg.trim();
+}
+
+function resolveRankingGroupSelection(inputText, groups = []) {
+    const raw = String(inputText || '').trim();
+    if (!raw) return null;
+
+    const byNumber = Number.parseInt(raw, 10);
+    if (Number.isFinite(byNumber) && byNumber >= 1 && byNumber <= groups.length) {
+        return groups[byNumber - 1];
+    }
+
+    const lowered = raw.toLowerCase();
+    const exactId = groups.find((g) => String(g.id || '').toLowerCase() === lowered);
+    if (exactId) return exactId;
+
+    const exactName = groups.find((g) => String(g.subject || '').toLowerCase() === lowered);
+    if (exactName) return exactName;
+
+    const partial = groups.filter((g) => String(g.subject || '').toLowerCase().includes(lowered));
+    if (partial.length === 1) return partial[0];
+
+    return null;
 }
 
 function isNoneText(value) {
@@ -1223,6 +1286,61 @@ export async function handleGroupMessages(sock, message, context = {}) {
         const textLower = (text || '').trim().toLowerCase();
         if (textLower && RESPONSES[textLower]) {
             await sendSafeMessage(sock, senderId, { text: RESPONSES[textLower] });
+            return;
+        }
+
+        const rankingState = getRankingWizard(senderId);
+        if (rankingState) {
+            if (textLower === '/cancelar' || textLower === 'cancelar') {
+                clearRankingWizard(senderId);
+                await sendSafeMessage(sock, senderId, { text: 'Fluxo /ranking cancelado.' });
+                return;
+            }
+
+            if (rankingState.step === 'chooseGroup') {
+                const selected = resolveRankingGroupSelection(text, rankingState.groups || []);
+                if (!selected) {
+                    await sendSafeMessage(sock, senderId, {
+                        text: 'Grupo invalido. Responda com o numero da lista, nome exato ou ID @g.us.'
+                    });
+                    return;
+                }
+
+                clearRankingWizard(senderId);
+                const ranking = getGroupTopRanking(selected.id, 10);
+                await sendSafeMessage(sock, senderId, { text: buildRankingMessageForGroup(ranking, 'RANKING TOP 10') });
+                return;
+            }
+        }
+
+        if (textLower.startsWith('/ranking')) {
+            let groupsRaw;
+            try {
+                groupsRaw = await sock.groupFetchAllParticipating();
+            } catch (error) {
+                await sendSafeMessage(sock, senderId, { text: `Falha ao listar grupos: ${error.message}` });
+                return;
+            }
+
+            const groups = Object.entries(groupsRaw || {})
+                .map(([id, data]) => ({ id, subject: String(data?.subject || '').trim() || id }))
+                .sort((a, b) => a.subject.localeCompare(b.subject, 'pt-BR'));
+
+            if (!groups.length) {
+                await sendSafeMessage(sock, senderId, { text: 'Nao encontrei grupos para consultar ranking.' });
+                return;
+            }
+
+            const maxList = 30;
+            const shown = groups.slice(0, maxList);
+            const lines = shown.map((g, i) => `${i + 1}. ${g.subject} | ${g.id}`).join('\n');
+            setRankingWizard(senderId, { step: 'chooseGroup', groups: shown });
+
+            let msg = `Qual grupo deseja consultar no /ranking?\n\n${lines}\n\nResponda com numero, nome ou ID do grupo.`;
+            if (groups.length > maxList) {
+                msg += `\n\nMostrando ${maxList} de ${groups.length} grupos.`;
+            }
+            await sendSafeMessage(sock, senderId, { text: msg });
             return;
         }
 
@@ -2269,24 +2387,7 @@ Desejamos a todos um excelente dia.`;
                 await sendSafeMessage(sock, groupId, { text: statusMessage });
             } else if (normalizedText.startsWith('/ranking')) {
                 const ranking = getGroupTopRanking(groupId, 10);
-                if (!ranking.top.length) {
-                    await sendSafeMessage(sock, groupId, { text: '📊 Ainda nao ha mensagens suficientes para gerar ranking neste grupo.' });
-                    return;
-                }
-
-                const medals = ['🥇', '🥈', '🥉'];
-                let rankingMsg = `🏆 *RANKING TOP 10*\n`;
-                rankingMsg += `📌 Grupo: ${ranking.groupName}\n`;
-                rankingMsg += `💬 Mensagens totais: ${ranking.totalMessages}\n\n`;
-
-                ranking.top.forEach((item, index) => {
-                    const medal = medals[index] || '🏅';
-                    rankingMsg += `${medal} *${item.senderName}*\n`;
-                    rankingMsg += `🔥 Grau: ${item.grade}\n`;
-                    rankingMsg += `💭 Total de mensagens: ${item.messages}\n\n`;
-                });
-
-                await sendSafeMessage(sock, groupId, { text: rankingMsg.trim() });
+                await sendSafeMessage(sock, groupId, { text: buildRankingMessageForGroup(ranking, 'RANKING TOP 10') });
             } else if (normalizedText.startsWith('/stats')) {
                 const statsMessage = formatStats();
                 await sendSafeMessage(sock, groupId, { text: statsMessage });
@@ -2969,7 +3070,10 @@ _iMavyAgent | Sistema de Lembretes_`;
 }
 
 export function hasPendingPrivateWizard(senderId) {
-    return addGroupWizardState.has(senderId) || laminaWizardState.has(senderId) || agendarLaminaWizardState.has(senderId);
+    return addGroupWizardState.has(senderId)
+        || laminaWizardState.has(senderId)
+        || agendarLaminaWizardState.has(senderId)
+        || rankingWizardState.has(senderId);
 }
 
 
