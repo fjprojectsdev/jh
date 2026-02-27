@@ -40,6 +40,8 @@ function loadAdminIds() {
 const devModeActive = new Map();
 const devModeForcedOff = new Set();
 const conversationHistory = new Map();
+const commandCreationState = new Map();
+const pendingCommandApproval = new Map();
 
 export function isDev(userId) {
     const cleanId = userId.replace('@s.whatsapp.net', '').replace('@lid', '');
@@ -83,6 +85,8 @@ export function deactivateDevMode(userId) {
     }
     devModeActive.delete(userId);
     conversationHistory.delete(userId);
+    commandCreationState.delete(userId);
+    pendingCommandApproval.delete(userId);
 }
 
 function getHistory(userId) {
@@ -179,156 +183,140 @@ export async function handleDevCommand(sock, message, text) {
     }
 }
 
+function isApprovalText(text) {
+    return /^(aprovar|aprovado|aprovo|sim|ok|confirmo)$/i.test(String(text || '').trim());
+}
+
+function isCancelText(text) {
+    return /^(cancelar|cancela|nao|n?o|parar|stop)$/i.test(String(text || '').trim());
+}
+
+function looksLikeCommandCreationRequest(text) {
+    const t = String(text || '').toLowerCase();
+    return t.includes('criar comando')
+        || t.includes('crie um comando')
+        || t.includes('novo comando')
+        || t.includes('comando que');
+}
+
+async function persistGeneratedCommand(result) {
+    const fileName = `${result.commandName}.js`;
+    const customDir = path.join(__dirname, 'custom');
+    if (!fs.existsSync(customDir)) {
+        fs.mkdirSync(customDir, { recursive: true });
+    }
+
+    const filePath = path.join(customDir, fileName);
+    fs.writeFileSync(filePath, result.code);
+    ensureCommandHandlerExport(filePath, result.commandName);
+    await integrateCommand(result.commandName, result.commandTrigger, result.isPublic);
+
+    return {
+        fileName,
+        trigger: result.commandTrigger,
+        isPublic: Boolean(result.isPublic),
+        usage: result.usage || 'Sem exemplo',
+        logic: result.logic || 'Sem descricao'
+    };
+}
+
 export async function handleDevConversation(sock, senderId, messageText) {
     const chatId = senderId;
+    const rawInput = String(messageText || '').trim();
+    if (!rawInput) return;
 
-    await sendSafeMessage(sock, chatId, { text: '🤖 Analisando sua solicitação...' });
+    const pending = pendingCommandApproval.get(senderId);
+    if (pending) {
+        if (isApprovalText(rawInput)) {
+            pendingCommandApproval.delete(senderId);
+            const saved = await persistGeneratedCommand(pending);
+            await sendSafeMessage(sock, chatId, {
+                text: `COMANDO APROVADO E CRIADO\nArquivo: functions/custom/${saved.fileName}\nGatilho: ${saved.trigger}\nPublico: ${saved.isPublic ? 'Sim' : 'Nao'}\nUso: ${saved.usage}\n\nLogica:\n${saved.logic}`
+            });
+            return;
+        }
+
+        if (isCancelText(rawInput)) {
+            pendingCommandApproval.delete(senderId);
+            await sendSafeMessage(sock, chatId, { text: 'Criacao cancelada. Nenhum arquivo foi alterado.' });
+            return;
+        }
+
+        await sendSafeMessage(sock, chatId, { text: 'Responda APROVAR para criar ou CANCELAR para abortar.' });
+        return;
+    }
+
+    const creationState = commandCreationState.get(senderId);
+    if (creationState?.step === 'intent') {
+        creationState.intent = rawInput;
+        creationState.step = 'response';
+        commandCreationState.set(senderId, creationState);
+        await sendSafeMessage(sock, chatId, { text: '2/3 O que o comando deve responder/mostrar quando for enviado?' });
+        return;
+    }
+
+    let effectivePrompt = rawInput;
+    if (creationState?.step === 'response') {
+        creationState.responseSpec = rawInput;
+        commandCreationState.delete(senderId);
+        effectivePrompt = `Crie um comando WhatsApp para o bot.\nIntencao: ${creationState.intent}\nResposta esperada: ${creationState.responseSpec}\nGere JSON no formato combinado (type=code com commandName, commandTrigger, code, usage, isPublic, logic, response).`;
+    } else if (looksLikeCommandCreationRequest(rawInput)) {
+        commandCreationState.set(senderId, { step: 'intent' });
+        await sendSafeMessage(sock, chatId, { text: '1/3 Qual a intencao principal do comando que voce quer criar?' });
+        return;
+    }
+
+    await sendSafeMessage(sock, chatId, { text: 'Analisando sua solicitacao...' });
 
     try {
         const history = getHistory(senderId);
-
-        const systemPrompt = `Você é um assistente de desenvolvimento EXPERT em Node.js, Baileys (WhatsApp bot) e JavaScript.
-
-🎯 PROCESSO DE DESENVOLVIMENTO:
-
-1. ANÁLISE: Entenda COMPLETAMENTE o que o dev quer
-2. PLANEJAMENTO: Pense na lógica ANTES de codificar
-3. VALIDAÇÃO: Pergunte se não tiver certeza
-4. IMPLEMENTAÇÃO: Código limpo e funcional
-
-📋 REGRAS DE LÓGICA:
-
-- SEMPRE analise requisitos antes de codificar
-- Identifique estados necessários (Map, Set, Array)
-- Pense em edge cases (erros, validações)
-- Use estruturas de dados apropriadas
-- Considere concorrência (múltiplos grupos)
-
-🔧 QUANDO CRIAR CÓDIGO:
-
-SÓ crie código se:
-✅ Entendeu 100% o requisito
-✅ Sabe qual estrutura usar
-✅ Tem lógica clara em mente
-
-Se NÃO tiver certeza:
-❌ NÃO crie código
-✅ Faça perguntas (type: "question")
-✅ Sugira alternativas (type: "advice")
-
-📦 FORMATO DE RESPOSTA JSON:
-
-{
-  "type": "code" | "advice" | "question",
-  "response": "explicação clara",
-  "logic": "descrição da lógica (se type=code)",
-  "commandName": "nome sem espaços",
-  "commandTrigger": "!comando ou /comando",
-  "code": "código completo",
-  "usage": "exemplo de uso",
-  "isPublic": true/false
-}
-
-💻 ESTRUTURA OBRIGATÓRIA:
-
-// Estados globais (se necessário)
-const estadoComando = new Map();
-
-export async function handleNome(sock, message, text) {
-  const chatId = message.key.remoteJid;
-  const senderId = message.key.participant || message.key.remoteJid;
-  const args = text.split(' ').slice(1);
-  
-  // Validações
-  if (!args[0]) {
-    await sendSafeMessage(sock, chatId, { text: '❌ Uso: !comando <param>' });
-    return;
-  }
-  
-  // Lógica principal
-  try {
-    // seu código
-    await sendSafeMessage(sock, chatId, { text: '✅ Sucesso' });
-  } catch (e) {
-    await sendSafeMessage(sock, chatId, { text: '❌ Erro: ' + e.message });
-  }
-}
-
-🎓 EXEMPLOS DE BOA LÓGICA:
-
-1. Sorteio: Map para grupos ativos, setTimeout para finalizar
-2. Enquete: Map com {chatId: {opcoes, votos}}
-3. Quiz: Map com {chatId: {pergunta, resposta, participantes}}
-
-⚠️ NUNCA:
-- Código sem validação
-- Lógica incompleta
-- Variáveis globais sem Map/Set
-- Código sem try/catch
-- Funções sem await`;
+        const systemPrompt = `Voce e um assistente de desenvolvimento para Node.js/Baileys.\nResponda SEMPRE em JSON com os campos:\n{\n  "type": "code" | "advice" | "question",\n  "response": "texto",\n  "logic": "texto",\n  "commandName": "nome",\n  "commandTrigger": "/comando",\n  "code": "codigo",\n  "usage": "exemplo",\n  "isPublic": true\n}\nSe faltar contexto para criar comando, use type=question.\nSe for para criar comando, use type=code com codigo executavel ESM.`;
 
         const messages = [
-            { role: "system", content: systemPrompt },
+            { role: 'system', content: systemPrompt },
             ...history,
-            { role: "user", content: messageText }
+            { role: 'user', content: effectivePrompt }
         ];
 
         const response = await groq.chat.completions.create({
-            model: "llama-3.3-70b-versatile",
+            model: 'llama-3.3-70b-versatile',
             messages,
             max_tokens: 2000,
-            temperature: 0.7,
-            response_format: { type: "json_object" }
+            temperature: 0.5,
+            response_format: { type: 'json_object' }
         });
 
         const result = JSON.parse(response.choices[0].message.content);
+        addToHistory(senderId, 'user', effectivePrompt);
+        addToHistory(senderId, 'assistant', result.response || '');
 
-        addToHistory(senderId, 'user', messageText);
-        addToHistory(senderId, 'assistant', result.response);
-
-        // Se for pergunta, apenas responder
         if (result.type === 'question') {
-            await sendSafeMessage(sock, chatId, { text: `❓ ${result.response}` });
+            await sendSafeMessage(sock, chatId, { text: `Pergunta: ${result.response}` });
             return;
         }
 
-        // Se for conselho, apenas responder
         if (result.type === 'advice') {
-            await sendSafeMessage(sock, chatId, { text: `💡 ${result.response}` });
+            await sendSafeMessage(sock, chatId, { text: `Sugestao: ${result.response}` });
             return;
         }
 
-        // Se for código, validar lógica
         if (result.type === 'code') {
-            if (!result.logic || result.logic.length < 20) {
-                await sendSafeMessage(sock, chatId, { text: '❌ Erro: Lógica não foi planejada adequadamente. Tente novamente.' });
+            if (!result.commandName || !result.commandTrigger || !result.code) {
+                await sendSafeMessage(sock, chatId, { text: 'Erro: resposta de codigo incompleta. Tente novamente.' });
                 return;
             }
-            const fileName = `${result.commandName}.js`;
-            const customDir = path.join(__dirname, 'custom');
 
-            if (!fs.existsSync(customDir)) {
-                fs.mkdirSync(customDir, { recursive: true });
-            }
-
-            const filePath = path.join(customDir, fileName);
-            fs.writeFileSync(filePath, result.code);
-            ensureCommandHandlerExport(filePath, result.commandName);
-
-            // Auto-integrar ao groupResponder
-            await integrateCommand(result.commandName, result.commandTrigger, result.isPublic);
-
-            const msg = `${result.response}\n\n🧠 *LÓGICA IMPLEMENTADA:*\n${result.logic}\n\n✅ *COMANDO CRIADO!*\n📁 Arquivo: functions/custom/${fileName}\n🔑 Gatilho: ${result.commandTrigger}\n👥 Público: ${result.isPublic ? 'Sim' : 'Só admins'}\n💬 Uso: ${result.usage}\n\n✅ Integrado e pronto para usar!`;
-            await sendSafeMessage(sock, chatId, { text: msg });
-        } else {
-            await sendSafeMessage(sock, chatId, { text: result.response });
+            pendingCommandApproval.set(senderId, result);
+            const preview = `3/3 Confirmacao\n\nComando: ${result.commandTrigger}\nArquivo: functions/custom/${result.commandName}.js\nPublico: ${result.isPublic ? 'Sim' : 'Nao'}\nUso: ${result.usage || 'Sem exemplo'}\n\nDescricao:\n${result.response || 'Sem descricao'}\n\nResponda APROVAR para criar ou CANCELAR para abortar.`;
+            await sendSafeMessage(sock, chatId, { text: preview });
+            return;
         }
 
+        await sendSafeMessage(sock, chatId, { text: result.response || 'Nao entendi sua solicitacao.' });
     } catch (e) {
-        await sendSafeMessage(sock, chatId, { text: `❌ Erro: ${e.message}` });
+        await sendSafeMessage(sock, chatId, { text: `Erro: ${e.message}` });
     }
 }
-
 async function integrateCommand(commandName, trigger, isPublic) {
     const responderPath = path.join(__dirname, 'groupResponder.js');
     let content = fs.readFileSync(responderPath, 'utf8');
