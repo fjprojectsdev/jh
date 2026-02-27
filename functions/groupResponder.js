@@ -33,9 +33,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEMBRETES_FILE = path.join(__dirname, '..', 'lembretes.json');
 const BOT_LOG_FILE = path.join(__dirname, '..', 'bot.log');
 const LAMINAS_FILE = path.join(__dirname, '..', 'laminas.json');
+const LAMINA_SCHEDULES_FILE = path.join(__dirname, '..', 'lamina_schedules.json');
+const LAMINA_CONVERSATIONS_FILE = path.join(__dirname, '..', 'lamina_conversations.json');
 const BOT_TRIGGER = 'bot';
 const addGroupWizardState = new Map();
 const laminaWizardState = new Map();
+const agendarLaminaWizardState = new Map();
+let laminaSchedulerTimer = null;
 
 // Configuração dos tokens do projeto (Centralizada)
 const PROJECT_TOKENS = {
@@ -203,6 +207,14 @@ function getLaminaWizard(senderId) {
 
 function clearLaminaWizard(senderId) {
     laminaWizardState.delete(senderId);
+}
+
+function getAgendarLaminaWizard(senderId) {
+    return agendarLaminaWizardState.get(senderId);
+}
+
+function clearAgendarLaminaWizard(senderId) {
+    agendarLaminaWizardState.delete(senderId);
 }
 
 function getRequiredPermissionForAdminCommand(commandToken) {
@@ -447,6 +459,193 @@ function buildSavedLaminasListMessage() {
         });
 
     return `LAMINAS SALVAS (${list.length})\n\n${lines.join('\n')}`;
+}
+
+function readLaminaSchedules() {
+    try {
+        if (!fs.existsSync(LAMINA_SCHEDULES_FILE)) return [];
+        const parsed = JSON.parse(fs.readFileSync(LAMINA_SCHEDULES_FILE, 'utf8'));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeLaminaSchedules(items) {
+    fs.writeFileSync(LAMINA_SCHEDULES_FILE, JSON.stringify(items, null, 2), 'utf8');
+}
+
+function readLaminaConversations() {
+    try {
+        if (!fs.existsSync(LAMINA_CONVERSATIONS_FILE)) return {};
+        const parsed = JSON.parse(fs.readFileSync(LAMINA_CONVERSATIONS_FILE, 'utf8'));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function writeLaminaConversations(data) {
+    fs.writeFileSync(LAMINA_CONVERSATIONS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function trackLaminaConversation(senderId, context, messageText = '') {
+    const safeSender = String(senderId || '').trim();
+    if (!safeSender) return;
+
+    const db = readLaminaConversations();
+    const nowIso = new Date().toISOString();
+    const current = db[safeSender] || {
+        userId: safeSender,
+        firstSeenAt: nowIso,
+        lastSeenAt: nowIso,
+        totalInteractions: 0,
+        contexts: {},
+        samples: []
+    };
+
+    current.lastSeenAt = nowIso;
+    current.totalInteractions = Number(current.totalInteractions || 0) + 1;
+    const ctx = String(context || 'unknown').trim() || 'unknown';
+    current.contexts[ctx] = Number(current.contexts[ctx] || 0) + 1;
+    if (String(messageText || '').trim()) {
+        current.samples.push({
+            at: nowIso,
+            context: ctx,
+            text: String(messageText).slice(0, 220)
+        });
+        if (current.samples.length > 20) current.samples.shift();
+    }
+
+    db[safeSender] = current;
+    writeLaminaConversations(db);
+}
+
+function parseTimeHHMM(value) {
+    const raw = String(value || '').trim();
+    const match = raw.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    const hh = Number(match[1]);
+    const mm = Number(match[2]);
+    if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+    return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function getSaoPauloDateTimeParts(now = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false
+    }).formatToParts(now);
+
+    const pick = (type) => parts.find((p) => p.type === type)?.value || '';
+    const year = pick('year');
+    const month = pick('month');
+    const day = pick('day');
+    const hour = pick('hour');
+    const minute = pick('minute');
+    return {
+        dateKey: `${year}-${month}-${day}`,
+        time: `${hour}:${minute}`
+    };
+}
+
+function resolveLaminaByInput(input) {
+    const list = readSavedLaminas();
+    if (!list.length) return { ok: false, message: 'Nao ha laminas salvas para agendar.' };
+
+    const raw = String(input || '').trim();
+    if (!raw) return { ok: false, message: 'Informe o titulo ou numero da lamina.' };
+
+    const asNumber = Number.parseInt(raw, 10);
+    if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= list.length) {
+        return { ok: true, lamina: list[asNumber - 1] };
+    }
+
+    const lower = raw.toLowerCase();
+    const exact = list.find((item) => String(item?.title || '').toLowerCase() === lower);
+    if (exact) return { ok: true, lamina: exact };
+
+    const partial = list.filter((item) => String(item?.title || '').toLowerCase().includes(lower));
+    if (partial.length === 1) return { ok: true, lamina: partial[0] };
+    if (partial.length > 1) return { ok: false, message: 'Mais de uma lamina encontrada. Use o numero.' };
+
+    return { ok: false, message: 'Lamina nao encontrada.' };
+}
+
+function createLaminaSchedule({ title, time, creatorId }) {
+    const schedules = readLaminaSchedules();
+    const id = `lamina_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const item = {
+        id,
+        title,
+        time,
+        creatorId,
+        active: true,
+        lastRunDate: null,
+        createdAt: new Date().toISOString()
+    };
+    schedules.push(item);
+    writeLaminaSchedules(schedules);
+    return item;
+}
+
+async function runScheduledLaminaItem(sock, scheduleItem) {
+    const lamina = readSavedLaminas().find((item) => String(item?.title || '').toLowerCase() === String(scheduleItem.title || '').toLowerCase());
+    if (!lamina) {
+        return { ok: false, message: `Lamina "${scheduleItem.title}" nao encontrada.` };
+    }
+
+    const state = {
+        groups: Array.isArray(lamina.groups) ? lamina.groups : [],
+        imageSource: String(lamina.imageSource || ''),
+        imageBuffer: lamina.imageBase64 ? Buffer.from(lamina.imageBase64, 'base64') : null,
+        textBody: String(lamina.textBody || '')
+    };
+
+    const result = await sendLaminaToGroups(sock, state);
+    if (result.failures.length) {
+        return { ok: false, message: result.failures.join('; ') };
+    }
+    return { ok: true };
+}
+
+function ensureLaminaScheduler(sock) {
+    if (laminaSchedulerTimer) return;
+    laminaSchedulerTimer = setInterval(async () => {
+        const schedules = readLaminaSchedules();
+        if (!schedules.length) return;
+
+        const now = getSaoPauloDateTimeParts(new Date());
+        let changed = false;
+
+        for (const item of schedules) {
+            if (!item?.active) continue;
+            if (String(item.time || '') !== now.time) continue;
+            if (String(item.lastRunDate || '') === now.dateKey) continue;
+
+            try {
+                const exec = await runScheduledLaminaItem(sock, item);
+                item.lastRunDate = now.dateKey;
+                item.lastRunAt = new Date().toISOString();
+                item.lastRunStatus = exec.ok ? 'ok' : 'error';
+                item.lastRunMessage = exec.ok ? '' : exec.message;
+                changed = true;
+            } catch (error) {
+                item.lastRunDate = now.dateKey;
+                item.lastRunAt = new Date().toISOString();
+                item.lastRunStatus = 'error';
+                item.lastRunMessage = error.message || String(error);
+                changed = true;
+            }
+        }
+
+        if (changed) writeLaminaSchedules(schedules);
+    }, 30000);
 }
 
 function getIncomingImageMessageContent(message) {
@@ -808,6 +1007,7 @@ const RESPONSES = {
 
 export async function handleGroupMessages(sock, message, context = {}) {
     if (!global.sock) global.sock = sock;
+    ensureLaminaScheduler(sock);
     const groupId = message.key.remoteJid;
     const isGroup = groupId.endsWith('@g.us');
     const senderId = message.key.participant || message.key.remoteJid;
@@ -913,8 +1113,70 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
                 return;
             }
+            trackLaminaConversation(senderId, 'list', text);
             await sendSafeMessage(sock, senderId, { text: buildSavedLaminasListMessage() });
             return;
+        }
+
+        const agendarState = getAgendarLaminaWizard(senderId);
+        if (agendarState) {
+            if (textLower === '/cancelar' || textLower === 'cancelar') {
+                clearAgendarLaminaWizard(senderId);
+                await sendSafeMessage(sock, senderId, { text: 'Fluxo /agendarlamina cancelado.' });
+                return;
+            }
+
+            if (agendarState.step === 'choose') {
+                const resolved = resolveLaminaByInput(text);
+                if (!resolved.ok) {
+                    await sendSafeMessage(sock, senderId, { text: `${resolved.message}\n\nEscolha pelo numero ou titulo da lamina.` });
+                    return;
+                }
+                agendarState.templateTitle = resolved.lamina.title;
+                agendarState.step = 'time';
+                agendarLaminaWizardState.set(senderId, agendarState);
+                await sendSafeMessage(sock, senderId, { text: `Lamina selecionada: ${resolved.lamina.title}\n\nQual horario diario? (HH:MM, America/Sao_Paulo)` });
+                return;
+            }
+
+            if (agendarState.step === 'time') {
+                const parsedTime = parseTimeHHMM(text);
+                if (!parsedTime) {
+                    await sendSafeMessage(sock, senderId, { text: 'Horario invalido. Use formato HH:MM, ex: 09:30' });
+                    return;
+                }
+                agendarState.time = parsedTime;
+                agendarState.step = 'confirm';
+                agendarLaminaWizardState.set(senderId, agendarState);
+                await sendSafeMessage(sock, senderId, {
+                    text: `Confirma agendamento diario?\n\nLamina: ${agendarState.templateTitle}\nHorario: ${agendarState.time} (America/Sao_Paulo)\n\nResponda APROVAR ou CANCELAR.`
+                });
+                return;
+            }
+
+            if (agendarState.step === 'confirm') {
+                if (/^(aprovar|aprovado|aprovo|sim|ok|confirmo)$/i.test(textLower)) {
+                    const created = createLaminaSchedule({
+                        title: agendarState.templateTitle,
+                        time: agendarState.time,
+                        creatorId: senderId
+                    });
+                    clearAgendarLaminaWizard(senderId);
+                    await sendSafeMessage(sock, senderId, {
+                        text: `Agendamento criado.\nID: ${created.id}\nLamina: ${created.title}\nHorario: ${created.time} (America/Sao_Paulo)`
+                    });
+                    return;
+                }
+
+                if (textLower === 'cancelar' || textLower === '/cancelar') {
+                    clearAgendarLaminaWizard(senderId);
+                    await sendSafeMessage(sock, senderId, { text: 'Agendamento cancelado.' });
+                    return;
+                }
+
+                await sendSafeMessage(sock, senderId, { text: 'Responda APROVAR ou CANCELAR.' });
+                return;
+            }
         }
 
         const laminaState = getLaminaWizard(senderId);
@@ -1061,6 +1323,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
                 return;
             }
+            trackLaminaConversation(senderId, 'lamina_start', text);
             laminaWizardState.set(senderId, {
                 step: 'group',
                 groups: [],
@@ -1070,6 +1333,26 @@ export async function handleGroupMessages(sock, message, context = {}) {
             });
             await sendSafeMessage(sock, senderId, {
                 text: 'Fluxo /lamina iniciado.\n\nPara qual grupo ou grupos enviar o texto?\nEnvie nome(s) ou ID(s) @g.us separados por virgula ou quebra de linha.'
+            });
+            return;
+        }
+
+        if (textLower.startsWith('/agendarlamina')) {
+            const authorized = await isAuthorized(senderId);
+            if (!authorized) {
+                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
+                return;
+            }
+            const list = readSavedLaminas();
+            if (!list.length) {
+                await sendSafeMessage(sock, senderId, { text: 'Nao ha laminas salvas. Envie uma /lamina e salve primeiro.' });
+                return;
+            }
+            trackLaminaConversation(senderId, 'agendar_start', text);
+            const options = list.map((item, idx) => `${idx + 1}. ${item.title}`).join('\n');
+            agendarLaminaWizardState.set(senderId, { step: 'choose', templateTitle: '', time: '' });
+            await sendSafeMessage(sock, senderId, {
+                text: `Qual lamina deseja agendar?\n\n${options}\n\nResponda com numero ou titulo.`
             });
             return;
         }
@@ -2491,5 +2774,5 @@ _iMavyAgent | Sistema de Lembretes_`;
 }
 
 export function hasPendingPrivateWizard(senderId) {
-    return addGroupWizardState.has(senderId) || laminaWizardState.has(senderId);
+    return addGroupWizardState.has(senderId) || laminaWizardState.has(senderId) || agendarLaminaWizardState.has(senderId);
 }
