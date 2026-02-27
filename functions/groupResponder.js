@@ -32,6 +32,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEMBRETES_FILE = path.join(__dirname, '..', 'lembretes.json');
 const BOT_LOG_FILE = path.join(__dirname, '..', 'bot.log');
+const LAMINAS_FILE = path.join(__dirname, '..', 'laminas.json');
 const BOT_TRIGGER = 'bot';
 const addGroupWizardState = new Map();
 const laminaWizardState = new Map();
@@ -386,6 +387,66 @@ async function sendLaminaToGroups(sock, state) {
     }
 
     return { failures };
+}
+
+function readSavedLaminas() {
+    try {
+        if (!fs.existsSync(LAMINAS_FILE)) return [];
+        const parsed = JSON.parse(fs.readFileSync(LAMINAS_FILE, 'utf8'));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeSavedLaminas(items) {
+    fs.writeFileSync(LAMINAS_FILE, JSON.stringify(items, null, 2), 'utf8');
+}
+
+function saveLaminaTemplate({ title, state, senderId }) {
+    const safeTitle = String(title || '').trim();
+    if (!safeTitle) {
+        return { ok: false, message: 'Titulo invalido.' };
+    }
+
+    const list = readSavedLaminas();
+    const nowIso = new Date().toISOString();
+    const payload = {
+        title: safeTitle,
+        textBody: String(state?.textBody || ''),
+        imageSource: String(state?.imageSource || ''),
+        imageBase64: state?.imageBuffer ? state.imageBuffer.toString('base64') : '',
+        groups: Array.isArray(state?.groups) ? state.groups : [],
+        updatedAt: nowIso,
+        createdBy: senderId
+    };
+
+    const index = list.findIndex((item) => String(item?.title || '').toLowerCase() === safeTitle.toLowerCase());
+    if (index >= 0) {
+        payload.createdAt = list[index].createdAt || nowIso;
+        list[index] = payload;
+    } else {
+        payload.createdAt = nowIso;
+        list.push(payload);
+    }
+
+    writeSavedLaminas(list);
+    return { ok: true, message: `Lamina "${safeTitle}" salva com sucesso.` };
+}
+
+function buildSavedLaminasListMessage() {
+    const list = readSavedLaminas();
+    if (!list.length) return 'Nenhuma lamina salva.';
+
+    const lines = list
+        .slice(-50)
+        .reverse()
+        .map((item, idx) => {
+            const dt = item?.updatedAt ? new Date(item.updatedAt).toLocaleString('pt-BR') : 'sem data';
+            return `${idx + 1}. ${item.title} | atualizada: ${dt}`;
+        });
+
+    return `LAMINAS SALVAS (${list.length})\n\n${lines.join('\n')}`;
 }
 
 function getIncomingImageMessageContent(message) {
@@ -846,6 +907,16 @@ export async function handleGroupMessages(sock, message, context = {}) {
             return;
         }
 
+        if (textLower.startsWith('/listarlaminas')) {
+            const authorized = await isAuthorized(senderId);
+            if (!authorized) {
+                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
+                return;
+            }
+            await sendSafeMessage(sock, senderId, { text: buildSavedLaminasListMessage() });
+            return;
+        }
+
         const laminaState = getLaminaWizard(senderId);
         if (laminaState) {
             if (textLower === '/cancelar' || textLower === 'cancelar') {
@@ -930,8 +1001,12 @@ export async function handleGroupMessages(sock, message, context = {}) {
                         });
                     } catch (error) {
                         await sendSafeMessage(sock, senderId, { text: `Falha ao enviar lamina: ${error.message}` });
+                        clearLaminaWizard(senderId);
+                        return;
                     }
-                    clearLaminaWizard(senderId);
+                    laminaState.step = 'savePrompt';
+                    laminaWizardState.set(senderId, laminaState);
+                    await sendSafeMessage(sock, senderId, { text: 'Deseja salvar essa lamina para usar depois? (sim/nao)' });
                     return;
                 }
 
@@ -947,6 +1022,35 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
 
                 await sendSafeMessage(sock, senderId, { text: 'Responda APROVAR, REFAZER ou CANCELAR.' });
+                return;
+            }
+
+            if (laminaState.step === 'savePrompt') {
+                const answer = parseYesNo(textLower);
+                if (answer === null) {
+                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
+                    return;
+                }
+                if (!answer) {
+                    clearLaminaWizard(senderId);
+                    await sendSafeMessage(sock, senderId, { text: 'Ok. Lamina enviada e nao salva.' });
+                    return;
+                }
+                laminaState.step = 'saveTitle';
+                laminaWizardState.set(senderId, laminaState);
+                await sendSafeMessage(sock, senderId, { text: 'Qual titulo deseja para essa lamina salva?' });
+                return;
+            }
+
+            if (laminaState.step === 'saveTitle') {
+                const title = String(text || '').trim();
+                if (!title) {
+                    await sendSafeMessage(sock, senderId, { text: 'Titulo vazio. Envie um titulo valido.' });
+                    return;
+                }
+                const saved = saveLaminaTemplate({ title, state: laminaState, senderId });
+                clearLaminaWizard(senderId);
+                await sendSafeMessage(sock, senderId, { text: saved.message });
                 return;
             }
         }
