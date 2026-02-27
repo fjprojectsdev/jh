@@ -26,11 +26,11 @@ function levelFromMessages(totalMessages) {
 }
 
 function gradeFromLevel(level) {
-    if (level >= 15) return 'Lenda';
-    if (level >= 10) return 'Mestre';
-    if (level >= 6) return 'Avancado';
-    if (level >= 3) return 'Intermediario';
-    return 'Neofita';
+    if (level >= 15) return 'Rei do Teclado';
+    if (level >= 10) return 'Mago do Grupo';
+    if (level >= 6) return 'Foguetinho';
+    if (level >= 3) return 'Tagarela Premium';
+    return 'Aquecendo os Dedos';
 }
 
 function ensureLoaded() {
@@ -152,4 +152,3 @@ export function getGroupTopRanking(groupId, limit = 10) {
         top
     };
 }
-

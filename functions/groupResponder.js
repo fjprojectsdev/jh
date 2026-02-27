@@ -2281,9 +2281,8 @@ Desejamos a todos um excelente dia.`;
                 ranking.top.forEach((item, index) => {
                     const medal = medals[index] || '🏅';
                     rankingMsg += `${medal} *${item.senderName}*\n`;
-                    rankingMsg += `⭐ Nivel: ${item.level}\n`;
                     rankingMsg += `🔥 Grau: ${item.grade}\n`;
-                    rankingMsg += `💭 Mensagens: ${item.messages}\n\n`;
+                    rankingMsg += `💭 Total de mensagens: ${item.messages}\n\n`;
                 });
 
                 await sendSafeMessage(sock, groupId, { text: rankingMsg.trim() });
