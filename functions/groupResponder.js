@@ -315,29 +315,29 @@ function isLikelyHttpUrl(value) {
 }
 
 function buildLaminaPreview(state) {
-    const imageLabel = state.imageBuffer
-        ? 'upload no PV'
-        : (state.imageSource ? state.imageSource : 'nenhuma');
     const groupsLines = (state.groups || []).map((g, idx) => `${idx + 1}. ${g.subject} | ${g.id}`).join('\n');
-    return `PREVIA /lamina\n\nGrupos:\n${groupsLines}\n\nImagem: ${imageLabel}\n\nTexto:\n${state.textBody}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
+    return `PREVIA PRONTA.\n\nGrupos de destino:\n${groupsLines}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
 }
 
 async function sendLaminaPreview(sock, senderId, state) {
     if (state.imageBuffer) {
         await sendSafeMessage(sock, senderId, {
             image: state.imageBuffer,
-            caption: 'PREVIA DA IMAGEM /lamina'
+            caption: state.textBody
         });
         return;
     }
 
     const raw = String(state.imageSource || '').trim();
-    if (!raw) return;
+    if (!raw) {
+        await sendSafeMessage(sock, senderId, { text: state.textBody });
+        return;
+    }
 
     if (isLikelyHttpUrl(raw)) {
         await sendSafeMessage(sock, senderId, {
             image: { url: raw },
-            caption: 'PREVIA DA IMAGEM /lamina'
+            caption: state.textBody
         });
         return;
     }
@@ -347,7 +347,7 @@ async function sendLaminaPreview(sock, senderId, state) {
     const imageBuffer = fs.readFileSync(absPath);
     await sendSafeMessage(sock, senderId, {
         image: imageBuffer,
-        caption: 'PREVIA DA IMAGEM /lamina'
+        caption: state.textBody
     });
 }
 
