@@ -39,7 +39,7 @@ import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js'
 import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
 import { createIntelEngine, getIntelEventBuffer, storeIntelEvent } from './src/intelligence/intelEngine.js';
 import { createLeadEngine } from './src/intelligence/leadEngine.js';
-import { trackGroupMessage } from './functions/groupRanking.js';
+import { trackGroupMessage, backfillRankingFromLastHour } from './functions/groupRanking.js';
 
 console.log('[IA] Moderacao:', isAIEnabled() ? 'ATIVA (Groq)' : 'Desabilitada');
 console.log('[IA] Vendas:', isAISalesEnabled() ? 'ATIVA (Groq)' : 'Desabilitada');
@@ -618,6 +618,12 @@ async function startBot() {
     console.log('[DEBUG] ensureCoreConfigFiles...');
     await ensureCoreConfigFiles();
     await refreshAllowedGroupsCache(true);
+    try {
+        const backfill = await backfillRankingFromLastHour({ hours: 1, maxRows: 5000 });
+        console.log('[RANKING] Backfill 1h:', backfill);
+    } catch (error) {
+        console.warn('[RANKING] Falha no backfill 1h:', error.message || String(error));
+    }
 
     console.log('[DEBUG] restoreSessionFromBackup...');
     // Tentar restaurar sessao do backup se necessario
@@ -949,7 +955,8 @@ async function startBot() {
                         groupName: groupSubject || chatId,
                         senderId,
                         senderName: resolveParticipantName(message, senderId),
-                        timestamp: messageTimestamp
+                        timestamp: messageTimestamp,
+                        messageId
                     });
                 }
 
