@@ -1318,11 +1318,6 @@ export async function handleGroupMessages(sock, message, context = {}) {
         }
 
         if (textLower.startsWith('/lamina')) {
-            const authorized = await isAuthorized(senderId);
-            if (!authorized) {
-                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
-                return;
-            }
             trackLaminaConversation(senderId, 'lamina_start', text);
             laminaWizardState.set(senderId, {
                 step: 'group',
