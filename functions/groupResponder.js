@@ -322,6 +322,35 @@ function buildLaminaPreview(state) {
     return `PREVIA /lamina\n\nGrupos:\n${groupsLines}\n\nImagem: ${imageLabel}\n\nTexto:\n${state.textBody}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
 }
 
+async function sendLaminaPreview(sock, senderId, state) {
+    if (state.imageBuffer) {
+        await sendSafeMessage(sock, senderId, {
+            image: state.imageBuffer,
+            caption: 'PREVIA DA IMAGEM /lamina'
+        });
+        return;
+    }
+
+    const raw = String(state.imageSource || '').trim();
+    if (!raw) return;
+
+    if (isLikelyHttpUrl(raw)) {
+        await sendSafeMessage(sock, senderId, {
+            image: { url: raw },
+            caption: 'PREVIA DA IMAGEM /lamina'
+        });
+        return;
+    }
+
+    const absPath = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+    if (!fs.existsSync(absPath)) return;
+    const imageBuffer = fs.readFileSync(absPath);
+    await sendSafeMessage(sock, senderId, {
+        image: imageBuffer,
+        caption: 'PREVIA DA IMAGEM /lamina'
+    });
+}
+
 async function sendLaminaToGroups(sock, state) {
     const targets = Array.isArray(state.groups) ? state.groups : [];
     const failures = [];
@@ -881,6 +910,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 laminaState.textBody = body;
                 laminaState.step = 'confirm';
                 laminaWizardState.set(senderId, laminaState);
+                await sendLaminaPreview(sock, senderId, laminaState);
                 await sendSafeMessage(sock, senderId, { text: buildLaminaPreview(laminaState) });
                 return;
             }
