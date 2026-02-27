@@ -279,11 +279,19 @@ function isLikelyHttpUrl(value) {
 }
 
 function buildLaminaPreview(state) {
-    return `PREVIA /lamina\n\nGrupo: ${state.groupName}\nID: ${state.groupId}\nImagem: ${state.imageSource ? state.imageSource : 'nenhuma'}\n\nTexto:\n${state.textBody}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
+    const imageLabel = state.imageBuffer
+        ? 'upload no PV'
+        : (state.imageSource ? state.imageSource : 'nenhuma');
+    return `PREVIA /lamina\n\nGrupo: ${state.groupName}\nID: ${state.groupId}\nImagem: ${imageLabel}\n\nTexto:\n${state.textBody}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
 }
 
 async function sendLaminaToGroup(sock, state) {
     const targetId = state.groupId;
+    if (state.imageBuffer) {
+        await sendSafeMessage(sock, targetId, { image: state.imageBuffer, caption: state.textBody });
+        return;
+    }
+
     if (!state.imageSource) {
         await sendSafeMessage(sock, targetId, { text: state.textBody });
         return;
@@ -301,6 +309,18 @@ async function sendLaminaToGroup(sock, state) {
     }
     const imageBuffer = fs.readFileSync(absPath);
     await sendSafeMessage(sock, targetId, { image: imageBuffer, caption: state.textBody });
+}
+
+function getIncomingImageMessageContent(message) {
+    const root = message?.message || {};
+    const unwrapped =
+        root?.ephemeralMessage?.message
+        || root?.viewOnceMessage?.message
+        || root?.viewOnceMessageV2?.message
+        || root?.viewOnceMessageV2Extension?.message
+        || root;
+
+    return unwrapped?.imageMessage || null;
 }
 
 function stripImavyMention(text) {
@@ -662,6 +682,8 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
     const contentType = Object.keys(message.message)[0];
     let text = '';
+    const imageMessageContent = getIncomingImageMessageContent(message);
+    const hasIncomingImage = Boolean(imageMessageContent);
 
     // Permitir /comandos no PV
     switch (contentType) {
@@ -674,7 +696,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Bloquear mensagens vazias
-    if (!text || text.trim().length === 0) return;
+    if ((!text || text.trim().length === 0) && !(hasIncomingImage && !isGroup)) return;
 
     // Funcionalidade de resposta automática desabilitada
 
@@ -766,17 +788,34 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 laminaState.step = 'image';
                 laminaWizardState.set(senderId, laminaState);
                 await sendSafeMessage(sock, senderId, {
-                    text: 'Qual imagem deseja enviar junto? Envie URL HTTP/HTTPS, caminho local (ex: assets/minha.jpg) ou digite NENHUMA.'
+                    text: 'Qual imagem deseja enviar junto? Envie a imagem aqui no PV, ou URL HTTP/HTTPS, ou caminho local (ex: assets/minha.jpg), ou digite NENHUMA.'
                 });
                 return;
             }
 
             if (laminaState.step === 'image') {
-                const raw = String(text || '').trim();
-                if (isNoneText(raw)) {
-                    laminaState.imageSource = '';
+                if (hasIncomingImage) {
+                    try {
+                        const media = await sock.downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
+                        if (!media || !Buffer.isBuffer(media) || media.length === 0) {
+                            await sendSafeMessage(sock, senderId, { text: 'Nao consegui ler a imagem enviada. Tente novamente.' });
+                            return;
+                        }
+                        laminaState.imageBuffer = media;
+                        laminaState.imageSource = 'upload_pv';
+                    } catch (error) {
+                        await sendSafeMessage(sock, senderId, { text: `Falha ao processar imagem: ${error.message}` });
+                        return;
+                    }
                 } else {
-                    laminaState.imageSource = raw;
+                    const raw = String(text || '').trim();
+                    if (isNoneText(raw)) {
+                        laminaState.imageSource = '';
+                        laminaState.imageBuffer = null;
+                    } else {
+                        laminaState.imageSource = raw;
+                        laminaState.imageBuffer = null;
+                    }
                 }
                 laminaState.step = 'text';
                 laminaWizardState.set(senderId, laminaState);
@@ -816,6 +855,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     laminaState.groupId = '';
                     laminaState.groupName = '';
                     laminaState.imageSource = '';
+                    laminaState.imageBuffer = null;
                     laminaState.textBody = '';
                     laminaWizardState.set(senderId, laminaState);
                     await sendSafeMessage(sock, senderId, { text: 'Vamos refazer. Para qual grupo enviar o texto?' });
@@ -838,6 +878,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 groupId: '',
                 groupName: '',
                 imageSource: '',
+                imageBuffer: null,
                 textBody: ''
             });
             await sendSafeMessage(sock, senderId, { text: 'Fluxo /lamina iniciado.\n\nPara qual grupo enviar o texto?' });
