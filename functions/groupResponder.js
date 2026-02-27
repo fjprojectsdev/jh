@@ -461,6 +461,35 @@ function buildSavedLaminasListMessage() {
     return `LAMINAS SALVAS (${list.length})\n\n${lines.join('\n')}`;
 }
 
+function resolveSavedLaminaByTitle(input) {
+    const list = readSavedLaminas();
+    if (!list.length) return { ok: false, message: 'Nao ha laminas salvas.' };
+
+    const raw = String(input || '').trim();
+    if (!raw) return { ok: false, message: 'Informe o titulo da lamina. Ex.: /usarlamina MinhaLamina' };
+
+    const exact = list.find((item) => String(item?.title || '').toLowerCase() === raw.toLowerCase());
+    if (exact) return { ok: true, lamina: exact };
+
+    const partial = list.filter((item) => String(item?.title || '').toLowerCase().includes(raw.toLowerCase()));
+    if (partial.length === 1) return { ok: true, lamina: partial[0] };
+    if (partial.length > 1) {
+        const options = partial.slice(0, 10).map((item, idx) => `${idx + 1}. ${item.title}`).join('\n');
+        return { ok: false, message: `Mais de uma lamina encontrada:\n${options}\n\nSeja mais especifico no titulo.` };
+    }
+
+    return { ok: false, message: `Lamina "${raw}" nao encontrada.` };
+}
+
+function buildLaminaStateFromSaved(lamina) {
+    return {
+        groups: Array.isArray(lamina?.groups) ? lamina.groups : [],
+        imageSource: String(lamina?.imageSource || ''),
+        imageBuffer: lamina?.imageBase64 ? Buffer.from(lamina.imageBase64, 'base64') : null,
+        textBody: String(lamina?.textBody || '')
+    };
+}
+
 function readLaminaSchedules() {
     try {
         if (!fs.existsSync(LAMINA_SCHEDULES_FILE)) return [];
@@ -1115,6 +1144,40 @@ export async function handleGroupMessages(sock, message, context = {}) {
             }
             trackLaminaConversation(senderId, 'list', text);
             await sendSafeMessage(sock, senderId, { text: buildSavedLaminasListMessage() });
+            return;
+        }
+
+        if (textLower.startsWith('/usarlamina')) {
+            const title = String(text || '').replace(/^\/usarlamina/i, '').trim();
+            const resolved = resolveSavedLaminaByTitle(title);
+            if (!resolved.ok) {
+                await sendSafeMessage(sock, senderId, { text: resolved.message });
+                return;
+            }
+
+            const state = buildLaminaStateFromSaved(resolved.lamina);
+            if (!state.groups.length) {
+                await sendSafeMessage(sock, senderId, { text: `A lamina "${resolved.lamina.title}" nao tem grupos configurados.` });
+                return;
+            }
+            if (!state.textBody) {
+                await sendSafeMessage(sock, senderId, { text: `A lamina "${resolved.lamina.title}" esta sem texto configurado.` });
+                return;
+            }
+
+            trackLaminaConversation(senderId, 'use_saved', text);
+            try {
+                const result = await sendLaminaToGroups(sock, state);
+                const total = state.groups.length;
+                const sent = total - result.failures.length;
+                let summary = `Lamina "${resolved.lamina.title}" enviada.\nSucesso: ${sent}\nFalhas: ${result.failures.length}`;
+                if (result.failures.length) {
+                    summary += `\n\nDetalhes:\n- ${result.failures.join('\n- ')}`;
+                }
+                await sendSafeMessage(sock, senderId, { text: summary });
+            } catch (error) {
+                await sendSafeMessage(sock, senderId, { text: `Falha ao usar lamina salva: ${error.message}` });
+            }
             return;
         }
 
