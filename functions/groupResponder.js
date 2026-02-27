@@ -6,7 +6,6 @@ import { addAdmin, removeAdmin, listAdmins, getAdminStats, isAuthorized, checkAu
 import { addBannedWord, removeBannedWord, listBannedWords } from './antiSpam.js';
 import { analyzeLeadIntent, getLeads } from './aiSales.js';
 import { analyzeMessage } from './aiModeration.js';
-import { addPromoGroup, removePromoGroup, listPromoGroups, setPromoInterval, togglePromo, getPromoConfig } from './autoPromo.js';
 import { checkRateLimit } from './rateLimiter.js';
 import { logger } from './logger.js';
 import { formatStats } from './stats.js';
@@ -36,13 +35,18 @@ const BOT_LOG_FILE = path.join(__dirname, '..', 'bot.log');
 const LAMINAS_FILE = path.join(__dirname, '..', 'laminas.json');
 const LAMINA_SCHEDULES_FILE = path.join(__dirname, '..', 'lamina_schedules.json');
 const LAMINA_CONVERSATIONS_FILE = path.join(__dirname, '..', 'lamina_conversations.json');
+const SHILL_TEMPLATES_FILE = path.join(__dirname, '..', 'laminas_shill.json');
+const SHILL_SCHEDULES_FILE = path.join(__dirname, '..', 'shill_schedules.json');
 const PRIVATE_WIZARDS_FILE = path.join(__dirname, '..', 'private_wizards_state.json');
 const BOT_TRIGGER = 'bot';
 const addGroupWizardState = new Map();
 const laminaWizardState = new Map();
 const agendarLaminaWizardState = new Map();
 const rankingWizardState = new Map();
+const laminaShillWizardState = new Map();
+const shillWizardState = new Map();
 let laminaSchedulerTimer = null;
+let shillSchedulerTimer = null;
 
 // Configuração dos tokens do projeto (Centralizada)
 const PROJECT_TOKENS = {
@@ -233,6 +237,24 @@ function clearRankingWizard(senderId) {
     persistPrivateWizardsState();
 }
 
+function getLaminaShillWizard(senderId) {
+    return laminaShillWizardState.get(senderId);
+}
+
+function clearLaminaShillWizard(senderId) {
+    laminaShillWizardState.delete(senderId);
+    persistPrivateWizardsState();
+}
+
+function getShillWizard(senderId) {
+    return shillWizardState.get(senderId);
+}
+
+function clearShillWizard(senderId) {
+    shillWizardState.delete(senderId);
+    persistPrivateWizardsState();
+}
+
 function toSerializableLaminaState(state = {}) {
     const copy = { ...state };
     if (Buffer.isBuffer(copy.imageBuffer)) {
@@ -265,7 +287,9 @@ function persistPrivateWizardsState() {
             addGroup: Array.from(addGroupWizardState.entries()),
             lamina: Array.from(laminaWizardState.entries()).map(([senderId, state]) => [senderId, toSerializableLaminaState(state)]),
             agendarLamina: Array.from(agendarLaminaWizardState.entries()),
-            ranking: Array.from(rankingWizardState.entries())
+            ranking: Array.from(rankingWizardState.entries()),
+            laminaShill: Array.from(laminaShillWizardState.entries()).map(([senderId, state]) => [senderId, toSerializableLaminaState(state)]),
+            shill: Array.from(shillWizardState.entries())
         };
         fs.writeFileSync(PRIVATE_WIZARDS_FILE, JSON.stringify(payload, null, 2), 'utf8');
     } catch (error) {
@@ -297,6 +321,16 @@ function loadPrivateWizardsState() {
                 if (senderId && state && typeof state === 'object') rankingWizardState.set(senderId, state);
             }
         }
+        if (Array.isArray(parsed?.laminaShill)) {
+            for (const [senderId, state] of parsed.laminaShill) {
+                if (senderId && state && typeof state === 'object') laminaShillWizardState.set(senderId, fromSerializableLaminaState(state));
+            }
+        }
+        if (Array.isArray(parsed?.shill)) {
+            for (const [senderId, state] of parsed.shill) {
+                if (senderId && state && typeof state === 'object') shillWizardState.set(senderId, state);
+            }
+        }
     } catch (error) {
         console.error('Falha ao carregar estado de wizards privados:', error.message || String(error));
     }
@@ -322,11 +356,20 @@ function setRankingWizard(senderId, state) {
     persistPrivateWizardsState();
 }
 
+function setLaminaShillWizard(senderId, state) {
+    laminaShillWizardState.set(senderId, state);
+    persistPrivateWizardsState();
+}
+
+function setShillWizard(senderId, state) {
+    shillWizardState.set(senderId, state);
+    persistPrivateWizardsState();
+}
+
 function getRequiredPermissionForAdminCommand(commandToken) {
     const token = String(commandToken || '').toLowerCase();
     if (token === '/fechar' || token === '/abrir') return 'openClose';
     if (token === '/lembrete' || token === '/lembretefixo' || token === '/stoplembrete' || token === '/stoplembretefixo' || token === '/testelembrete') return 'reminders';
-    if (token === '/promo' || token === '/sethorario') return 'promo';
     if (token === '/banir' || token === '/adicionartermo' || token === '/removertermo' || token === '/listartermos') return 'moderation';
     if (token === '/engajamento') return 'engagement';
     if (token === '/leads') return 'leadsRead';
@@ -828,6 +871,157 @@ function ensureLaminaScheduler(sock) {
     }, 30000);
 }
 
+function readShillTemplates() {
+    try {
+        if (!fs.existsSync(SHILL_TEMPLATES_FILE)) return [];
+        const parsed = JSON.parse(fs.readFileSync(SHILL_TEMPLATES_FILE, 'utf8'));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeShillTemplates(items) {
+    fs.writeFileSync(SHILL_TEMPLATES_FILE, JSON.stringify(items, null, 2), 'utf8');
+}
+
+function saveShillTemplate({ state, senderId }) {
+    const list = readShillTemplates();
+    const nowIso = new Date().toISOString();
+    const id = `shill_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const item = {
+        id,
+        title: id,
+        textBody: String(state?.textBody || ''),
+        imageSource: String(state?.imageSource || ''),
+        imageBase64: state?.imageBuffer ? state.imageBuffer.toString('base64') : '',
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        createdBy: senderId
+    };
+    list.push(item);
+    writeShillTemplates(list);
+    return item;
+}
+
+function buildShillTemplatesList(limit = 30) {
+    const list = readShillTemplates();
+    if (!list.length) return { ok: false, message: 'Nao ha laminas de shill salvas. Use /laminashill primeiro.' };
+    const shown = list.slice(-limit).reverse();
+    const lines = shown.map((item, idx) => {
+        const excerpt = String(item.textBody || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+        return `${idx + 1}. ${item.title}${excerpt ? ` | ${excerpt}` : ''}`;
+    }).join('\n');
+    return { ok: true, shown, message: `Escolha a lamina de shill:\n\n${lines}\n\nResponda com numero ou titulo.` };
+}
+
+function resolveShillTemplateByInput(input, shownList) {
+    const raw = String(input || '').trim();
+    const list = Array.isArray(shownList) && shownList.length ? shownList : readShillTemplates();
+    if (!raw || !list.length) return null;
+
+    const asNumber = Number.parseInt(raw, 10);
+    if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= list.length) {
+        return list[asNumber - 1];
+    }
+
+    const lower = raw.toLowerCase();
+    const exact = list.find((item) => String(item?.title || '').toLowerCase() === lower || String(item?.id || '').toLowerCase() === lower);
+    if (exact) return exact;
+
+    const partial = list.filter((item) => String(item?.title || '').toLowerCase().includes(lower));
+    if (partial.length === 1) return partial[0];
+    return null;
+}
+
+function readShillSchedules() {
+    try {
+        if (!fs.existsSync(SHILL_SCHEDULES_FILE)) return [];
+        const parsed = JSON.parse(fs.readFileSync(SHILL_SCHEDULES_FILE, 'utf8'));
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeShillSchedules(items) {
+    fs.writeFileSync(SHILL_SCHEDULES_FILE, JSON.stringify(items, null, 2), 'utf8');
+}
+
+function createShillSchedule({ group, perDay, template, creatorId }) {
+    const schedules = readShillSchedules();
+    const safePerDay = Math.max(1, Math.min(48, Number(perDay) || 1));
+    const intervalMinutes = Math.max(5, Math.floor(1440 / safePerDay));
+    const now = Date.now();
+    const item = {
+        id: `shill_${now}_${Math.floor(Math.random() * 1000)}`,
+        active: true,
+        group: { id: String(group.id || ''), subject: String(group.subject || group.id || '') },
+        perDay: safePerDay,
+        intervalMinutes,
+        templateId: String(template.id || ''),
+        templateTitle: String(template.title || template.id || ''),
+        nextRunAt: now + 60 * 1000,
+        lastRunAt: null,
+        createdBy: creatorId,
+        createdAt: new Date(now).toISOString()
+    };
+    schedules.push(item);
+    writeShillSchedules(schedules);
+    return item;
+}
+
+async function runShillScheduleItem(sock, scheduleItem) {
+    const templates = readShillTemplates();
+    const tpl = templates.find((item) => String(item.id || '') === String(scheduleItem.templateId || ''));
+    if (!tpl) return { ok: false, message: `Template de shill nao encontrado: ${scheduleItem.templateId}` };
+
+    const state = {
+        groups: [scheduleItem.group],
+        imageSource: String(tpl.imageSource || ''),
+        imageBuffer: tpl.imageBase64 ? Buffer.from(tpl.imageBase64, 'base64') : null,
+        textBody: String(tpl.textBody || '')
+    };
+    const result = await sendLaminaToGroups(sock, state);
+    if (result.failures.length) {
+        return { ok: false, message: result.failures.join('; ') };
+    }
+    return { ok: true };
+}
+
+function ensureShillScheduler(sock) {
+    if (shillSchedulerTimer) return;
+    shillSchedulerTimer = setInterval(async () => {
+        const schedules = readShillSchedules();
+        if (!schedules.length) return;
+        let changed = false;
+        const now = Date.now();
+
+        for (const item of schedules) {
+            if (!item?.active) continue;
+            const nextRunAt = Number(item.nextRunAt || 0);
+            if (!nextRunAt || nextRunAt > now) continue;
+
+            try {
+                const exec = await runShillScheduleItem(sock, item);
+                item.lastRunAt = new Date(now).toISOString();
+                item.lastRunStatus = exec.ok ? 'ok' : 'error';
+                item.lastRunMessage = exec.ok ? '' : exec.message;
+            } catch (error) {
+                item.lastRunAt = new Date(now).toISOString();
+                item.lastRunStatus = 'error';
+                item.lastRunMessage = error.message || String(error);
+            }
+
+            const intervalMinutes = Math.max(5, Number(item.intervalMinutes || 60));
+            item.nextRunAt = now + (intervalMinutes * 60 * 1000);
+            changed = true;
+        }
+
+        if (changed) writeShillSchedules(schedules);
+    }, 30000);
+}
+
 function getIncomingImageMessageContent(message) {
     const root = message?.message || {};
     const unwrapped =
@@ -1190,6 +1384,7 @@ loadPrivateWizardsState();
 export async function handleGroupMessages(sock, message, context = {}) {
     if (!global.sock) global.sock = sock;
     ensureLaminaScheduler(sock);
+    ensureShillScheduler(sock);
     const groupId = message.key.remoteJid;
     const isGroup = groupId.endsWith('@g.us');
     const senderId = message.key.participant || message.key.remoteJid;
@@ -1341,6 +1536,151 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 msg += `\n\nMostrando ${maxList} de ${groups.length} grupos.`;
             }
             await sendSafeMessage(sock, senderId, { text: msg });
+            return;
+        }
+
+        const laminaShillState = getLaminaShillWizard(senderId);
+        if (laminaShillState) {
+            if (textLower === '/cancelar' || textLower === 'cancelar') {
+                clearLaminaShillWizard(senderId);
+                await sendSafeMessage(sock, senderId, { text: 'Fluxo /laminashill cancelado.' });
+                return;
+            }
+
+            if (laminaShillState.step === 'image') {
+                if (hasIncomingImage) {
+                    try {
+                        const media = typeof sock.downloadMediaMessage === 'function'
+                            ? await sock.downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage })
+                            : await downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
+                        if (!media || !Buffer.isBuffer(media) || media.length === 0) {
+                            await sendSafeMessage(sock, senderId, { text: 'Nao consegui ler a imagem enviada. Tente novamente.' });
+                            return;
+                        }
+                        laminaShillState.imageBuffer = media;
+                        laminaShillState.imageSource = 'upload_pv';
+                    } catch (error) {
+                        await sendSafeMessage(sock, senderId, { text: `Falha ao processar imagem: ${error.message}` });
+                        return;
+                    }
+                } else {
+                    const raw = String(text || '').trim();
+                    if (isNoneText(raw)) {
+                        laminaShillState.imageSource = '';
+                        laminaShillState.imageBuffer = null;
+                    } else {
+                        laminaShillState.imageSource = raw;
+                        laminaShillState.imageBuffer = null;
+                    }
+                }
+                laminaShillState.step = 'text';
+                setLaminaShillWizard(senderId, laminaShillState);
+                await sendSafeMessage(sock, senderId, { text: 'Qual texto da lamina de shill?' });
+                return;
+            }
+
+            if (laminaShillState.step === 'text') {
+                const body = String(text || '').trim();
+                if (!body) {
+                    await sendSafeMessage(sock, senderId, { text: 'Texto vazio. Envie o texto da lamina de shill.' });
+                    return;
+                }
+                laminaShillState.textBody = body;
+                const saved = saveShillTemplate({ state: laminaShillState, senderId });
+                clearLaminaShillWizard(senderId);
+                await sendSafeMessage(sock, senderId, {
+                    text: `Lamina de shill salva.\nTitulo: ${saved.title}\nID: ${saved.id}\n\nUse /shill para agendar envio.`
+                });
+                return;
+            }
+        }
+
+        const shillState = getShillWizard(senderId);
+        if (shillState) {
+            if (textLower === '/cancelar' || textLower === 'cancelar') {
+                clearShillWizard(senderId);
+                await sendSafeMessage(sock, senderId, { text: 'Fluxo /shill cancelado.' });
+                return;
+            }
+
+            if (shillState.step === 'group') {
+                const resolved = await resolveGroupsByInput(sock, text);
+                if (!resolved.ok) {
+                    await sendSafeMessage(sock, senderId, { text: `${resolved.message}\n\nInforme um grupo por nome ou ID @g.us.` });
+                    return;
+                }
+                if (!Array.isArray(resolved.groups) || resolved.groups.length !== 1) {
+                    await sendSafeMessage(sock, senderId, { text: 'Escolha apenas 1 grupo para o /shill.' });
+                    return;
+                }
+                shillState.group = resolved.groups[0];
+                shillState.step = 'perDay';
+                setShillWizard(senderId, shillState);
+                await sendSafeMessage(sock, senderId, { text: 'Quantas vezes por dia deve enviar? (ex: 6)' });
+                return;
+            }
+
+            if (shillState.step === 'perDay') {
+                const perDay = Number.parseInt(String(text || '').trim(), 10);
+                if (!Number.isInteger(perDay) || perDay < 1 || perDay > 48) {
+                    await sendSafeMessage(sock, senderId, { text: 'Valor invalido. Informe um numero entre 1 e 48.' });
+                    return;
+                }
+                shillState.perDay = perDay;
+                const list = buildShillTemplatesList(30);
+                if (!list.ok) {
+                    clearShillWizard(senderId);
+                    await sendSafeMessage(sock, senderId, { text: list.message });
+                    return;
+                }
+                shillState.step = 'template';
+                shillState.templates = list.shown;
+                setShillWizard(senderId, shillState);
+                await sendSafeMessage(sock, senderId, { text: list.message });
+                return;
+            }
+
+            if (shillState.step === 'template') {
+                const tpl = resolveShillTemplateByInput(text, shillState.templates || []);
+                if (!tpl) {
+                    await sendSafeMessage(sock, senderId, { text: 'Lamina de shill invalida. Responda com numero ou titulo da lista.' });
+                    return;
+                }
+                const created = createShillSchedule({
+                    group: shillState.group,
+                    perDay: shillState.perDay,
+                    template: tpl,
+                    creatorId: senderId
+                });
+                clearShillWizard(senderId);
+                await sendSafeMessage(sock, senderId, {
+                    text: `Shill agendado com sucesso.\nGrupo: ${created.group.subject}\nFrequencia: ${created.perDay}x por dia\nLamina: ${created.templateTitle}\nProximo envio: ${new Date(created.nextRunAt).toLocaleString('pt-BR')}`
+                });
+                return;
+            }
+        }
+
+        if (textLower.startsWith('/laminashill')) {
+            const authorized = await isAuthorized(senderId);
+            if (!authorized) {
+                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
+                return;
+            }
+            setLaminaShillWizard(senderId, { step: 'image', imageSource: '', imageBuffer: null, textBody: '' });
+            await sendSafeMessage(sock, senderId, {
+                text: 'Fluxo /laminashill iniciado.\n\nQual imagem?\nEnvie a imagem aqui no PV, URL HTTP/HTTPS, caminho local, ou NENHUMA.'
+            });
+            return;
+        }
+
+        if (textLower.startsWith('/shill')) {
+            const authorized = await isAuthorized(senderId);
+            if (!authorized) {
+                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
+                return;
+            }
+            setShillWizard(senderId, { step: 'group', group: null, perDay: 0, templates: [] });
+            await sendSafeMessage(sock, senderId, { text: 'Fluxo /shill iniciado.\n\nQual grupo?' });
             return;
         }
 
@@ -1677,19 +2017,6 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     return;
                 }
                 wizard.permissions.reminders = value;
-                wizard.step = 'promo';
-                setAddGroupWizard(senderId, wizard);
-                await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de promo neste grupo? (sim/nao)' });
-                return;
-            }
-
-            if (wizard.step === 'promo') {
-                const value = parseYesNo(textLower);
-                if (value === null) {
-                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
-                    return;
-                }
-                wizard.permissions.promo = value;
                 wizard.step = 'moderation';
                 setAddGroupWizard(senderId, wizard);
                 await sendSafeMessage(sock, senderId, { text: 'Permitir comandos de moderacao (ban/termos)? (sim/nao)' });
@@ -1731,7 +2058,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 wizard.permissions.leadsRead = value;
                 wizard.step = 'confirm';
                 setAddGroupWizard(senderId, wizard);
-                const summary = `Confirma cadastro do grupo?\n\nGrupo: ${wizard.groupName}\nAbertura/fechamento: ${wizard.permissions.openClose ? 'SIM' : 'NAO'}\nAnti-spam: ${wizard.permissions.spam ? 'SIM' : 'NAO'}\nLembretes: ${wizard.permissions.reminders ? 'SIM' : 'NAO'}\nPromo: ${wizard.permissions.promo ? 'SIM' : 'NAO'}\nModeracao: ${wizard.permissions.moderation ? 'SIM' : 'NAO'}\nEngajamento (ler grupo): ${wizard.permissions.engagement ? 'SIM' : 'NAO'}\nLeads (ler grupo): ${wizard.permissions.leadsRead ? 'SIM' : 'NAO'}\n\nResponda sim para confirmar ou nao para cancelar.`;
+                const summary = `Confirma cadastro do grupo?\n\nGrupo: ${wizard.groupName}\nAbertura/fechamento: ${wizard.permissions.openClose ? 'SIM' : 'NAO'}\nAnti-spam: ${wizard.permissions.spam ? 'SIM' : 'NAO'}\nLembretes: ${wizard.permissions.reminders ? 'SIM' : 'NAO'}\nModeracao: ${wizard.permissions.moderation ? 'SIM' : 'NAO'}\nEngajamento (ler grupo): ${wizard.permissions.engagement ? 'SIM' : 'NAO'}\nLeads (ler grupo): ${wizard.permissions.leadsRead ? 'SIM' : 'NAO'}\n\nResponda sim para confirmar ou nao para cancelar.`;
                 await sendSafeMessage(sock, senderId, { text: summary });
                 return;
             }
@@ -2275,7 +2602,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -2933,55 +3260,6 @@ _iMavyAgent | Sistema de Lembretes_`;
                     if (leadsArray.length > 10) msg += `\n... e mais ${leadsArray.length - 10} leads`;
                     await sendSafeMessage(sock, groupId, { text: msg });
                 }
-            } else if (normalizedText.startsWith('/promo')) {
-                const args = text.split(' ');
-                const subCmd = args[1]?.toLowerCase();
-
-                if (subCmd === 'add') {
-                    const gm = await sock.groupMetadata(groupId);
-                    addPromoGroup(groupId, gm.subject);
-                    await sendSafeMessage(sock, groupId, { text: '✅ Grupo adicionado à lista de promoção!' });
-                } else if (subCmd === 'remove') {
-                    removePromoGroup(groupId);
-                    await sendSafeMessage(sock, groupId, { text: '❌ Grupo removido da lista de promoção!' });
-                } else if (subCmd === 'list') {
-                    const groups = listPromoGroups();
-                    if (groups.length === 0) {
-                        await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum grupo na lista de promoção.' });
-                    } else {
-                        let msg = `📊 *GRUPOS DE PROMOÇÃO* (${groups.length})\n\n`;
-                        groups.forEach((g, i) => {
-                            const lastPromo = g.lastPromo ? new Date(g.lastPromo).toLocaleString('pt-BR') : 'Nunca';
-                            msg += `${i + 1}. ${g.name}\n   Último: ${lastPromo}\n\n`;
-                        });
-                        await sendSafeMessage(sock, groupId, { text: msg });
-                    }
-                } else if (subCmd === 'interval') {
-                    const hours = parseInt(args[2]);
-                    if (hours && hours > 0) {
-                        setPromoInterval(hours);
-                        await sendSafeMessage(sock, groupId, { text: `⏰ Intervalo definido: ${hours}h` });
-                    } else {
-                        await sendSafeMessage(sock, groupId, { text: '❌ Use: /promo interval 6' });
-                    }
-                } else if (subCmd === 'on') {
-                    togglePromo(true);
-                    await sendSafeMessage(sock, groupId, { text: '✅ Auto-promoção ATIVADA!' });
-                } else if (subCmd === 'off') {
-                    togglePromo(false);
-                    await sendSafeMessage(sock, groupId, { text: '❌ Auto-promoção DESATIVADA!' });
-                } else if (subCmd === 'config') {
-                    const config = getPromoConfig();
-                    let msg = `⚙️ *CONFIGURAÇÃO DE PROMO*\n\n`;
-                    msg += `• Status: ${config.enabled ? '✅ Ativo' : '❌ Inativo'}\n`;
-                    msg += `• Intervalo: ${config.intervalHours}h\n`;
-                    msg += `• Grupos: ${config.groups.length}\n`;
-                    msg += `• Mensagens: ${config.messages.length}`;
-                    await sendSafeMessage(sock, groupId, { text: msg });
-                } else {
-                    const help = `📊 *COMANDOS DE PROMOÇÃO*\n\n• /promo add - Adiciona grupo atual\n• /promo remove - Remove grupo atual\n• /promo list - Lista grupos\n• /promo interval [horas] - Define intervalo\n• /promo on - Ativa\n• /promo off - Desativa\n• /promo config - Ver configuração`;
-                    await sendSafeMessage(sock, groupId, { text: help });
-                }
             } else if (normalizedText.startsWith('/sethorario')) {
                 const args = text.split(' ');
                 const tipo = args[1]?.toLowerCase();
@@ -3073,8 +3351,11 @@ export function hasPendingPrivateWizard(senderId) {
     return addGroupWizardState.has(senderId)
         || laminaWizardState.has(senderId)
         || agendarLaminaWizardState.has(senderId)
-        || rankingWizardState.has(senderId);
+        || rankingWizardState.has(senderId)
+        || laminaShillWizardState.has(senderId)
+        || shillWizardState.has(senderId);
 }
+
 
 
 
