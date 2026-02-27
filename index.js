@@ -18,7 +18,7 @@ import { getGroupStatus } from './functions/groupStats.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import { handleGroupMessages, initLembretes } from './functions/groupResponder.js';
-import { isAuthorized } from './functions/adminCommands.js';
+import { isAuthorized, getAllowedGroupPermissions } from './functions/adminCommands.js';
 import { getNumberFromJid, formatNumberInternational } from './functions/utils.js';
 import { scheduleGroupMessages } from './functions/scheduler.js';
 import { ensureCoreConfigFiles } from './functions/configBootstrap.js';
@@ -390,7 +390,15 @@ function loadAllowedGroupNames() {
         }
         const parsed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
         if (Array.isArray(parsed)) {
-            parsed.map(normalizeGroupName).filter(Boolean).forEach((name) => allowed.add(name));
+            parsed
+                .map((entry) => {
+                    if (typeof entry === 'string') return entry;
+                    if (entry && typeof entry === 'object' && typeof entry.name === 'string') return entry.name;
+                    return '';
+                })
+                .map(normalizeGroupName)
+                .filter(Boolean)
+                .forEach((name) => allowed.add(name));
         }
     } catch (e) {
         console.warn('Falha ao ler allowed_groups.json:', e.message);
@@ -768,268 +776,292 @@ async function startBot() {
             const messageText = extractProcessableIncomingText(message);
             if (!messageText) continue;
 
-            // Intelligence mode: analisar todas as conversas sem bloquear o loop principal.
-            if (runtimeControlState.features.intelEnabled) {
-                intelEngine.processMessage(message, chatId, messageTimestamp, {
-                    text: messageText,
-                    senderId,
+            const processingStart = Date.now();
+            const messageId = message?.key?.id || null;
+            let processingStage = 'start';
+
+            try {
+                logger.debug('msg_received', {
+                    chatId,
+                    messageId,
                     isGroup,
-                    timestamp: messageTimestamp
-                }).catch((error) => {
-                    console.warn('[INTEL] Falha ao processar mensagem:', error.message || String(error));
+                    textLen: messageText.length
+                });
+
+                // Intelligence mode: analisar todas as conversas sem bloquear o loop principal.
+                if (runtimeControlState.features.intelEnabled) {
+                    intelEngine.processMessage(message, chatId, messageTimestamp, {
+                        text: messageText,
+                        senderId,
+                        isGroup,
+                        timestamp: messageTimestamp
+                    }).catch((error) => {
+                        console.warn('[INTEL] Falha ao processar mensagem:', error.message || String(error));
+                    });
+                }
+
+                // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
+                if (!isGroup) {
+                    processingStage = 'private';
+                    const privateText = String(messageText || '').trim().toLowerCase();
+                    const privateCommandToken = privateText.split(/\s+/)[0] || '';
+
+                    if (messageText.toLowerCase().startsWith('/leads')) {
+                        if (!runtimeControlState.features.commandsEnabled || !runtimeControlState.features.leadsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await leadEngine.handleLeadsCommand(sock, chatId);
+                        continue;
+                    }
+                    if (messageText.toLowerCase().startsWith('/engajamento')) {
+                        if (!runtimeControlState.features.commandsEnabled || !runtimeControlState.features.leadsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        const allowedGroups = getAllowedGroupsSnapshot().normalizedNames;
+                        await leadEngine.handleEngagementCommand(sock, chatId, {
+                            allowedGroupNames: Array.from(allowedGroups)
+                        });
+                        continue;
+                    }
+
+                    // Comando /dev (ativar modo desenvolvedor)
+                    if (messageText.startsWith('/dev')) {
+                        if (!runtimeControlState.features.commandsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await handleDevCommand(sock, message, messageText);
+                        continue;
+                    }
+
+                    // Modo desenvolvedor ativo
+                    if (isDevModeActive(senderId)) {
+                        await handleDevConversation(sock, senderId, messageText);
+                        continue;
+                    }
+
+                    // Encaminhar qualquer slash-command no PV para o handler dedicado de comandos.
+                    if (privateCommandToken.startsWith('/')) {
+                        if (!runtimeControlState.features.commandsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await handleGroupMessages(sock, message, { isPrivate: true });
+                        continue;
+                    }
+
+                    // Ignorar mensagens privadas (atendimento desabilitado)
+                    continue;
+                }
+
+                // ========== 4. FLUXO DE GRUPO ==========
+                // Mover leitura de arquivo para fora do loop de mensagens ou usar cache?
+                // Vamos logar tudo para debug agora.
+
+                processingStage = 'group';
+                console.log(`[DEBUG] Processando msg de ${senderId} no grupo ${chatId}`);
+
+                // Carregar allowed_groups (ideal: mover para memoria global recarregavel)
+                const allowedGroupsSnapshot = await refreshAllowedGroupsCache();
+                const ALLOWED_GROUP_NAMES = allowedGroupsSnapshot.normalizedNames;
+                const ALLOWED_GROUP_IDS = allowedGroupsSnapshot.groupIds;
+
+                let groupSubject = null;
+                let groupDescription = '';
+                let groupMetadata = null;
+                try {
+                    groupMetadata = await sock.groupMetadata(chatId);
+                    groupSubject = groupMetadata.subject || '';
+                    groupDescription = String(groupMetadata.desc || '').trim();
+                    console.log(`[DEBUG] Nome do grupo obtido: "${groupSubject}"`);
+                } catch (e) {
+                    console.warn('Falha ao obter metadata do grupo:', e.message);
+                }
+
+                // Captura dados de lead para qualquer grupo (permitido ou nao permitido)
+                if (runtimeControlState.features.leadsEnabled) {
+                    try {
+                        leadEngine.processMessage(message, chatId, groupSubject || chatId);
+                    } catch (e) {
+                        console.warn('[LEADS] Falha ao capturar mensagem de grupo:', e.message || String(e));
+                    }
+                }
+
+                const normalizedGroupSubject = normalizeGroupName(groupSubject);
+                const isAllowedByName = Boolean(groupSubject) && ALLOWED_GROUP_NAMES.has(normalizedGroupSubject);
+                const isAllowedById = ALLOWED_GROUP_IDS.has(chatId);
+                if (!isAllowedByName && !isAllowedById) {
+                    console.log(`Ignorado: Grupo "${groupSubject}" nao esta na lista permitida.`);
+                    // DEBUG: Listar permitidos se falhar
+                    // console.log('Permitidos:', Array.from(ALLOWED_GROUP_NAMES));
+
+                    const normalizedTextForGate = String(messageText || '').trimStart();
+                    if (normalizedTextForGate.toLowerCase().startsWith('/leads')) {
+                        if (!runtimeControlState.features.commandsEnabled || !runtimeControlState.features.leadsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await leadEngine.handleLeadsCommand(sock, chatId);
+                        continue;
+                    }
+                    if (normalizedTextForGate.startsWith('/')) {
+                        const lastNoticeTs = unauthorizedGroupNoticeCooldown.get(chatId) || 0;
+                        const nowTs = Date.now();
+                        if (nowTs - lastNoticeTs >= UNAUTHORIZED_GROUP_NOTICE_MS) {
+                            unauthorizedGroupNoticeCooldown.set(chatId, nowTs);
+                            await sendSafeMessage(sock, chatId, {
+                                text: 'Este grupo nao esta autorizado para comandos.\n\nPeca a um admin para adicionar o grupo na lista permitida.'
+                            });
+                        }
+                    }
+                    continue;
+                }
+
+                console.log('Grupo autorizado:', groupSubject);
+                const isRestrictedGroup = isRestrictedGroupName(groupSubject);
+                if (isRestrictedGroup) {
+                    console.log(`Modo restrito ativo para o grupo: "${groupSubject}"`);
+                }
+                const groupPermissions = await getAllowedGroupPermissions(groupSubject);
+
+                // Salva toda mensagem de texto de grupos autorizados (incluindo comandos).
+                publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
+
+                // 4.1. COMANDOS (prioridade maxima - moderacao sempre roda)
+                const isCommand = String(messageText || '').trimStart().startsWith('/');
+                console.log(`[DEBUG] isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
+
+                if (isCommand) {
+                    if (!runtimeControlState.features.commandsEnabled) {
+                        await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
+                        continue;
+                    }
+                    console.log('COMANDO detectado:', messageText.split(' ')[0]);
+
+                    if (messageText.toLowerCase().startsWith('/leads')) {
+                        if (!runtimeControlState.features.leadsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await leadEngine.handleLeadsCommand(sock, chatId);
+                        continue;
+                    }
+                    if (messageText.toLowerCase().startsWith('/engajamento')) {
+                        if (!runtimeControlState.features.leadsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await leadEngine.handleEngagementCommand(sock, chatId, {
+                            allowedGroupNames: Array.from(ALLOWED_GROUP_NAMES)
+                        });
+                        continue;
+                    }
+
+                    // Comando DEV (funciona em grupo e privado)
+                    if (!isRestrictedGroup && messageText.toLowerCase().startsWith('/dev')) {
+                        await handleDevCommand(sock, message, messageText);
+                        continue;
+                    }
+
+                    // Processar comando
+                    await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
+                    // Nao continue aqui - deixar moderacao rodar
+                }
+
+                if (isRestrictedGroup) {
+                    // Neste grupo, o bot so atende funcoes especificas tratadas no groupResponder.
+                    // Inclui comandos cripto e mencao explicita ao @IMAVY.
+                    if (!isCommand) {
+                        await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
+                    }
+                    continue;
+                }
+
+                if (runtimeControlState.features.moderationEnabled && groupPermissions.spam) {
+                    // 4.2. MODERACAO MINIMALISTA (2 regras: REPEAT + LINK)
+                    // Verificar se e admin do bot ou do grupo
+                    let isUserAdmin = false;
+                    try {
+                        const isBotAdmin = await isAuthorized(senderId);
+                        const metadataForAdmin = groupMetadata || await sock.groupMetadata(chatId);
+                        const participant = metadataForAdmin.participants.find(p => p.id === senderId);
+                        const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+                        isUserAdmin = isBotAdmin || isGroupAdmin;
+                    } catch (e) {
+                        console.error('Erro ao verificar admin:', e.message);
+                    }
+
+                    // Aplicar anti-spam
+                    const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
+
+                    if (violation.violated) {
+                        console.log(`VIOLACAO: ${violation.rule} - User: ${senderId}`);
+
+                        // Deletar mensagem
+                        let deleteError = null;
+                        try {
+                            await sendSafeMessage(sock, chatId, { delete: message.key });
+                            console.log('Mensagem deletada');
+                        } catch (e) {
+                            deleteError = 'Nao consegui apagar a mensagem (sem permissao).';
+                            console.error('Erro ao deletar:', e.message);
+                        }
+
+                        // Adicionar strike
+                        const strikeCount = addStrike(chatId, senderId, violation.rule, messageText);
+                        console.log(`Strike aplicado: ${strikeCount}/3`);
+
+                        // Aviso no grupo
+                        let warning = `⚠️ Violacao das regras do grupo. (Strike ${strikeCount}/3)`;
+                        if (violation.rule === 'LINK') {
+                            warning = `🚫 Links nao sao permitidos. (Strike ${strikeCount}/3)`;
+                        } else if (violation.rule === 'FLOOD_REPEAT') {
+                            warning = `⚠️ Flood detectado: 3 mensagens iguais em menos de 1 minuto. (Strike ${strikeCount}/3)`;
+                        } else if (violation.rule === 'FLOOD_VOLUME') {
+                            warning = `⚠️ Flood detectado: 10 mensagens em menos de 1 minuto. (Strike ${strikeCount}/3)`;
+                        } else if (violation.rule?.startsWith('DESC_')) {
+                            warning = `⚠️ Mensagem viola regras da descricao deste grupo. (Strike ${strikeCount}/3)`;
+                        }
+
+                        try {
+                            await sendSafeMessage(sock, chatId, { text: warning });
+                        } catch (e) {
+                            console.error('Erro ao enviar aviso:', e.message);
+                        }
+
+                        // Notificar admins
+                        await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount, messageText, deleteError);
+
+                        // Aplicar punicao se 3/3
+                        if (strikeCount >= 3) {
+                            await applyPunishment(sock, chatId, senderId, strikeCount);
+                        }
+
+                        // Bloquear processamento de comandos
+                        continue;
+                    }
+                }
+
+
+
+                // Se foi comando e nao violou, ja foi processado
+                if (isCommand) {
+                    continue;
+                }
+
+                // Mensagens nao-comando podem acionar o IMAVY via mencao explicita.
+                await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
+            } finally {
+                logger.debug('msg_processed', {
+                    chatId,
+                    messageId,
+                    isGroup,
+                    ms: Date.now() - processingStart,
+                    stage: processingStage
                 });
             }
-
-            // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
-            if (!isGroup) {
-                const privateText = String(messageText || '').trim().toLowerCase();
-                const privateCommandToken = privateText.split(/\s+/)[0] || '';
-
-                if (messageText.toLowerCase().startsWith('/leads')) {
-                    if (!runtimeControlState.features.commandsEnabled || !runtimeControlState.features.leadsEnabled) {
-                        await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
-                        continue;
-                    }
-                    await leadEngine.handleLeadsCommand(sock, chatId);
-                    continue;
-                }
-                if (messageText.toLowerCase().startsWith('/engajamento')) {
-                    if (!runtimeControlState.features.commandsEnabled || !runtimeControlState.features.leadsEnabled) {
-                        await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
-                        continue;
-                    }
-                    const allowedGroups = getAllowedGroupsSnapshot().normalizedNames;
-                    await leadEngine.handleEngagementCommand(sock, chatId, {
-                        allowedGroupNames: Array.from(allowedGroups)
-                    });
-                    continue;
-                }
-
-                // Comando /dev (ativar modo desenvolvedor)
-                if (messageText.startsWith('/dev')) {
-                    if (!runtimeControlState.features.commandsEnabled) {
-                        await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
-                        continue;
-                    }
-                    await handleDevCommand(sock, message, messageText);
-                    continue;
-                }
-
-                // Modo desenvolvedor ativo
-                if (isDevModeActive(senderId)) {
-                    await handleDevConversation(sock, senderId, messageText);
-                    continue;
-                }
-
-                // Encaminhar qualquer slash-command no PV para o handler dedicado de comandos.
-                if (privateCommandToken.startsWith('/')) {
-                    if (!runtimeControlState.features.commandsEnabled) {
-                        await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
-                        continue;
-                    }
-                    await handleGroupMessages(sock, message, { isPrivate: true });
-                    continue;
-                }
-
-                // Ignorar mensagens privadas (atendimento desabilitado)
-                continue;
-            }
-
-            // ========== 4. FLUXO DE GRUPO ==========
-            // Mover leitura de arquivo para fora do loop de mensagens ou usar cache?
-            // Vamos logar tudo para debug agora.
-
-            console.log(`[DEBUG] Processando msg de ${senderId} no grupo ${chatId}`);
-
-            // Carregar allowed_groups (ideal: mover para memoria global recarregavel)
-            const allowedGroupsSnapshot = await refreshAllowedGroupsCache();
-            const ALLOWED_GROUP_NAMES = allowedGroupsSnapshot.normalizedNames;
-            const ALLOWED_GROUP_IDS = allowedGroupsSnapshot.groupIds;
-
-            let groupSubject = null;
-            let groupDescription = '';
-            let groupMetadata = null;
-            try {
-                groupMetadata = await sock.groupMetadata(chatId);
-                groupSubject = groupMetadata.subject || '';
-                groupDescription = String(groupMetadata.desc || '').trim();
-                console.log(`[DEBUG] Nome do grupo obtido: "${groupSubject}"`);
-            } catch (e) {
-                console.warn('Falha ao obter metadata do grupo:', e.message);
-            }
-
-            // Captura dados de lead para qualquer grupo (permitido ou nao permitido)
-            if (runtimeControlState.features.leadsEnabled) {
-                try {
-                    leadEngine.processMessage(message, chatId, groupSubject || chatId);
-                } catch (e) {
-                    console.warn('[LEADS] Falha ao capturar mensagem de grupo:', e.message || String(e));
-                }
-            }
-
-            const normalizedGroupSubject = normalizeGroupName(groupSubject);
-            const isAllowedByName = Boolean(groupSubject) && ALLOWED_GROUP_NAMES.has(normalizedGroupSubject);
-            const isAllowedById = ALLOWED_GROUP_IDS.has(chatId);
-            if (!isAllowedByName && !isAllowedById) {
-                console.log(`Ignorado: Grupo "${groupSubject}" nao esta na lista permitida.`);
-                // DEBUG: Listar permitidos se falhar
-                // console.log('Permitidos:', Array.from(ALLOWED_GROUP_NAMES));
-
-                const normalizedTextForGate = String(messageText || '').trimStart();
-                if (normalizedTextForGate.toLowerCase().startsWith('/leads')) {
-                    if (!runtimeControlState.features.commandsEnabled || !runtimeControlState.features.leadsEnabled) {
-                        await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
-                        continue;
-                    }
-                    await leadEngine.handleLeadsCommand(sock, chatId);
-                    continue;
-                }
-                if (normalizedTextForGate.startsWith('/')) {
-                    const lastNoticeTs = unauthorizedGroupNoticeCooldown.get(chatId) || 0;
-                    const nowTs = Date.now();
-                    if (nowTs - lastNoticeTs >= UNAUTHORIZED_GROUP_NOTICE_MS) {
-                        unauthorizedGroupNoticeCooldown.set(chatId, nowTs);
-                        await sendSafeMessage(sock, chatId, {
-                            text: 'Este grupo nao esta autorizado para comandos.\n\nPeca a um admin para adicionar o grupo na lista permitida.'
-                        });
-                    }
-                }
-                continue;
-            }
-
-            console.log('Grupo autorizado:', groupSubject);
-            const isRestrictedGroup = isRestrictedGroupName(groupSubject);
-            if (isRestrictedGroup) {
-                console.log(`Modo restrito ativo para o grupo: "${groupSubject}"`);
-            }
-
-            // Salva toda mensagem de texto de grupos autorizados (incluindo comandos).
-            publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
-
-            // 4.1. COMANDOS (prioridade maxima - moderacao sempre roda)
-            const isCommand = String(messageText || '').trimStart().startsWith('/');
-            console.log(`[DEBUG] isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
-
-            if (isCommand) {
-                if (!runtimeControlState.features.commandsEnabled) {
-                    await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
-                    continue;
-                }
-                console.log('COMANDO detectado:', messageText.split(' ')[0]);
-
-                if (messageText.toLowerCase().startsWith('/leads')) {
-                    if (!runtimeControlState.features.leadsEnabled) {
-                        await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
-                        continue;
-                    }
-                    await leadEngine.handleLeadsCommand(sock, chatId);
-                    continue;
-                }
-                if (messageText.toLowerCase().startsWith('/engajamento')) {
-                    if (!runtimeControlState.features.leadsEnabled) {
-                        await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
-                        continue;
-                    }
-                    await leadEngine.handleEngagementCommand(sock, chatId, {
-                        allowedGroupNames: Array.from(ALLOWED_GROUP_NAMES)
-                    });
-                    continue;
-                }
-
-                // Comando DEV (funciona em grupo e privado)
-                if (!isRestrictedGroup && messageText.toLowerCase().startsWith('/dev')) {
-                    await handleDevCommand(sock, message, messageText);
-                    continue;
-                }
-
-                // Processar comando
-                await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
-                // Nao continue aqui - deixar moderacao rodar
-            }
-
-            if (isRestrictedGroup) {
-                // Neste grupo, o bot so atende funcoes especificas tratadas no groupResponder.
-                // Inclui comandos cripto e mencao explicita ao @IMAVY.
-                if (!isCommand) {
-                    await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
-                }
-                continue;
-            }
-
-            if (runtimeControlState.features.moderationEnabled) {
-                // 4.2. MODERACAO MINIMALISTA (2 regras: REPEAT + LINK)
-                // Verificar se e admin do bot ou do grupo
-                let isUserAdmin = false;
-                try {
-                    const isBotAdmin = await isAuthorized(senderId);
-                    const metadataForAdmin = groupMetadata || await sock.groupMetadata(chatId);
-                    const participant = metadataForAdmin.participants.find(p => p.id === senderId);
-                    const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
-                    isUserAdmin = isBotAdmin || isGroupAdmin;
-                } catch (e) {
-                    console.error('Erro ao verificar admin:', e.message);
-                }
-
-                // Aplicar anti-spam
-                const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
-
-                if (violation.violated) {
-                    console.log(`VIOLACAO: ${violation.rule} - User: ${senderId}`);
-
-                    // Deletar mensagem
-                    let deleteError = null;
-                    try {
-                        await sendSafeMessage(sock, chatId, { delete: message.key });
-                        console.log('Mensagem deletada');
-                    } catch (e) {
-                        deleteError = 'Nao consegui apagar a mensagem (sem permissao).';
-                        console.error('Erro ao deletar:', e.message);
-                    }
-
-                    // Adicionar strike
-                    const strikeCount = addStrike(chatId, senderId, violation.rule, messageText);
-                    console.log(`Strike aplicado: ${strikeCount}/3`);
-
-                    // Aviso no grupo
-                    let warning = `⚠️ Violacao das regras do grupo. (Strike ${strikeCount}/3)`;
-                    if (violation.rule === 'LINK') {
-                        warning = `🚫 Links nao sao permitidos. (Strike ${strikeCount}/3)`;
-                    } else if (violation.rule === 'FLOOD_REPEAT') {
-                        warning = `⚠️ Flood detectado: 3 mensagens iguais em menos de 1 minuto. (Strike ${strikeCount}/3)`;
-                    } else if (violation.rule === 'FLOOD_VOLUME') {
-                        warning = `⚠️ Flood detectado: 10 mensagens em menos de 1 minuto. (Strike ${strikeCount}/3)`;
-                    } else if (violation.rule?.startsWith('DESC_')) {
-                        warning = `⚠️ Mensagem viola regras da descricao deste grupo. (Strike ${strikeCount}/3)`;
-                    }
-
-                    try {
-                        await sendSafeMessage(sock, chatId, { text: warning });
-                    } catch (e) {
-                        console.error('Erro ao enviar aviso:', e.message);
-                    }
-
-                    // Notificar admins
-                    await notifyAdmins(sock, chatId, senderId, violation.rule, strikeCount, messageText, deleteError);
-
-                    // Aplicar punicao se 3/3
-                    if (strikeCount >= 3) {
-                        await applyPunishment(sock, chatId, senderId, strikeCount);
-                    }
-
-                    // Bloquear processamento de comandos
-                    continue;
-                }
-            }
-
-
-
-            // Se foi comando e nao violou, ja foi processado
-            if (isCommand) {
-                continue;
-            }
-
-            // Mensagens nao-comando podem acionar o IMAVY via mencao explicita.
-            await handleGroupMessages(sock, message, { groupSubject, isRestrictedGroup });
         }
     });
 

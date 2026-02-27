@@ -22,7 +22,25 @@ function getScheduleConfig() {
 function getAllowedGroups() {
     try {
         if (fs.existsSync(ALLOWED_FILE)) {
-            return JSON.parse(fs.readFileSync(ALLOWED_FILE, 'utf8'));
+            const parsed = JSON.parse(fs.readFileSync(ALLOWED_FILE, 'utf8'));
+            if (!Array.isArray(parsed)) return [];
+            return parsed
+                .map((entry) => {
+                    if (typeof entry === 'string') {
+                        return { name: entry, permissions: { openClose: true } };
+                    }
+                    if (!entry || typeof entry !== 'object') return null;
+                    if (typeof entry.name !== 'string') return null;
+                    return {
+                        name: entry.name,
+                        permissions: {
+                            openClose: typeof entry.permissions?.openClose === 'boolean'
+                                ? entry.permissions.openClose
+                                : true
+                        }
+                    };
+                })
+                .filter(Boolean);
         }
     } catch (e) { }
     return [];
@@ -44,7 +62,8 @@ export function scheduleGroupMessages(sock) {
 
             for (const groupId in allGroups) {
                 const group = allGroups[groupId];
-                if (allowedGroups.includes(group.subject) && !isRestrictedGroupName(group.subject)) {
+                const allowedGroup = allowedGroups.find((g) => g.name === group.subject);
+                if (allowedGroup && allowedGroup.permissions.openClose && !isRestrictedGroupName(group.subject)) {
                     await sock.groupSettingUpdate(groupId, 'announcement');
                     await sendSafeMessage(sock, groupId, {
                         text: 'Grupo Temporariamente Fechado\n\nO envio de mensagens está desativado até 08:00.\n\nA funcionalidade será reativada automaticamente no horário programado.'
@@ -67,7 +86,8 @@ export function scheduleGroupMessages(sock) {
 
             for (const groupId in allGroups) {
                 const group = allGroups[groupId];
-                if (allowedGroups.includes(group.subject) && !isRestrictedGroupName(group.subject)) {
+                const allowedGroup = allowedGroups.find((g) => g.name === group.subject);
+                if (allowedGroup && allowedGroup.permissions.openClose && !isRestrictedGroupName(group.subject)) {
                     await sock.groupSettingUpdate(groupId, 'not_announcement');
                     await sendSafeMessage(sock, groupId, {
                         text: 'Grupo Aberto\n\nAs mensagens foram reativadas.\nDesejamos a todos um excelente dia.'
