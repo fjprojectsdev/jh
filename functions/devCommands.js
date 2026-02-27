@@ -7,6 +7,7 @@ import { sendSafeMessage } from './messageHandler.js';
 import { getNumberFromJid } from './utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DEV_FEATURE_ENABLED = String(process.env.IMAVY_DEV_FEATURE || 'false').toLowerCase() === 'true';
 const GLOBAL_DEV_MODE = String(process.env.IMAVY_DEV_MODE || 'false').toLowerCase() === 'true';
 
 const groq = new Groq({
@@ -69,6 +70,7 @@ export function isDev(userId) {
 }
 
 export function isDevModeActive(userId) {
+    if (!DEV_FEATURE_ENABLED) return false;
     if (GLOBAL_DEV_MODE && isDev(userId) && !devModeForcedOff.has(userId)) {
         return true;
     }
@@ -76,12 +78,14 @@ export function isDevModeActive(userId) {
 }
 
 export function activateDevMode(userId) {
+    if (!DEV_FEATURE_ENABLED) return;
     devModeForcedOff.delete(userId);
     devModeActive.set(userId, true);
     conversationHistory.set(userId, []);
 }
 
 export function deactivateDevMode(userId) {
+    if (!DEV_FEATURE_ENABLED) return;
     if (GLOBAL_DEV_MODE) {
         devModeForcedOff.add(userId);
     }
@@ -108,6 +112,11 @@ export async function handleDevCommand(sock, message, text) {
     const senderId = message.key.participant || message.key.remoteJid;
     const chatId = message.key.remoteJid;
     const isPrivate = !chatId.endsWith('@g.us');
+
+    if (!DEV_FEATURE_ENABLED) {
+        await sendSafeMessage(sock, chatId, { text: 'Modo desenvolvedor desativado pelo administrador.' });
+        return;
+    }
 
     if (!isDev(senderId)) {
         await sendSafeMessage(sock, chatId, { text: '❌ Acesso negado. Comando apenas para desenvolvedores.' });
@@ -250,6 +259,7 @@ function validateGeneratedCommandResult(result) {
 }
 
 export async function handleDevConversation(sock, senderId, messageText) {
+    if (!DEV_FEATURE_ENABLED) return;
     const chatId = senderId;
     const rawInput = String(messageText || '').trim();
     if (!rawInput) return;
