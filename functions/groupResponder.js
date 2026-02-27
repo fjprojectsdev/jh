@@ -24,6 +24,7 @@ import { generateImavyCryptoReply } from './crypto/imavyAnalyst.js';
 import { askChatGPT } from './chatgpt.js';
 import { isRestrictedGroupName } from './groupPolicy.js';
 import { registrarComandoAceito } from './commandMetrics.js';
+import { downloadMediaMessage } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -842,7 +843,9 @@ export async function handleGroupMessages(sock, message, context = {}) {
             if (laminaState.step === 'image') {
                 if (hasIncomingImage) {
                     try {
-                        const media = await sock.downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
+                        const media = typeof sock.downloadMediaMessage === 'function'
+                            ? await sock.downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage })
+                            : await downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
                         if (!media || !Buffer.isBuffer(media) || media.length === 0) {
                             await sendSafeMessage(sock, senderId, { text: 'Nao consegui ler a imagem enviada. Tente novamente.' });
                             return;
