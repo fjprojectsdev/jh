@@ -22,6 +22,11 @@ function buildDefaultPermissions() {
     };
 }
 
+function isJidLike(value) {
+    const safe = String(value || '').trim();
+    return /^\d{6,}@(c\.us|g\.us|s\.whatsapp\.net|lid)$/i.test(safe);
+}
+
 function normalizePermissions(perms = {}) {
     const defaults = buildDefaultPermissions();
     return {
@@ -103,8 +108,8 @@ export async function addAllowedGroup(senderId, groupName, options = {}) {
     const param = groupName.trim();
 
     try {
-        // If looks like JID, save as allowed user
-        if (param.includes('@')) {
+        // Se for JID valido, salva como usuario permitido.
+        if (isJidLike(param)) {
             const currentUsers = await readAllowedUsers();
             if (currentUsers.includes(param)) {
                 return { success: false, message: `O usuario "${param}" ja esta habilitado para o bot.` };
@@ -160,7 +165,7 @@ export async function removeAllowedGroup(senderId, groupName) {
     const param = groupName.trim();
 
     try {
-        if (param.includes('@')) {
+        if (isJidLike(param)) {
             const currentUsers = await readAllowedUsers();
             const index = currentUsers.indexOf(param);
             if (index === -1) {
