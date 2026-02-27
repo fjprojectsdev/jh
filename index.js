@@ -17,7 +17,7 @@ import { getGroupStatus } from './functions/groupStats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-import { handleGroupMessages, initLembretes } from './functions/groupResponder.js';
+import { handleGroupMessages, initLembretes, hasPendingPrivateWizard } from './functions/groupResponder.js';
 import { isAuthorized, getAllowedGroupPermissions } from './functions/adminCommands.js';
 import { getNumberFromJid, formatNumberInternational } from './functions/utils.js';
 import { scheduleGroupMessages } from './functions/scheduler.js';
@@ -844,6 +844,16 @@ async function startBot() {
 
                     // Encaminhar qualquer slash-command no PV para o handler dedicado de comandos.
                     if (privateCommandToken.startsWith('/')) {
+                        if (!runtimeControlState.features.commandsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await handleGroupMessages(sock, message, { isPrivate: true });
+                        continue;
+                    }
+
+                    // Encaminhar respostas de fluxos guiados ativos (ex.: /lamina, /adicionargrupo) no PV.
+                    if (hasPendingPrivateWizard(senderId)) {
                         if (!runtimeControlState.features.commandsEnabled) {
                             await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
                             continue;

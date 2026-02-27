@@ -2352,3 +2352,7 @@ _iMavyAgent | Sistema de Lembretes_`;
 
     // Modo de respostas inteligentes desabilitado - apenas comandos
 }
+
+export function hasPendingPrivateWizard(senderId) {
+    return addGroupWizardState.has(senderId) || laminaWizardState.has(senderId);
+}
