@@ -228,10 +228,42 @@ function normalizeGroupSearch(value) {
         .trim();
 }
 
-async function resolveGroupByInput(sock, input) {
-    const query = String(input || '').trim();
-    if (!query) {
-        return { ok: false, message: 'Informe o nome ou ID do grupo.' };
+function splitGroupQueries(input) {
+    const raw = String(input || '');
+    return raw
+        .split(/[\n,;]+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+}
+
+function resolveSingleGroupFromList(list, query) {
+    if (query.endsWith('@g.us')) {
+        const found = list.find((g) => g.id === query);
+        if (!found) return { ok: false, message: `Grupo por ID nao encontrado: ${query}` };
+        return { ok: true, group: found };
+    }
+
+    const normalizedQuery = normalizeGroupSearch(query);
+    const exact = list.filter((g) => normalizeGroupSearch(g.subject) === normalizedQuery);
+    if (exact.length === 1) return { ok: true, group: exact[0] };
+    if (exact.length > 1) {
+        return { ok: false, message: `Mais de um grupo com esse nome: "${query}". Informe o ID @g.us.` };
+    }
+
+    const partial = list.filter((g) => normalizeGroupSearch(g.subject).includes(normalizedQuery));
+    if (partial.length === 1) return { ok: true, group: partial[0] };
+    if (partial.length > 1) {
+        const opts = partial.slice(0, 8).map((g) => `- ${g.subject} | ${g.id}`).join('\n');
+        return { ok: false, message: `Encontrei varios grupos para "${query}". Seja mais especifico:\n${opts}` };
+    }
+
+    return { ok: false, message: `Grupo nao encontrado: "${query}"` };
+}
+
+async function resolveGroupsByInput(sock, input) {
+    const queries = splitGroupQueries(input);
+    if (!queries.length) {
+        return { ok: false, message: 'Informe nome(s) ou ID(s) do(s) grupo(s).' };
     }
 
     let groups;
@@ -246,27 +278,30 @@ async function resolveGroupByInput(sock, input) {
         subject: String(data?.subject || '')
     }));
 
-    if (query.endsWith('@g.us')) {
-        const found = list.find((g) => g.id === query);
-        if (!found) return { ok: false, message: 'Grupo por ID nao encontrado.' };
-        return { ok: true, group: found };
+    const selected = [];
+    const selectedIds = new Set();
+    const errors = [];
+
+    for (const query of queries) {
+        const resolved = resolveSingleGroupFromList(list, query);
+        if (!resolved.ok) {
+            errors.push(resolved.message);
+            continue;
+        }
+        if (!selectedIds.has(resolved.group.id)) {
+            selected.push(resolved.group);
+            selectedIds.add(resolved.group.id);
+        }
     }
 
-    const normalizedQuery = normalizeGroupSearch(query);
-    const exact = list.filter((g) => normalizeGroupSearch(g.subject) === normalizedQuery);
-    if (exact.length === 1) return { ok: true, group: exact[0] };
-    if (exact.length > 1) {
-        return { ok: false, message: 'Mais de um grupo com esse nome. Informe o ID @g.us.' };
+    if (!selected.length) {
+        return { ok: false, message: errors.join('\n') || 'Nenhum grupo valido selecionado.' };
+    }
+    if (errors.length) {
+        return { ok: false, message: errors.join('\n') };
     }
 
-    const partial = list.filter((g) => normalizeGroupSearch(g.subject).includes(normalizedQuery));
-    if (partial.length === 1) return { ok: true, group: partial[0] };
-    if (partial.length > 1) {
-        const opts = partial.slice(0, 8).map((g) => `- ${g.subject} | ${g.id}`).join('\n');
-        return { ok: false, message: `Encontrei varios grupos. Seja mais especifico:\n${opts}` };
-    }
-
-    return { ok: false, message: 'Grupo nao encontrado.' };
+    return { ok: true, groups: selected };
 }
 
 function isNoneText(value) {
@@ -282,33 +317,45 @@ function buildLaminaPreview(state) {
     const imageLabel = state.imageBuffer
         ? 'upload no PV'
         : (state.imageSource ? state.imageSource : 'nenhuma');
-    return `PREVIA /lamina\n\nGrupo: ${state.groupName}\nID: ${state.groupId}\nImagem: ${imageLabel}\n\nTexto:\n${state.textBody}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
+    const groupsLines = (state.groups || []).map((g, idx) => `${idx + 1}. ${g.subject} | ${g.id}`).join('\n');
+    return `PREVIA /lamina\n\nGrupos:\n${groupsLines}\n\nImagem: ${imageLabel}\n\nTexto:\n${state.textBody}\n\nResponda APROVAR para enviar, REFAZER para recomecar ou CANCELAR para abortar.`;
 }
 
-async function sendLaminaToGroup(sock, state) {
-    const targetId = state.groupId;
-    if (state.imageBuffer) {
-        await sendSafeMessage(sock, targetId, { image: state.imageBuffer, caption: state.textBody });
-        return;
+async function sendLaminaToGroups(sock, state) {
+    const targets = Array.isArray(state.groups) ? state.groups : [];
+    const failures = [];
+
+    for (const group of targets) {
+        try {
+            const targetId = group.id;
+            if (state.imageBuffer) {
+                await sendSafeMessage(sock, targetId, { image: state.imageBuffer, caption: state.textBody });
+                continue;
+            }
+
+            if (!state.imageSource) {
+                await sendSafeMessage(sock, targetId, { text: state.textBody });
+                continue;
+            }
+
+            const raw = String(state.imageSource || '').trim();
+            if (isLikelyHttpUrl(raw)) {
+                await sendSafeMessage(sock, targetId, { image: { url: raw }, caption: state.textBody });
+                continue;
+            }
+
+            const absPath = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
+            if (!fs.existsSync(absPath)) {
+                throw new Error(`Imagem nao encontrada no caminho: ${absPath}`);
+            }
+            const imageBuffer = fs.readFileSync(absPath);
+            await sendSafeMessage(sock, targetId, { image: imageBuffer, caption: state.textBody });
+        } catch (error) {
+            failures.push(`${group.subject || group.id}: ${error.message}`);
+        }
     }
 
-    if (!state.imageSource) {
-        await sendSafeMessage(sock, targetId, { text: state.textBody });
-        return;
-    }
-
-    const raw = String(state.imageSource || '').trim();
-    if (isLikelyHttpUrl(raw)) {
-        await sendSafeMessage(sock, targetId, { image: { url: raw }, caption: state.textBody });
-        return;
-    }
-
-    const absPath = path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
-    if (!fs.existsSync(absPath)) {
-        throw new Error(`Imagem nao encontrada no caminho: ${absPath}`);
-    }
-    const imageBuffer = fs.readFileSync(absPath);
-    await sendSafeMessage(sock, targetId, { image: imageBuffer, caption: state.textBody });
+    return { failures };
 }
 
 function getIncomingImageMessageContent(message) {
@@ -778,13 +825,12 @@ export async function handleGroupMessages(sock, message, context = {}) {
             }
 
             if (laminaState.step === 'group') {
-                const resolved = await resolveGroupByInput(sock, text);
+                const resolved = await resolveGroupsByInput(sock, text);
                 if (!resolved.ok) {
-                    await sendSafeMessage(sock, senderId, { text: `${resolved.message}\n\nInforme nome ou ID do grupo (@g.us).` });
+                    await sendSafeMessage(sock, senderId, { text: `${resolved.message}\n\nInforme nome(s) ou ID(s) @g.us, separados por virgula ou quebra de linha.` });
                     return;
                 }
-                laminaState.groupId = resolved.group.id;
-                laminaState.groupName = resolved.group.subject || resolved.group.id;
+                laminaState.groups = resolved.groups;
                 laminaState.step = 'image';
                 laminaWizardState.set(senderId, laminaState);
                 await sendSafeMessage(sock, senderId, {
@@ -839,9 +885,15 @@ export async function handleGroupMessages(sock, message, context = {}) {
             if (laminaState.step === 'confirm') {
                 if (/^(aprovar|aprovado|aprovo|sim|ok|confirmo)$/i.test(textLower)) {
                     try {
-                        await sendLaminaToGroup(sock, laminaState);
+                        const result = await sendLaminaToGroups(sock, laminaState);
+                        const total = Array.isArray(laminaState.groups) ? laminaState.groups.length : 0;
+                        const sent = total - result.failures.length;
+                        let summary = `Lamina enviada.\nSucesso: ${sent}\nFalhas: ${result.failures.length}`;
+                        if (result.failures.length) {
+                            summary += `\n\nDetalhes de falhas:\n- ${result.failures.join('\n- ')}`;
+                        }
                         await sendSafeMessage(sock, senderId, {
-                            text: `Lamina enviada com sucesso para ${laminaState.groupName} (${laminaState.groupId}).`
+                            text: summary
                         });
                     } catch (error) {
                         await sendSafeMessage(sock, senderId, { text: `Falha ao enviar lamina: ${error.message}` });
@@ -852,13 +904,12 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
                 if (/^(refazer|refaco|refaço|editar|nao|não)$/i.test(textLower)) {
                     laminaState.step = 'group';
-                    laminaState.groupId = '';
-                    laminaState.groupName = '';
+                    laminaState.groups = [];
                     laminaState.imageSource = '';
                     laminaState.imageBuffer = null;
                     laminaState.textBody = '';
                     laminaWizardState.set(senderId, laminaState);
-                    await sendSafeMessage(sock, senderId, { text: 'Vamos refazer. Para qual grupo enviar o texto?' });
+                    await sendSafeMessage(sock, senderId, { text: 'Vamos refazer. Para qual grupo ou grupos enviar o texto?' });
                     return;
                 }
 
@@ -875,13 +926,14 @@ export async function handleGroupMessages(sock, message, context = {}) {
             }
             laminaWizardState.set(senderId, {
                 step: 'group',
-                groupId: '',
-                groupName: '',
+                groups: [],
                 imageSource: '',
                 imageBuffer: null,
                 textBody: ''
             });
-            await sendSafeMessage(sock, senderId, { text: 'Fluxo /lamina iniciado.\n\nPara qual grupo enviar o texto?' });
+            await sendSafeMessage(sock, senderId, {
+                text: 'Fluxo /lamina iniciado.\n\nPara qual grupo ou grupos enviar o texto?\nEnvie nome(s) ou ID(s) @g.us separados por virgula ou quebra de linha.'
+            });
             return;
         }
 
