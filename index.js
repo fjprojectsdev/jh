@@ -891,15 +891,6 @@ async function startBot() {
                     console.warn('Falha ao obter metadata do grupo:', e.message);
                 }
 
-                // Captura dados de lead para qualquer grupo (permitido ou nao permitido)
-                if (runtimeControlState.features.leadsEnabled) {
-                    try {
-                        leadEngine.processMessage(message, chatId, groupSubject || chatId);
-                    } catch (e) {
-                        console.warn('[LEADS] Falha ao capturar mensagem de grupo:', e.message || String(e));
-                    }
-                }
-
                 const normalizedGroupSubject = normalizeGroupName(groupSubject);
                 const isAllowedByName = Boolean(groupSubject) && ALLOWED_GROUP_NAMES.has(normalizedGroupSubject);
                 const isAllowedById = ALLOWED_GROUP_IDS.has(chatId);
@@ -936,6 +927,17 @@ async function startBot() {
                     console.log(`Modo restrito ativo para o grupo: "${groupSubject}"`);
                 }
                 const groupPermissions = await getAllowedGroupPermissions(groupSubject);
+                const canReadForLeads = Boolean(groupPermissions?.leadsRead);
+                const canReadForEngagement = Boolean(groupPermissions?.engagement);
+
+                // Captura para engine de leads/engajamento somente com autorizacao por grupo.
+                if (runtimeControlState.features.leadsEnabled && (canReadForLeads || canReadForEngagement)) {
+                    try {
+                        leadEngine.processMessage(message, chatId, groupSubject || chatId);
+                    } catch (e) {
+                        console.warn('[LEADS] Falha ao capturar mensagem de grupo:', e.message || String(e));
+                    }
+                }
 
                 // Salva toda mensagem de texto de grupos autorizados (incluindo comandos).
                 publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
@@ -956,12 +958,20 @@ async function startBot() {
                             await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
                             continue;
                         }
+                        if (!canReadForLeads) {
+                            await sendSafeMessage(sock, chatId, { text: 'Este grupo esta sem permissao para leitura de leads.' });
+                            continue;
+                        }
                         await leadEngine.handleLeadsCommand(sock, chatId);
                         continue;
                     }
                     if (messageText.toLowerCase().startsWith('/engajamento')) {
                         if (!runtimeControlState.features.leadsEnabled) {
                             await sendFeatureDisabledNotice(sock, chatId, 'leads', 'Comandos de leads estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        if (!canReadForEngagement) {
+                            await sendSafeMessage(sock, chatId, { text: 'Este grupo esta sem permissao para leitura de engajamento.' });
                             continue;
                         }
                         await leadEngine.handleEngagementCommand(sock, chatId, {

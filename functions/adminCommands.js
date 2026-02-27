@@ -16,7 +16,9 @@ function buildDefaultPermissions() {
         spam: true,
         reminders: true,
         promo: true,
-        moderation: true
+        moderation: true,
+        engagement: true,
+        leadsRead: true
     };
 }
 
@@ -27,7 +29,9 @@ function normalizePermissions(perms = {}) {
         spam: typeof perms.spam === 'boolean' ? perms.spam : defaults.spam,
         reminders: typeof perms.reminders === 'boolean' ? perms.reminders : defaults.reminders,
         promo: typeof perms.promo === 'boolean' ? perms.promo : defaults.promo,
-        moderation: typeof perms.moderation === 'boolean' ? perms.moderation : defaults.moderation
+        moderation: typeof perms.moderation === 'boolean' ? perms.moderation : defaults.moderation,
+        engagement: typeof perms.engagement === 'boolean' ? perms.engagement : defaults.engagement,
+        leadsRead: typeof perms.leadsRead === 'boolean' ? perms.leadsRead : defaults.leadsRead
     };
 }
 
@@ -122,7 +126,7 @@ export async function addAllowedGroup(senderId, groupName, options = {}) {
 
         return {
             success: true,
-            message: `Grupo "${name}" adicionado com sucesso.\n\nPermissoes:\n- abertura/fechamento: ${permissions.openClose ? 'SIM' : 'NAO'}\n- anti-spam: ${permissions.spam ? 'SIM' : 'NAO'}\n- lembretes: ${permissions.reminders ? 'SIM' : 'NAO'}\n- promo: ${permissions.promo ? 'SIM' : 'NAO'}\n- moderacao: ${permissions.moderation ? 'SIM' : 'NAO'}`
+            message: `Grupo "${name}" adicionado com sucesso.\n\nPermissoes:\n- abertura/fechamento: ${permissions.openClose ? 'SIM' : 'NAO'}\n- anti-spam: ${permissions.spam ? 'SIM' : 'NAO'}\n- lembretes: ${permissions.reminders ? 'SIM' : 'NAO'}\n- promo: ${permissions.promo ? 'SIM' : 'NAO'}\n- moderacao: ${permissions.moderation ? 'SIM' : 'NAO'}\n- engajamento (ler grupo): ${permissions.engagement ? 'SIM' : 'NAO'}\n- leads (ler grupo): ${permissions.leadsRead ? 'SIM' : 'NAO'}`
         };
     } catch (e) {
         console.error('Erro ao adicionar permitido:', e);
@@ -137,7 +141,7 @@ export async function listAllowedGroups() {
     const combined = [];
     for (const g of groups) {
         combined.push(
-            `Grupo: ${g.name} | abrir/fechar=${g.permissions.openClose ? 'SIM' : 'NAO'} | spam=${g.permissions.spam ? 'SIM' : 'NAO'} | lembretes=${g.permissions.reminders ? 'SIM' : 'NAO'} | promo=${g.permissions.promo ? 'SIM' : 'NAO'} | moderacao=${g.permissions.moderation ? 'SIM' : 'NAO'}`
+            `Grupo: ${g.name} | abrir/fechar=${g.permissions.openClose ? 'SIM' : 'NAO'} | spam=${g.permissions.spam ? 'SIM' : 'NAO'} | lembretes=${g.permissions.reminders ? 'SIM' : 'NAO'} | promo=${g.permissions.promo ? 'SIM' : 'NAO'} | moderacao=${g.permissions.moderation ? 'SIM' : 'NAO'} | engajamento=${g.permissions.engagement ? 'SIM' : 'NAO'} | leads=${g.permissions.leadsRead ? 'SIM' : 'NAO'}`
         );
     }
     for (const u of users) combined.push(`Usuario: ${u}`);

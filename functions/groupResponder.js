@@ -305,6 +305,8 @@ function getRequiredPermissionForAdminCommand(commandToken) {
     if (token === '/lembrete' || token === '/lembretefixo' || token === '/stoplembrete' || token === '/stoplembretefixo' || token === '/testelembrete') return 'reminders';
     if (token === '/promo' || token === '/sethorario') return 'promo';
     if (token === '/banir' || token === '/adicionartermo' || token === '/removertermo' || token === '/listartermos') return 'moderation';
+    if (token === '/engajamento') return 'engagement';
+    if (token === '/leads') return 'leadsRead';
     return null;
 }
 
@@ -313,6 +315,8 @@ function getPermissionLabel(permissionKey) {
     if (permissionKey === 'reminders') return 'lembretes';
     if (permissionKey === 'promo') return 'promo';
     if (permissionKey === 'moderation') return 'moderacao';
+    if (permissionKey === 'engagement') return 'engajamento (leitura)';
+    if (permissionKey === 'leadsRead') return 'leads (leitura)';
     return permissionKey || 'desconhecida';
 }
 
@@ -1579,9 +1583,35 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     return;
                 }
                 wizard.permissions.moderation = value;
+                wizard.step = 'engagement';
+                setAddGroupWizard(senderId, wizard);
+                await sendSafeMessage(sock, senderId, { text: 'Permitir leitura para engajamento neste grupo? (sim/nao)' });
+                return;
+            }
+
+            if (wizard.step === 'engagement') {
+                const value = parseYesNo(textLower);
+                if (value === null) {
+                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
+                    return;
+                }
+                wizard.permissions.engagement = value;
+                wizard.step = 'leadsRead';
+                setAddGroupWizard(senderId, wizard);
+                await sendSafeMessage(sock, senderId, { text: 'Permitir leitura para leads neste grupo? (sim/nao)' });
+                return;
+            }
+
+            if (wizard.step === 'leadsRead') {
+                const value = parseYesNo(textLower);
+                if (value === null) {
+                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
+                    return;
+                }
+                wizard.permissions.leadsRead = value;
                 wizard.step = 'confirm';
                 setAddGroupWizard(senderId, wizard);
-                const summary = `Confirma cadastro do grupo?\n\nGrupo: ${wizard.groupName}\nAbertura/fechamento: ${wizard.permissions.openClose ? 'SIM' : 'NAO'}\nAnti-spam: ${wizard.permissions.spam ? 'SIM' : 'NAO'}\nLembretes: ${wizard.permissions.reminders ? 'SIM' : 'NAO'}\nPromo: ${wizard.permissions.promo ? 'SIM' : 'NAO'}\nModeracao: ${wizard.permissions.moderation ? 'SIM' : 'NAO'}\n\nResponda sim para confirmar ou nao para cancelar.`;
+                const summary = `Confirma cadastro do grupo?\n\nGrupo: ${wizard.groupName}\nAbertura/fechamento: ${wizard.permissions.openClose ? 'SIM' : 'NAO'}\nAnti-spam: ${wizard.permissions.spam ? 'SIM' : 'NAO'}\nLembretes: ${wizard.permissions.reminders ? 'SIM' : 'NAO'}\nPromo: ${wizard.permissions.promo ? 'SIM' : 'NAO'}\nModeracao: ${wizard.permissions.moderation ? 'SIM' : 'NAO'}\nEngajamento (ler grupo): ${wizard.permissions.engagement ? 'SIM' : 'NAO'}\nLeads (ler grupo): ${wizard.permissions.leadsRead ? 'SIM' : 'NAO'}\n\nResponda sim para confirmar ou nao para cancelar.`;
                 await sendSafeMessage(sock, senderId, { text: summary });
                 return;
             }
@@ -1615,7 +1645,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     setAddGroupWizard(senderId, {
                         step: param ? 'openClose' : 'name',
                         groupName: param || '',
-                        permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true }
+                        permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true, engagement: true, leadsRead: true }
                     });
                     if (!param) {
                         await sendSafeMessage(sock, senderId, { text: 'Qual o nome/ID do grupo que deseja adicionar?' });
@@ -2125,7 +2155,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/promo') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -2443,7 +2473,7 @@ Um membro foi banido do grupo:
                 setAddGroupWizard(senderId, {
                     step: 'openClose',
                     groupName: param,
-                    permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true }
+                    permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true, engagement: true, leadsRead: true }
                 });
                 await sendSafeMessage(sock, senderId, {
                     text: `Configurando grupo: ${param}\nPermitir abertura/fechamento automatico? (sim/nao)\n\nResponda no privado.`
@@ -2918,5 +2948,6 @@ _iMavyAgent | Sistema de Lembretes_`;
 export function hasPendingPrivateWizard(senderId) {
     return addGroupWizardState.has(senderId) || laminaWizardState.has(senderId) || agendarLaminaWizardState.has(senderId);
 }
+
 
 
