@@ -107,6 +107,10 @@ function isAllowedCommandForRestrictedGroup(commandToken) {
     if (commandToken === '/aviso') return true;
     if (commandToken === '/lembrete') return true;
     if (commandToken === '/ranking') return true;
+    if (commandToken === '/logs') return true;
+    if (commandToken === '/adicionartermo' || commandToken === '/adicionartemo' || commandToken === '/addtermo') return true;
+    if (commandToken === '/removertermo' || commandToken === '/removertemo') return true;
+    if (commandToken === '/listartermos') return true;
     if (commandToken === '/valyrafi') return true;
     return isCryptoCommandToken(commandToken);
 }
@@ -2110,7 +2114,21 @@ export async function handleGroupMessages(sock, message, context = {}) {
         }
 
         // Permitir comandos administrativos em PV para administradores autorizados
-        if (textLower && (textLower.includes('/adicionargrupo') || textLower.includes('/removergrupo') || textLower.includes('/listargrupos') || textLower.includes('/adicionaradmin') || textLower.includes('/removeradmin') || textLower.includes('/listaradmins'))) {
+        if (textLower && (
+            textLower.includes('/adicionargrupo')
+            || textLower.includes('/removergrupo')
+            || textLower.includes('/listargrupos')
+            || textLower.includes('/adicionaradmin')
+            || textLower.includes('/removeradmin')
+            || textLower.includes('/listaradmins')
+            || textLower.includes('/logs')
+            || textLower.includes('/adicionartermo')
+            || textLower.includes('/adicionartemo')
+            || textLower.includes('/addtermo')
+            || textLower.includes('/removertermo')
+            || textLower.includes('/removertemo')
+            || textLower.includes('/listartermos')
+        )) {
             const authorized = await isAuthorized(senderId);
             if (authorized) {
                 // Processar comando administrativo em PV
@@ -2182,6 +2200,41 @@ export async function handleGroupMessages(sock, message, context = {}) {
                     adminList += `\n━━━━━━━━━━━━━━━━━━━━━━━\n💡 Use /adicionaradmin ou /removeradmin para gerenciar`;
 
                     await sendSafeMessage(sock, senderId, { text: adminList });
+                } else if (normalizedText.startsWith('/logs')) {
+                    const linesRaw = text.replace(/^\/logs/i, '').trim();
+                    const requestedLines = Number.parseInt(linesRaw, 10);
+                    const logs = readRecentLogs(Number.isFinite(requestedLines) ? requestedLines : 20);
+                    if (!logs.ok) {
+                        await sendSafeMessage(sock, senderId, { text: `❌ ${logs.message}` });
+                    } else {
+                        await sendSafeMessage(sock, senderId, {
+                            text: `📋 *Últimos logs (${logs.safeLines} linhas)*\n\n\`\`\`\n${logs.text}\n\`\`\``
+                        });
+                    }
+                } else if (normalizedText.startsWith('/adicionartermo') || normalizedText.startsWith('/adicionartemo') || normalizedText.startsWith('/addtermo')) {
+                    const termo = text.replace(/^\/(adicionartermo|adicionartemo|addtermo)/i, '').trim();
+                    if (!termo) {
+                        await sendSafeMessage(sock, senderId, { text: '❌ Use: `/adicionartermo palavra ou frase`' });
+                    } else {
+                        const result = addBannedWord(termo);
+                        await sendSafeMessage(sock, senderId, { text: result.message });
+                    }
+                } else if (normalizedText.startsWith('/removertermo') || normalizedText.startsWith('/removertemo')) {
+                    const termo = text.replace(/^\/(removertermo|removertemo)/i, '').trim();
+                    if (!termo) {
+                        await sendSafeMessage(sock, senderId, { text: '❌ Use: `/removertermo palavra ou frase`' });
+                    } else {
+                        const result = removeBannedWord(termo);
+                        await sendSafeMessage(sock, senderId, { text: result.message });
+                    }
+                } else if (normalizedText.startsWith('/listartermos')) {
+                    const termos = listBannedWords();
+                    if (!termos.length) {
+                        await sendSafeMessage(sock, senderId, { text: 'ℹ️ Nenhum termo proibido cadastrado.' });
+                    } else {
+                        const lista = termos.map((t, i) => `${i + 1}. ${t}`).join('\n');
+                        await sendSafeMessage(sock, senderId, { text: `🚫 *TERMOS PROIBIDOS*\n\n${lista}\n\n📊 Total: ${termos.length}` });
+                    }
                 }
                 return;
             } else {
@@ -2240,7 +2293,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         if (!imavyMentioned && !isAllowedCommandForRestrictedGroup(commandToken)) {
             await sendSafeMessage(sock, groupId, {
-                text: '⚠️ Neste grupo, apenas funções de cripto, /aviso, /lembrete e /ranking estão ativas.'
+                text: '⚠️ Neste grupo: cripto, /aviso, /lembrete, /ranking, /logs e termos (/adicionartermo /removertermo /listartermos) estão ativos.'
             });
             return;
         }
