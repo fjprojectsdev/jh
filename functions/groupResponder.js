@@ -1476,6 +1476,35 @@ export async function handleGroupMessages(sock, message, context = {}) {
         return;
     }
 
+    if (!isGroup && String(text || '').trim().toLowerCase().startsWith('/comandos2')) {
+        const comandosOcultos = `🕵️ *COMANDOS OCULTOS (SEM EXCECOES)*\n` +
+            `━━━━━━━━━━━━━━━━━━━━━━\n` +
+            `/adicionargrupo\n` +
+            `/removergrupo\n` +
+            `/listargrupos\n` +
+            `/adicionaradmin\n` +
+            `/removeradmin\n` +
+            `/listaradmins\n` +
+            `/logs [linhas]\n` +
+            `/sethorario abrir HH:MM\n` +
+            `/sethorario fechar HH:MM\n` +
+            `/testelembrete [mensagem]\n` +
+            `/testia [mensagem]\n` +
+            `/leads\n` +
+            `/engajamento\n` +
+            `/dev on\n` +
+            `/dev off\n` +
+            `/lamina\n` +
+            `/listarlaminas\n` +
+            `/usarlamina <titulo>\n` +
+            `/agendarlamina\n` +
+            `/laminashill\n` +
+            `/shill\n` +
+            `/ranking`;
+        await sendSafeMessage(sock, senderId, { text: comandosOcultos });
+        return;
+    }
+
     // Permitir respostas em PV usando o dicionário RESPONSES
     if (!isGroup) {
         const textLower = (text || '').trim().toLowerCase();
@@ -2602,7 +2631,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking') || normalizedText.includes('/shill') || normalizedText.includes('/laminashill')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/comandos2') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking') || normalizedText.includes('/shill') || normalizedText.includes('/laminashill')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -2614,7 +2643,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
         let commandMessageKey = message.key;
 
         try {
-            const isPublicInfoCommand = normalizedText.startsWith('/regras') || normalizedText.startsWith('/ranking');
+            const isPublicInfoCommand = normalizedText.startsWith('/regras') || normalizedText.startsWith('/ranking') || normalizedText.startsWith('/comandos2');
             const requiresAuth = !isPublicInfoCommand;
 
             // Se requer autorização, verificar se o usuário é admin
@@ -2717,6 +2746,32 @@ Desejamos a todos um excelente dia.`;
             } else if (normalizedText.startsWith('/ranking')) {
                 const ranking = getGroupTopRanking(groupId, 10);
                 await sendSafeMessage(sock, groupId, { text: buildRankingMessageForGroup(ranking, 'RANKING TOP 10') });
+            } else if (normalizedText.startsWith('/comandos2')) {
+                const comandosOcultos = `🕵️ *COMANDOS OCULTOS (SEM EXCECOES)*\n` +
+                    `━━━━━━━━━━━━━━━━━━━━━━\n` +
+                    `/adicionargrupo\n` +
+                    `/removergrupo\n` +
+                    `/listargrupos\n` +
+                    `/adicionaradmin\n` +
+                    `/removeradmin\n` +
+                    `/listaradmins\n` +
+                    `/logs [linhas]\n` +
+                    `/sethorario abrir HH:MM\n` +
+                    `/sethorario fechar HH:MM\n` +
+                    `/testelembrete [mensagem]\n` +
+                    `/testia [mensagem]\n` +
+                    `/leads\n` +
+                    `/engajamento\n` +
+                    `/dev on\n` +
+                    `/dev off\n` +
+                    `/lamina\n` +
+                    `/listarlaminas\n` +
+                    `/usarlamina <titulo>\n` +
+                    `/agendarlamina\n` +
+                    `/laminashill\n` +
+                    `/shill\n` +
+                    `/ranking`;
+                await sendSafeMessage(sock, groupId, { text: comandosOcultos });
             } else if (normalizedText.startsWith('/stats')) {
                 const statsMessage = formatStats();
                 await sendSafeMessage(sock, groupId, { text: statsMessage });
