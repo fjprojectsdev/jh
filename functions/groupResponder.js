@@ -370,7 +370,7 @@ function getRequiredPermissionForAdminCommand(commandToken) {
     const token = String(commandToken || '').toLowerCase();
     if (token === '/fechar' || token === '/abrir') return 'openClose';
     if (token === '/lembrete' || token === '/lembretefixo' || token === '/stoplembrete' || token === '/stoplembretefixo' || token === '/testelembrete') return 'reminders';
-    if (token === '/banir' || token === '/adicionartermo' || token === '/removertermo' || token === '/listartermos') return 'moderation';
+    if (token === '/banir' || token === '/adicionartermo' || token === '/adicionartemo' || token === '/addtermo' || token === '/removertermo' || token === '/removertemo' || token === '/listartermos') return 'moderation';
     if (token === '/engajamento') return 'engagement';
     if (token === '/leads') return 'leadsRead';
     return null;
@@ -2631,7 +2631,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/comandos2') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking') || normalizedText.includes('/shill') || normalizedText.includes('/laminashill')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/comandos2') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/adicionartemo') || normalizedText.includes('/addtermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/removertemo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking') || normalizedText.includes('/shill') || normalizedText.includes('/laminashill')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -3042,16 +3042,16 @@ Um membro foi banido do grupo:
                     });
                     await sendSafeMessage(sock, senderId, { text: adminList });
                 }
-            } else if (normalizedText.startsWith('/adicionartermo')) {
-                const termo = text.replace(/\/adicionartermo/i, '').trim();
+            } else if (normalizedText.startsWith('/adicionartermo') || normalizedText.startsWith('/adicionartemo') || normalizedText.startsWith('/addtermo')) {
+                const termo = text.replace(/^\/(adicionartermo|adicionartemo|addtermo)/i, '').trim();
                 if (termo) {
                     const result = addBannedWord(termo);
                     await sendSafeMessage(sock, groupId, { text: result.message });
                 } else {
                     await sendSafeMessage(sock, groupId, { text: '❌ Use: `/adicionartermo palavra ou frase`' });
                 }
-            } else if (normalizedText.startsWith('/removertermo')) {
-                const termo = text.replace(/\/removertermo/i, '').trim();
+            } else if (normalizedText.startsWith('/removertermo') || normalizedText.startsWith('/removertemo')) {
+                const termo = text.replace(/^\/(removertermo|removertemo)/i, '').trim();
                 if (termo) {
                     const result = removeBannedWord(termo);
                     await sendSafeMessage(sock, groupId, { text: result.message });
@@ -3412,6 +3412,7 @@ export function hasPendingPrivateWizard(senderId) {
         || laminaShillWizardState.has(senderId)
         || shillWizardState.has(senderId);
 }
+
 
 
 

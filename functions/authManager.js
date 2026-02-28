@@ -57,7 +57,9 @@ export async function isAuthorized(senderId) {
     const hardcodedAdmins = [
         '556993613476@s.whatsapp.net',
         '5569993613476@s.whatsapp.net',
-        '225919675449527@lid' // Owner LID
+        '225919675449527@lid', // Owner LID
+        '77807795347703@lid',
+        '39213319876707@lid'
     ];
 
     // Comparação EXATA de JID primeiro
