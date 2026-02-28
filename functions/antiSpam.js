@@ -7,6 +7,7 @@ import { sendSafeMessage } from './messageHandler.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRIKES_FILE = path.join(__dirname, '..', 'strikes.json');
 const GROUP_RULES_FILE = path.join(__dirname, '..', 'group_rules_cache.json');
+const BANNED_WORDS_FILE = path.join(__dirname, '..', 'banned_words.json');
 
 // Cache: userId+chatId -> { textMap: { normalizedText: [timestamps] }, timeline: [timestamps] }
 const messageCache = new Map();
@@ -247,6 +248,23 @@ function saveStrikes(strikes) {
     fs.writeFileSync(STRIKES_FILE, JSON.stringify(strikes, null, 2));
 }
 
+function loadBannedWords() {
+    try {
+        if (!fs.existsSync(BANNED_WORDS_FILE)) return [];
+        const parsed = JSON.parse(fs.readFileSync(BANNED_WORDS_FILE, 'utf8'));
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .map((word) => normalizeForMatch(word).trim())
+            .filter(Boolean);
+    } catch {
+        return [];
+    }
+}
+
+function saveBannedWords(words) {
+    fs.writeFileSync(BANNED_WORDS_FILE, JSON.stringify(words, null, 2), 'utf8');
+}
+
 // Obter strikes do usuário
 export function getStrikes(chatId, userId) {
     const strikes = loadStrikes();
@@ -311,6 +329,16 @@ export function checkViolation(messageText, chatId, userId, isAdmin) {
 
     if (!normalized) return { violated: false };
 
+    // REGRA 2: Palavras banidas
+    const bannedWords = loadBannedWords();
+    if (bannedWords.length > 0) {
+        const hit = bannedWords.find((word) => normalized.includes(word));
+        if (hit) {
+            console.log(`BANNED WORD bloqueado: ${userId} (${hit})`);
+            return { violated: true, rule: 'BANNED_WORD', detail: hit };
+        }
+    }
+
     const key = `${chatId}:${userId}`;
     if (!messageCache.has(key)) {
         messageCache.set(key, { textMap: {}, timeline: [] });
@@ -363,7 +391,8 @@ export async function notifyAdmins(sock, chatId, userId, rule, strikeCount, mess
             DESC_POLITICS: 'Conteudo politico bloqueado pelas regras da descricao',
             DESC_RELIGION: 'Conteudo religioso bloqueado pelas regras da descricao',
             DESC_VIOLENCE: 'Conteudo violento bloqueado pelas regras da descricao',
-            DESC_TERM: 'Termo bloqueado pelas regras da descricao'
+            DESC_TERM: 'Termo bloqueado pelas regras da descricao',
+            BANNED_WORD: 'Palavra banida detectada'
         };
         const ruleText = ruleMap[rule] || `Regra: ${rule}`;
 
@@ -415,13 +444,36 @@ export async function applyPunishment(sock, chatId, userId, strikeCount) {
 
 // Manter compatibilidade com comandos antigos
 export function addBannedWord(word) {
-    return { success: false, message: 'Sistema de palavras banidas desabilitado.' };
+    const safe = normalizeForMatch(word).trim();
+    if (!safe) return { success: false, message: 'Termo invalido.' };
+    if (safe.length < 2) return { success: false, message: 'Termo muito curto.' };
+
+    const words = loadBannedWords();
+    if (words.includes(safe)) {
+        return { success: false, message: `Termo ja bloqueado: "${safe}"` };
+    }
+
+    words.push(safe);
+    words.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    saveBannedWords(words);
+    return { success: true, message: `✅ Termo bloqueado: "${safe}"` };
 }
 
 export function removeBannedWord(word) {
-    return { success: false, message: 'Sistema de palavras banidas desabilitado.' };
+    const safe = normalizeForMatch(word).trim();
+    if (!safe) return { success: false, message: 'Termo invalido.' };
+
+    const words = loadBannedWords();
+    const index = words.indexOf(safe);
+    if (index === -1) {
+        return { success: false, message: `Termo nao encontrado: "${safe}"` };
+    }
+
+    words.splice(index, 1);
+    saveBannedWords(words);
+    return { success: true, message: `✅ Termo removido: "${safe}"` };
 }
 
 export function listBannedWords() {
-    return [];
+    return loadBannedWords();
 }
