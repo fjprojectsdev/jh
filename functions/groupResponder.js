@@ -32,6 +32,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LEMBRETES_FILE = path.join(__dirname, '..', 'lembretes.json');
 const BOT_LOG_FILE = path.join(__dirname, '..', 'bot.log');
+const EMOJI_FILE = path.join(__dirname, '..', 'emojis', 'iMavy_crypto_final_128.png');
 const LAMINAS_FILE = path.join(__dirname, '..', 'laminas.json');
 const LAMINA_SCHEDULES_FILE = path.join(__dirname, '..', 'lamina_schedules.json');
 const LAMINA_CONVERSATIONS_FILE = path.join(__dirname, '..', 'lamina_conversations.json');
@@ -2602,7 +2603,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking') || normalizedText.includes('/emoji')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -2614,7 +2615,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
         let commandMessageKey = message.key;
 
         try {
-            const isPublicInfoCommand = normalizedText.startsWith('/regras') || normalizedText.startsWith('/ranking');
+            const isPublicInfoCommand = normalizedText.startsWith('/regras') || normalizedText.startsWith('/ranking') || normalizedText.startsWith('/emoji');
             const requiresAuth = !isPublicInfoCommand;
 
             // Se requer autorização, verificar se o usuário é admin
@@ -2712,6 +2713,40 @@ Desejamos a todos um excelente dia.`;
             } else if (normalizedText.startsWith('/status')) {
                 const statusMessage = await getGroupStatus(sock, groupId);
                 await sendSafeMessage(sock, groupId, { text: statusMessage });
+            } else if (normalizedText.startsWith('/emoji')) {
+                if (!fs.existsSync(EMOJI_FILE)) {
+                    await sendSafeMessage(sock, groupId, {
+                        text: `Arquivo de emoji nao encontrado em:\n${EMOJI_FILE}\n\nUse: /emoji`
+                    });
+                    return;
+                }
+
+                const args = String(text || '').trim().toLowerCase();
+                const emojiBuffer = fs.readFileSync(EMOJI_FILE);
+                if (args === '/emoji sticker') {
+                    try {
+                        const mod = await import('wa-sticker-formatter');
+                        const Sticker = mod?.Sticker;
+                        const StickerTypes = mod?.StickerTypes;
+                        if (!Sticker || !StickerTypes) {
+                            throw new Error('wa-sticker-formatter indisponivel.');
+                        }
+                        const sticker = new Sticker(EMOJI_FILE, {
+                            pack: 'iMavy Crypto',
+                            author: 'iMavy',
+                            type: StickerTypes.FULL,
+                            quality: 100
+                        });
+                        await sendSafeMessage(sock, groupId, { sticker: await sticker.toBuffer() });
+                    } catch (error) {
+                        await sendSafeMessage(sock, groupId, {
+                            text: `Falha ao enviar sticker: ${error.message}\nInstale: npm i wa-sticker-formatter`
+                        });
+                    }
+                    return;
+                }
+
+                await sendSafeMessage(sock, groupId, { image: emojiBuffer });
             } else if (normalizedText.startsWith('/ranking')) {
                 const ranking = getGroupTopRanking(groupId, 10);
                 await sendSafeMessage(sock, groupId, { text: buildRankingMessageForGroup(ranking, 'RANKING TOP 10') });
@@ -3307,6 +3342,7 @@ _iMavyAgent | Sistema de Lembretes_`;
 📊 *COMANDOS DE INFORMAÇÃO:*
 
 * 📊 /status - Status e estatísticas
+* 🤖 /emoji - Envia emoji do bot (ou /emoji sticker)
 * 🏆 /ranking - Top 10 de mensagens do grupo
 * 📋 /regras - Regras do grupo
 * 🔗 /link - Link do grupo
