@@ -108,6 +108,7 @@ function isAllowedCommandForRestrictedGroup(commandToken) {
     if (commandToken === '/aviso') return true;
     if (commandToken === '/lembrete') return true;
     if (commandToken === '/ranking') return true;
+    if (commandToken === '/emoji') return true;
     if (commandToken === '/valyrafi') return true;
     return isCryptoCommandToken(commandToken);
 }
@@ -2212,7 +2213,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
 
         if (!imavyMentioned && !isAllowedCommandForRestrictedGroup(commandToken)) {
             await sendSafeMessage(sock, groupId, {
-                text: '⚠️ Neste grupo, apenas funções de cripto, /aviso e /lembrete estão ativas.'
+                text: '⚠️ Neste grupo, apenas funções de cripto, /aviso, /lembrete, /ranking e /emoji estão ativas.'
             });
             return;
         }
@@ -2603,7 +2604,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     // Comandos administrativos
-    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking') || normalizedText.includes('/emoji')) {
+    if (normalizedText.includes('/fechar') || normalizedText.includes('/abrir') || normalizedText.includes('/fixar') || normalizedText.includes('/aviso') || normalizedText.includes('/todos') || normalizedText.includes('/regras') || normalizedText.includes('/descricao') || normalizedText.includes('/status') || normalizedText.includes('/stats') || normalizedText.includes('/hora') || normalizedText.includes('/banir') || normalizedText.includes('/link') || normalizedText.includes('/promover') || normalizedText.includes('/rebaixar') || normalizedText.includes('/agendar') || normalizedText.includes('/manutencao') || normalizedText.includes('/lembrete') || normalizedText.includes('/stoplembrete') || normalizedText.includes('/comandos') || normalizedText.includes('/adicionargrupo') || normalizedText.includes('/removergrupo') || normalizedText.includes('/listargrupos') || normalizedText.includes('/adicionaradmin') || normalizedText.includes('/removeradmin') || normalizedText.includes('/listaradmins') || normalizedText.includes('/adicionartermo') || normalizedText.includes('/removertermo') || normalizedText.includes('/listartermos') || normalizedText.includes('/testia') || normalizedText.includes('/leads') || normalizedText.includes('/engajamento') || normalizedText.includes('/sethorario') || normalizedText.includes('/testelembrete') || normalizedText.includes('/logs') || normalizedText.includes('/ranking') || normalizedText.includes('/emoji') || normalizedText.includes('/shill') || normalizedText.includes('/laminashill')) {
 
         const cooldown = parseInt(process.env.COMMAND_COOLDOWN || '3') * 1000;
         const rateCheck = checkRateLimit(senderId, cooldown);
@@ -2747,6 +2748,8 @@ Desejamos a todos um excelente dia.`;
                 }
 
                 await sendSafeMessage(sock, groupId, { image: emojiBuffer });
+            } else if (normalizedText.startsWith('/shill') || normalizedText.startsWith('/laminashill')) {
+                await sendSafeMessage(sock, groupId, { text: 'Use este comando no privado com o bot (PV).' });
             } else if (normalizedText.startsWith('/ranking')) {
                 const ranking = getGroupTopRanking(groupId, 10);
                 await sendSafeMessage(sock, groupId, { text: buildRankingMessageForGroup(ranking, 'RANKING TOP 10') });
