@@ -81,6 +81,89 @@ O ecossistema está sendo construído agora.
 
 Os primeiros sempre têm mais vantagens. 🔥`;
 
+const COMMANDS_MENU = `🤖 *MENU DE COMANDOS — iMavyAgent*
+━━━━━━━━━━━━━━━━
+
+👮 *ADMINISTRAÇÃO DO GRUPO*
+
+🔒 \`/fechar\` — Fecha o grupo
+🔓 \`/abrir\` — Abre o grupo
+
+🚫 \`/banir @membro\` — Banir membro
+👑 \`/promover @usuario\` — Promover admin
+👤 \`/rebaixar @usuario\` — Remover admin
+
+📢 \`/aviso mensagem\` — Mencionar todos
+
+📋 \`/logs [linhas]\` — Ver logs do bot
+
+⏰ *Lembretes*
+• \`/lembrete mensagem 1h 24h\`
+• \`/stoplembrete\`
+
+📅 *Lembrete fixo diário*
+• \`/lembretefixo mensagem 08:00 21:00\`
+• \`/stoplembretefixo\`
+
+🚫 \`/adicionartermo palavra\` — Bloquear palavra
+✏️ \`/removertermo palavra\` — Remover bloqueio
+📝 \`/listartermos\` — Listar termos bloqueados
+
+👮 \`/adicionaradmin @usuario\`
+🗑️ \`/removeradmin @usuario\`
+📋 \`/listaradmins\`
+
+━━━━━━━━━━━━━━━━
+
+📊 *INFORMAÇÕES*
+
+📊 \`/status\` — Status do bot
+📋 \`/regras\` — Regras do grupo
+🔗 \`/link\` — Link do grupo
+🕒 \`/hora\` — Horário do bot
+📱 \`/comandos\` — Menu de comandos
+
+🚀 \`/valyrafi\` — Apresentação oficial
+
+🤖 \`@IMAVY pergunta\`
+Analista cripto por menção
+
+💹 *Cotações*
+\`/btc\` \`/eth\` \`/bnb\` \`/sol\` \`/xrp\` \`/usdt\`
+
+🥇 \`/ouro\` ou \`/paxg\`
+Gráfico do Pax Gold (CMC)
+
+━━━━━━━━━━━━━━━━
+
+📝 *CONTRATOS / PROJETOS*
+
+\`/Snappy\`
+\`/Nix\`
+\`/Coffee\`
+\`/Lux\`
+\`/Kenesis\`
+\`/Dcar\`
+\`/Fsx\`
+\`/Nlc\`
+\`/Masaka\`
+\`/Vkinha\`
+
+━━━━━━━━━━━━━━━━
+
+🔒 *SEGURANÇA ATIVA*
+
+• Anti-spam automático com IA
+• Sistema de strikes (3 = expulsão)
+• Bloqueio de palavras proibidas
+• Alertas automáticos aos admins
+• Lembretes com encerramento automático
+
+━━━━━━━━━━━━━━━━
+
+🤖 *iMavyAgent*
+Protegendo seu grupo **24/7**`;
+
 function getCommandToken(normalizedText) {
     return String(normalizedText || '').trim().split(/\s+/)[0] || '';
 }
@@ -1420,61 +1503,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     // Funcionalidade de resposta automática desabilitada
 
     if (!isGroup && text.toLowerCase().includes('/comandos')) {
-        const comandosMsg = `🤖 *LISTA COMPLETA DE COMANDOS* 🤖
-━━━━━━━━━━━━━━━━
-👮 *COMANDOS ADMINISTRATIVOS:*
-
-* 🔒 /fechar - Fecha o grupo
-* 🔓 /abrir - Abre o grupo
-* 🚫 /banir @membro - Bane membro
-* 📢 /aviso [mensagem] - Menciona todos
-* 📋 /logs [linhas] - Mostra os últimos logs do bot
-* 📢 /lembrete + mensagem 1h 24h - Lembrete automático
-* 🛑 /stoplembrete - Para lembrete
-* ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo diário
-* 🛑 /stoplembretefixo - Para lembrete fixo
-* 🚫 /adicionartermo [palavra] - Bloqueia palavra
-* ✏️ /removertermo [palavra] - Remove palavra
-* 📝 /listartermos - Lista palavras bloqueadas
-* 👮 /adicionaradmin @usuario - Adiciona admin
-* 🗑️ /removeradmin @usuario - Remove admin
-* 📋 /listaradmins - Lista admins
-* 👑 /promover @usuario - Promove a admin
-* 👤 /rebaixar @usuario - Rebaixa admin
-━━━━━━━━━━━━━━━━
-📊 *COMANDOS DE INFORMAÇÃO:*
-
-* 📊 /status - Status e estatísticas
-* 📋 /regras - Regras do grupo
-* 🔗 /link - Link do grupo
-* 🕒 /hora - Horário do bot
-* 📱 /comandos - Lista de comandos
-* 🚀 /valyrafi - Apresentação oficial ValyraFi
-* @IMAVY [pergunta] - Analista cripto por menção
-* 💹 /btc /eth /bnb /sol /xrp /usdt - Cotação de mercado
-* 🥇 /ouro (ou /paxg) - Pax Gold com gráfico no CoinMarketCap
-━━━━━━━━━━━━━━━━
-📝 *CONTRATOS E PROJETOS:*
-
-* /Snappy
-* /Nix
-* /Coffee
-* /Lux
-* /Kenesis
-* /Dcar
-* /Fsx
-* /Nlc
-* /Masaka
-* /Vkinha
-━━━━━━━━━━━━━━━━
-🔒 *Sistema de Segurança Ativo*
-* Anti-spam automático com IA
-* Sistema de strikes (3 = expulsão)
-* Bloqueio de palavras proibidas
-* Notificação automática aos admins
-* Lembretes com encerramento automático
-━━━━━━━━━━━━━━━━
-🤖 *iMavyAgent* - Protegendo seu grupo 24/7`;
+        const comandosMsg = COMMANDS_MENU;
 
         await sendSafeMessage(sock, senderId, { text: comandosMsg });
         return;
@@ -3392,49 +3421,7 @@ _iMavyAgent | Sistema de Lembretes_`;
                     await sendSafeMessage(sock, groupId, { text: '❌ Use: /sethorario abrir 07:00\nou\n/sethorario fechar 23:00' });
                 }
             } else if (normalizedText.startsWith('/comandos')) {
-                const comandosMsg = `🤖 *LISTA COMPLETA DE COMANDOS* 🤖
-━━━━━━━━━━━━━━━━
-👮 *COMANDOS ADMINISTRATIVOS:*
-
-* 🔒 /fechar - Fecha o grupo
-* 🔓 /abrir - Abre o grupo
-* 🚫 /banir @membro - Bane membro
-* 📢 /aviso [mensagem] - Menciona todos
-* 📋 /logs [linhas] - Mostra os últimos logs do bot
-* 📢 /lembrete + mensagem 1h 24h - Lembrete automático
-* 🛑 /stoplembrete - Para lembrete
-* ⏰ /lembretefixo + mensagem 08:00 21:00 - Lembrete fixo diário
-* 🛑 /stoplembretefixo - Para lembrete fixo
-* 🚫 /adicionartermo [palavra] - Bloqueia palavra
-* ✏️ /removertermo [palavra] - Remove palavra
-* 📝 /listartermos - Lista palavras bloqueadas
-* 👮 /adicionaradmin @usuario - Adiciona admin
-* 🗑️ /removeradmin @usuario - Remove admin
-* 📋 /listaradmins - Lista admins
-* 👑 /promover @usuario - Promove a admin
-* 👤 /rebaixar @usuario - Rebaixa admin
-━━━━━━━━━━━━━━━━
-📊 *COMANDOS DE INFORMAÇÃO:*
-
-* 📊 /status - Status e estatísticas
-* 🏆 /ranking - Top 10 de mensagens do grupo
-* 📋 /regras - Regras do grupo
-* 🔗 /link - Link do grupo
-* 🕒 /hora - Horário do bot
-* 📱 /comandos - Lista de comandos
-* 🚀 /valyrafi - Apresentação oficial ValyraFi
-* @IMAVY [pergunta] - Analista cripto por menção
-* 💹 /btc /eth /bnb /sol /xrp /usdt - Cotação de mercado
-* 🥇 /ouro (ou /paxg) - Pax Gold com gráfico no CoinMarketCap
-━━━━━━━━━━━━━━━━
-🔒 *Sistema de Segurança Ativo*
-* Anti-spam automático com IA
-* Sistema de strikes (3 = expulsão)
-* Bloqueio de palavras proibidas
-* Notificação automática aos admins
-* Lembretes com encerramento automático
-━━━━━━━━━━━━━━━━
-🤖 *iMavyAgent* - Protegendo seu grupo 24/7`;
+                const comandosMsg = COMMANDS_MENU;
                 await sendSafeMessage(sock, senderId, { text: comandosMsg });
                 if (isGroup) {
                     await sendSafeMessage(sock, groupId, { text: '📱 *Lista de comandos enviada no privado!*' });
