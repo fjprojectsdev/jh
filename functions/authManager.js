@@ -49,40 +49,12 @@ function loadEnvAdmins() {
 export async function isAuthorized(senderId) {
     if (!senderId) return false;
 
-    // DEBUG: Log do senderId para identificar formato
-    console.log('🔍 DEBUG AUTH - senderId:', senderId);
-    console.log('🔍 DEBUG AUTH - getNumberFromJid:', getNumberFromJid(senderId));
-
-    // 0. Admin hardcoded (fallback)
-    const hardcodedAdmins = [
-        '556993613476@s.whatsapp.net',
-        '5569993613476@s.whatsapp.net',
-        '225919675449527@lid', // Owner LID
-        '77807795347703@lid',
-        '39213319876707@lid'
-    ];
-
-    // Comparação EXATA de JID primeiro
-    if (hardcodedAdmins.includes(senderId)) {
-        console.log('✅ DEBUG AUTH - AUTORIZADO por hardcoded (exato):', senderId);
-        return true;
-    }
-
-    // Comparação por número (fallback)
     const senderNumber = getNumberFromJid(senderId);
-    for (const adminId of hardcodedAdmins) {
-        const adminNumber = getNumberFromJid(adminId);
-        console.log('🔍 DEBUG AUTH - Comparando:', senderNumber, 'vs', adminNumber);
-        if (senderNumber === adminNumber && senderNumber.length > 0) {
-            console.log('✅ DEBUG AUTH - AUTORIZADO por número:', adminId);
-            return true;
-        }
-    }
 
-    // 1. Verificar variáveis de ambiente (prioridade alta)
+    // 1. Verificar variaveis de ambiente (prioridade alta)
     const envAdmins = loadEnvAdmins();
     for (const adminId of envAdmins) {
-        if (senderId === adminId || getNumberFromJid(senderId) === getNumberFromJid(adminId)) {
+        if (senderId === adminId || senderNumber === getNumberFromJid(adminId)) {
             return true;
         }
     }
@@ -90,7 +62,7 @@ export async function isAuthorized(senderId) {
     // 2. Verificar arquivo JSON de admins
     const fileAdmins = await loadAdmins();
     for (const adminId of fileAdmins) {
-        if (senderId === adminId || getNumberFromJid(senderId) === getNumberFromJid(adminId)) {
+        if (senderId === adminId || senderNumber === getNumberFromJid(adminId)) {
             return true;
         }
     }
@@ -105,7 +77,11 @@ export async function isGroupAdmin(sock, groupId, userId) {
         const participant = groupMetadata.participants.find(p =>
             p.id === userId || p.jid === userId || getNumberFromJid(p.id) === getNumberFromJid(userId)
         );
-        return participant && (participant.admin === true || participant.admin === 'admin');
+        return participant && (
+            participant.admin === true
+            || participant.admin === 'admin'
+            || participant.admin === 'superadmin'
+        );
     } catch (error) {
         console.error('❌ Erro ao verificar admin do grupo:', error);
         return false;

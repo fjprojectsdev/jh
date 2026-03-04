@@ -113,14 +113,6 @@ export function attachOutgoingGuard(sock) {
                 }
             }
 
-            const debugText = sanitizeText(extractTextCandidate(finalContent));
-            if (debugText) {
-                console.log('Enviando:', JSON.stringify(debugText));
-            } else {
-                const keys = finalContent && typeof finalContent === 'object' ? Object.keys(finalContent) : [];
-                console.log('[DEBUG] Enviando payload sem texto:', JSON.stringify({ jid, keys }));
-            }
-
             return await original(jid, finalContent, options);
         } catch (error) {
             console.error(`[OUTGOING ERROR] Falha ao enviar para ${jid}: ${error.message}`);
@@ -128,6 +120,5 @@ export function attachOutgoingGuard(sock) {
         }
     };
 
-    console.log('[DEBUG] Outgoing Guard ativado: socket protegido contra mensagens vazias.');
     return sock;
 }

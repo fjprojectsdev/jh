@@ -1280,7 +1280,7 @@ function agendarAtualizacaoRealtime() {
 
     state.realtimeDebounceTimer = setTimeout(() => {
         gerarDashboard({ forceSupabase: true, silentStatus: true }).catch(() => {
-            // status tratado na pr??pria fun????o.
+            // status tratado na propria funcao.
         });
     }, 700);
 }

@@ -64,7 +64,7 @@ Payload para ranking via Supabase:
 Execute no Supabase:
 - `ranking-dashboard/SUPABASE_MULTITENANT_SETUP.sql`
 
-### Endpoints de autentica??o
+### Endpoints de autenticacao
 
 - `POST /api/auth/register`
 - `POST /api/auth/login`
@@ -130,6 +130,6 @@ Com isso, alteracoes em grupos e politicas de acesso no dashboard disparam webho
 
 ### Regras de plano
 
-- Free: 1 grupo e 1000 intera??es/m?s
-- Pro: at? 5 grupos
+- Free: 1 grupo e 1000 interacoes/mes
+- Pro: ate 5 grupos
 - Enterprise: ilimitado

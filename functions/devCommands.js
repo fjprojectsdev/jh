@@ -50,9 +50,6 @@ export function isDev(userId) {
     const cleanId = userId.replace('@s.whatsapp.net', '').replace('@lid', '');
     const userNumber = getNumberFromJid(userId);
     const adminIds = loadAdminIds();
-    console.log('DEBUG DEV - userId:', userId);
-    console.log('DEBUG DEV - cleanId:', cleanId);
-    console.log('DEBUG DEV - DEV_IDS:', DEV_IDS);
     const isExplicitDev = DEV_IDS.some((devId) => {
         const trimmed = devId.trim();
         if (!trimmed) return false;
@@ -65,7 +62,6 @@ export function isDev(userId) {
         return Boolean(userNumber) && Boolean(adminNumber) && userNumber === adminNumber;
     });
     const isAuthorized = isExplicitDev || isAdmin;
-    console.log('DEBUG DEV - isAuthorized:', isAuthorized);
     return isAuthorized;
 }
 
@@ -152,14 +148,7 @@ export async function handleDevCommand(sock, message, text) {
     const subCmd = args[1]?.toLowerCase();
 
     if (subCmd === 'eval') {
-        // Executar código JavaScript
-        const code = args.slice(2).join(' ');
-        try {
-            const result = eval(code);
-            await sendSafeMessage(sock, chatId, { text: `✅ Resultado:\n${JSON.stringify(result, null, 2)}` });
-        } catch (e) {
-            await sendSafeMessage(sock, chatId, { text: `❌ Erro:\n${e.message}` });
-        }
+        await sendSafeMessage(sock, chatId, { text: 'Comando /dev eval foi desativado por seguranca.' });
     } else if (subCmd === 'restart') {
         await sendSafeMessage(sock, chatId, { text: '🔄 Reiniciando bot...' });
         process.exit(0);
@@ -189,7 +178,7 @@ export async function handleDevCommand(sock, message, text) {
             : 'Modo desenvolvedor desativado.';
         await sendSafeMessage(sock, chatId, { text: offMsg });
     } else {
-        const help = `COMANDOS DEV\n\n/dev - Ativar modo IA (privado)\n/dev on - Ativar modo neste chat\n/dev off - Desativar modo neste chat\n/dev eval [codigo] - Executa JS\n/dev restart - Reinicia bot\n/dev logs - Ultimos logs\n/dev status - Status do sistema\n/dev backup - Backup manual`;
+        const help = `COMANDOS DEV\n\n/dev - Ativar modo IA (privado)\n/dev on - Ativar modo neste chat\n/dev off - Desativar modo neste chat\n/dev restart - Reinicia bot\n/dev logs - Ultimos logs\n/dev status - Status do sistema\n/dev backup - Backup manual`;
         await sendSafeMessage(sock, chatId, { text: help });
     }
 }

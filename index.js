@@ -1,5 +1,4 @@
 ﻿// index.js
-console.log('[DEBUG] Carregando index.js...');
 import 'dotenv/config';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
@@ -16,6 +15,11 @@ import { handleWelcomeEvent } from './functions/welcomeMessage.js';
 import { getGroupStatus } from './functions/groupStats.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const DEBUG_MODE = String(process.env.IMAVY_DEBUG || 'false').toLowerCase() === 'true';
+const debugLog = (...args) => {
+    if (DEBUG_MODE) console.log(...args);
+};
 
 import { handleGroupMessages, initLembretes, hasPendingPrivateWizard } from './functions/groupResponder.js';
 import { isAuthorized, getAllowedGroupPermissions } from './functions/adminCommands.js';
@@ -39,7 +43,9 @@ import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js'
 import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
 import { createIntelEngine, getIntelEventBuffer, storeIntelEvent } from './src/intelligence/intelEngine.js';
 import { createLeadEngine } from './src/intelligence/leadEngine.js';
-import { trackGroupMessage, backfillRankingFromLastHour } from './functions/groupRanking.js';
+import { trackGroupMessage, backfillRankingFromCurrentMonth } from './functions/groupRanking.js';
+import { captureGroupKnowledge } from './functions/groupKnowledge.js';
+import { isGroupBotPaused } from './functions/groupBotState.js';
 
 console.log('[IA] Moderacao:', isAIEnabled() ? 'ATIVA (Groq)' : 'Desabilitada');
 console.log('[IA] Vendas:', isAISalesEnabled() ? 'ATIVA (Groq)' : 'Desabilitada');
@@ -379,7 +385,25 @@ function extractProcessableIncomingText(message) {
     const extendedText = sanitizeIncomingText(content?.extendedTextMessage?.text);
     if (extendedText) return extendedText;
 
+    const imageCaption = sanitizeIncomingText(content?.imageMessage?.caption);
+    if (imageCaption) return imageCaption;
+
+    const videoCaption = sanitizeIncomingText(content?.videoMessage?.caption);
+    if (videoCaption) return videoCaption;
+
     return '';
+}
+
+function isReminderPrivateCommandToken(commandToken) {
+    const token = String(commandToken || '').trim().toLowerCase();
+    if (!token) return false;
+    const normalized = token.startsWith('/') ? token : `/${token}`;
+    return normalized === '/lembrete'
+        || normalized === '/lembretes'
+        || normalized === '/lembretefixo'
+        || normalized === '/stoplembrete'
+        || normalized === '/stoplembretefixo'
+        || normalized === '/agendar';
 }
 
 function loadAllowedGroupNames() {
@@ -615,27 +639,27 @@ async function startBot() {
     console.log('Iniciando iMavyAgent - Respostas Pre-Definidas');
     console.log("===============================================");
 
-    console.log('[DEBUG] ensureCoreConfigFiles...');
+    debugLog('[DEBUG] ensureCoreConfigFiles...');
     await ensureCoreConfigFiles();
     await refreshAllowedGroupsCache(true);
     try {
-        const backfill = await backfillRankingFromLastHour({ hours: 1, maxRows: 5000 });
-        console.log('[RANKING] Backfill 1h:', backfill);
+        const backfill = await backfillRankingFromCurrentMonth({ maxRows: 50000 });
+        console.log('[RANKING] Backfill mensal:', backfill);
     } catch (error) {
-        console.warn('[RANKING] Falha no backfill 1h:', error.message || String(error));
+        console.warn('[RANKING] Falha no backfill mensal:', error.message || String(error));
     }
 
-    console.log('[DEBUG] restoreSessionFromBackup...');
+    debugLog('[DEBUG] restoreSessionFromBackup...');
     // Tentar restaurar sessao do backup se necessario
     restoreSessionFromBackup();
 
-    console.log('[DEBUG] useMultiFileAuthState...');
+    debugLog('[DEBUG] useMultiFileAuthState...');
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
 
-    console.log('[DEBUG] fetchLatestBaileysVersion...');
+    debugLog('[DEBUG] fetchLatestBaileysVersion...');
     const { version } = await fetchLatestBaileysVersion();
 
-    console.log('[DEBUG] Criando socket...');
+    debugLog('[DEBUG] Criando socket...');
 
     const sock = makeWASocket({
         auth: state,
@@ -748,7 +772,8 @@ async function startBot() {
 
     // Evento de mensagens recebidas
     sock.ev.on('messages.upsert', async (msgUpsert) => {
-        if (msgUpsert?.type && msgUpsert.type !== 'notify') {
+        const upsertType = String(msgUpsert?.type || '').toLowerCase();
+        if (upsertType && upsertType !== 'notify' && upsertType !== 'append') {
             return;
         }
 
@@ -771,11 +796,11 @@ async function startBot() {
             if (unwrappedContent.protocolMessage) continue;
             if (unwrappedContent.senderKeyDistributionMessage) continue;
 
+            const isGroup = message.key.remoteJid?.endsWith('@g.us');
             const messageTimestamp = message.messageTimestamp ? parseInt(message.messageTimestamp) * 1000 : Date.now();
-            if (messageTimestamp < botStartTime) continue;
+            if (isGroup && messageTimestamp < botStartTime) continue;
 
             // ========== 2. SEPARACAO DE CONTEXTO ==========
-            const isGroup = message.key.remoteJid?.endsWith('@g.us');
             const senderId = message.key.participant || message.key.remoteJid;
             const chatId = message.key.remoteJid;
 
@@ -813,6 +838,8 @@ async function startBot() {
                     processingStage = 'private';
                     const privateText = String(messageText || '').trim().toLowerCase();
                     const privateCommandToken = privateText.split(/\s+/)[0] || '';
+                    const isReminderPvCommand = isReminderPrivateCommandToken(privateCommandToken);
+                    const hasPrivateWizard = hasPendingPrivateWizard(senderId);
 
                     if (messageText.toLowerCase().startsWith('/leads')) {
                         if (!runtimeControlState.features.commandsEnabled || !runtimeControlState.features.leadsEnabled) {
@@ -851,22 +878,38 @@ async function startBot() {
                     }
 
                     // Encaminhar qualquer slash-command no PV para o handler dedicado de comandos.
-                    if (privateCommandToken.startsWith('/')) {
-                        if (!runtimeControlState.features.commandsEnabled) {
+                    if (privateCommandToken.startsWith('/') || isReminderPvCommand) {
+                        if (!runtimeControlState.features.commandsEnabled && !isReminderPvCommand) {
                             await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
                             continue;
                         }
-                        await handleGroupMessages(sock, message, { isPrivate: true });
+                        logger.info('private_command_dispatch', {
+                            chatId,
+                            senderId,
+                            command: privateCommandToken,
+                            reminderCommand: isReminderPvCommand
+                        });
+                        try {
+                            await handleGroupMessages(sock, message, { isPrivate: true });
+                        } catch (error) {
+                            console.error('[PV] Falha ao processar comando privado:', error?.stack || error?.message || String(error));
+                            await sendSafeMessage(sock, chatId, { text: 'Erro interno ao processar comando no PV. Tente novamente.' });
+                        }
                         continue;
                     }
 
                     // Encaminhar respostas de fluxos guiados ativos (ex.: /lamina, /adicionargrupo) no PV.
-                    if (hasPendingPrivateWizard(senderId)) {
-                        if (!runtimeControlState.features.commandsEnabled) {
-                            await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
-                            continue;
+                    if (hasPrivateWizard) {
+                        logger.info('private_wizard_dispatch', {
+                            chatId,
+                            senderId
+                        });
+                        try {
+                            await handleGroupMessages(sock, message, { isPrivate: true });
+                        } catch (error) {
+                            console.error('[PV] Falha ao processar resposta de wizard:', error?.stack || error?.message || String(error));
+                            await sendSafeMessage(sock, chatId, { text: 'Erro interno no fluxo do comando. Digite /cancelar e tente novamente.' });
                         }
-                        await handleGroupMessages(sock, message, { isPrivate: true });
                         continue;
                     }
 
@@ -879,7 +922,7 @@ async function startBot() {
                 // Vamos logar tudo para debug agora.
 
                 processingStage = 'group';
-                console.log(`[DEBUG] Processando msg de ${senderId} no grupo ${chatId}`);
+                debugLog(`[DEBUG] Processando msg de ${senderId} no grupo ${chatId}`);
 
                 // Carregar allowed_groups (ideal: mover para memoria global recarregavel)
                 const allowedGroupsSnapshot = await refreshAllowedGroupsCache();
@@ -893,7 +936,7 @@ async function startBot() {
                     groupMetadata = await sock.groupMetadata(chatId);
                     groupSubject = groupMetadata.subject || '';
                     groupDescription = String(groupMetadata.desc || '').trim();
-                    console.log(`[DEBUG] Nome do grupo obtido: "${groupSubject}"`);
+                    debugLog(`[DEBUG] Nome do grupo obtido: "${groupSubject}"`);
                 } catch (e) {
                     console.warn('Falha ao obter metadata do grupo:', e.message);
                 }
@@ -929,6 +972,9 @@ async function startBot() {
                 }
 
                 console.log('Grupo autorizado:', groupSubject);
+                if (isGroupBotPaused(chatId)) {
+                    continue;
+                }
                 const isRestrictedGroup = isRestrictedGroupName(groupSubject);
                 if (isRestrictedGroup) {
                     console.log(`Modo restrito ativo para o grupo: "${groupSubject}"`);
@@ -950,6 +996,16 @@ async function startBot() {
                 publishInteractionForDashboard(message, senderId, groupSubject, chatId, messageTimestamp, messageText);
                 const trimmedText = String(messageText || '').trimStart();
                 if (trimmedText && !trimmedText.startsWith('/')) {
+                    captureGroupKnowledge({
+                        groupId: chatId,
+                        groupName: groupSubject || chatId,
+                        senderId,
+                        senderName: resolveParticipantName(message, senderId),
+                        timestamp: messageTimestamp,
+                        messageId,
+                        text: messageText
+                    });
+
                     trackGroupMessage({
                         groupId: chatId,
                         groupName: groupSubject || chatId,
@@ -962,7 +1018,7 @@ async function startBot() {
 
                 // 4.1. COMANDOS (prioridade maxima - moderacao sempre roda)
                 const isCommand = trimmedText.startsWith('/');
-                console.log(`[DEBUG] isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
+                debugLog(`[DEBUG] isCommand? ${isCommand} | Texto: ${messageText.substring(0, 20)}`);
 
                 if (isCommand) {
                     if (!runtimeControlState.features.commandsEnabled) {
@@ -1131,6 +1187,12 @@ async function startBot() {
 
                 if (isRestrictedGroupName(groupSubject)) {
                     console.log(`Boas-vindas desativadas no grupo restrito: "${groupSubject}"`);
+                    return;
+                }
+
+                const groupPermissions = await getAllowedGroupPermissions(groupSubject);
+                if (!groupPermissions?.welcome) {
+                    console.log(`Boas-vindas desativadas por permissao no grupo: "${groupSubject}"`);
                     return;
                 }
 
