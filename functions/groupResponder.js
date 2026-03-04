@@ -164,6 +164,31 @@ Gráfico do Pax Gold (CMC)
 🤖 *iMavyAgent*
 Protegendo seu grupo **24/7**`;
 
+const HIDDEN_COMMANDS_MENU = `🕵️ *COMANDOS OCULTOS (SEM EXCECOES)*
+━━━━━━━━━━━━━━━━━━━━━━
+/adicionargrupo
+/removergrupo
+/listargrupos
+/adicionaradmin
+/removeradmin
+/listaradmins
+/logs [linhas]
+/sethorario abrir HH:MM
+/sethorario fechar HH:MM
+/testelembrete [mensagem]
+/testia [mensagem]
+/leads
+/engajamento
+/dev on
+/dev off
+/lamina
+/listarlaminas
+/usarlamina <titulo>
+/agendarlamina
+/laminashill
+/shill
+/ranking`;
+
 function getCommandToken(normalizedText) {
     return String(normalizedText || '').trim().split(/\s+/)[0] || '';
 }
@@ -1445,7 +1470,7 @@ function restartLembreteFixo(sock, groupId, config) {
 // Respostas pré-definidas
 const RESPONSES = {
     'oi': '👋 Olá! Como posso ajudar?',
-    'ajuda': '📋 Comandos disponíveis:\n- oi\n- ajuda\n- status\n- info\n- /fechar\n- /abrir\n- /fixar\n- /regras\n- /status\n- /comandos',
+    'ajuda': 'Use /comandos para ver o menu completo.',
     'status': '✅ Bot online e funcionando!',
     'info': '🤖 iMavyAgent - Bot para WhatsApp',
     '/snappy': '0x3a9e15b28E099708D0812E0843a9Ed70c508FB4b',
@@ -1510,30 +1535,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
     }
 
     if (!isGroup && String(text || '').trim().toLowerCase().startsWith('/comandos2')) {
-        const comandosOcultos = `🕵️ *COMANDOS OCULTOS (SEM EXCECOES)*\n` +
-            `━━━━━━━━━━━━━━━━━━━━━━\n` +
-            `/adicionargrupo\n` +
-            `/removergrupo\n` +
-            `/listargrupos\n` +
-            `/adicionaradmin\n` +
-            `/removeradmin\n` +
-            `/listaradmins\n` +
-            `/logs [linhas]\n` +
-            `/sethorario abrir HH:MM\n` +
-            `/sethorario fechar HH:MM\n` +
-            `/testelembrete [mensagem]\n` +
-            `/testia [mensagem]\n` +
-            `/leads\n` +
-            `/engajamento\n` +
-            `/dev on\n` +
-            `/dev off\n` +
-            `/lamina\n` +
-            `/listarlaminas\n` +
-            `/usarlamina <titulo>\n` +
-            `/agendarlamina\n` +
-            `/laminashill\n` +
-            `/shill\n` +
-            `/ranking`;
+        const comandosOcultos = HIDDEN_COMMANDS_MENU;
         await sendSafeMessage(sock, senderId, { text: comandosOcultos });
         return;
     }
@@ -2829,30 +2831,7 @@ Desejamos a todos um excelente dia.`;
                 const ranking = getGroupTopRanking(groupId, 10);
                 await sendSafeMessage(sock, groupId, { text: buildRankingMessageForGroup(ranking, 'RANKING TOP 10') });
             } else if (normalizedText.startsWith('/comandos2')) {
-                const comandosOcultos = `🕵️ *COMANDOS OCULTOS (SEM EXCECOES)*\n` +
-                    `━━━━━━━━━━━━━━━━━━━━━━\n` +
-                    `/adicionargrupo\n` +
-                    `/removergrupo\n` +
-                    `/listargrupos\n` +
-                    `/adicionaradmin\n` +
-                    `/removeradmin\n` +
-                    `/listaradmins\n` +
-                    `/logs [linhas]\n` +
-                    `/sethorario abrir HH:MM\n` +
-                    `/sethorario fechar HH:MM\n` +
-                    `/testelembrete [mensagem]\n` +
-                    `/testia [mensagem]\n` +
-                    `/leads\n` +
-                    `/engajamento\n` +
-                    `/dev on\n` +
-                    `/dev off\n` +
-                    `/lamina\n` +
-                    `/listarlaminas\n` +
-                    `/usarlamina <titulo>\n` +
-                    `/agendarlamina\n` +
-                    `/laminashill\n` +
-                    `/shill\n` +
-                    `/ranking`;
+                const comandosOcultos = HIDDEN_COMMANDS_MENU;
                 await sendSafeMessage(sock, groupId, { text: comandosOcultos });
             } else if (normalizedText.startsWith('/stats')) {
                 const statsMessage = formatStats();
