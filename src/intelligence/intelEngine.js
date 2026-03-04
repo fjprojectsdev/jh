@@ -138,7 +138,7 @@ export class IntelEngine {
         this.sendEvent = typeof options.sendEvent === 'function' ? options.sendEvent : sendIntelEvent;
         this.socialEngine = new SocialEngine({
             monitoredTokens: options.monitoredTokens || ['NIX', 'SNAP'],
-            trackedEmojis: options.trackedEmojis || ['ðŸš€', 'ðŸ”¥', 'ðŸ’Ž']
+            trackedEmojis: options.trackedEmojis || ['🚀', '🔥', '💎']
         });
         this.onchainBuyBuckets = new Map();
         this.recentSocialSpikes = new Map();
