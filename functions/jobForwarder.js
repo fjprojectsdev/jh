@@ -13,6 +13,7 @@ const STATE_FILE = path.join(__dirname, '..', 'job_forwarder_state.json');
 const TARGET_GROUP = String(process.env.IMAVY_JOB_TARGET_GROUP || 'DESENVOLVIMENTO IA').trim();
 const JOB_TIMEZONE = String(process.env.IMAVY_JOB_TIMEZONE || 'America/Porto_Velho').trim();
 const JOB_CRON = String(process.env.IMAVY_JOB_CRON || '0 */3 * * *').trim();
+const MAX_JOBS_PER_RUN = Math.max(1, Number.parseInt(process.env.IMAVY_JOB_MAX_PER_RUN || '3', 10) || 3);
 const MAX_TRACKED_ITEMS = 2000;
 const MAX_SUMMARY_LENGTH = 320;
 const MAX_REQUIREMENTS_LENGTH = 320;
@@ -530,7 +531,8 @@ async function pollJobs(sock) {
             return;
         }
 
-        for (const job of freshJobs) {
+        const jobsToSend = freshJobs.slice(0, MAX_JOBS_PER_RUN);
+        for (const job of jobsToSend) {
             const sent = await sendSafeMessage(sock, targetGroup.id, buildJobPayload(job));
             if (sent) {
                 logger.info('job_forwarder_sent', {
@@ -563,6 +565,7 @@ export async function startJobForwarder(sock) {
     logger.info('job_forwarder_started', {
         cron: JOB_CRON,
         timezone: JOB_TIMEZONE,
+        maxJobsPerRun: MAX_JOBS_PER_RUN,
         sources: SOURCES.map((source) => source.label)
     });
 
