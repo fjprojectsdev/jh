@@ -60,6 +60,24 @@ function truncate(value, maxLen) {
     return `${text.slice(0, maxLen - 3).trim()}...`;
 }
 
+function compactList(value, maxLen) {
+    const cleaned = normalizeSpace(String(value || '')
+        .replace(/\s*[|•·]\s*/g, ', ')
+        .replace(/\s*-\s*/g, ', ')
+        .replace(/\s*;\s*/g, ', ')
+        .replace(/,+/g, ', ')
+        .replace(/\s*,\s*/g, ', '));
+
+    if (!cleaned) return '';
+
+    const parts = cleaned
+        .split(',')
+        .map((item) => normalizeSpace(item))
+        .filter(Boolean);
+
+    return truncate(Array.from(new Set(parts)).join(', '), maxLen);
+}
+
 function looksRemoteOrForeign(text) {
     const safe = normalizeSpace(text).toLowerCase();
     if (!safe) return false;
@@ -109,7 +127,7 @@ function deterministicAnalysis(job) {
 
     const summary = truncate(
         cutAtSuspiciousMarker(cleanSummary) || `${job.title} em ${job.location}.`,
-        220
+        160
     );
     const extractedRequirements = extractAfterLabel(
         `${job.requirements || ''} ${job.summary || ''}`,
@@ -121,9 +139,9 @@ function deterministicAnalysis(job) {
             : cleanRequirements && !looksCodePolluted(cleanRequirements)
                 ? cutAtSuspiciousMarker(cleanRequirements)
                 : summary,
-        220
+        140
     );
-    const applyInfo = truncate(cleanApply || `A candidatura deve ser feita pelo link da vaga.`, 180);
+    const applyInfo = truncate(cleanApply || `A candidatura deve ser feita pelo link da vaga.`, 120);
 
     return {
         publish: true,
@@ -132,7 +150,7 @@ function deterministicAnalysis(job) {
         location: truncate(stripNoise(job.location || 'Porto Velho/RO'), 60),
         role: truncate(stripNoise(job.role || job.title), 120),
         summary,
-        requirements,
+        requirements: compactList(requirements, 140),
         applyInfo,
         sourceLabel: job.sourceLabel,
         url: job.url
@@ -227,9 +245,9 @@ function normalizeAiResult(result, job) {
         company: truncate(stripNoise(result?.company || job.company || 'Empresa nao informada'), 80),
         location: truncate(stripNoise(result?.location || job.location || 'Porto Velho/RO'), 60),
         role: truncate(stripNoise(result?.role || job.role || job.title), 120),
-        summary: truncate(stripNoise(result?.summary || job.summary), 220),
-        requirements: truncate(stripNoise(result?.requirements || job.requirements), 220),
-        applyInfo: truncate(stripNoise(result?.applyInfo || job.applyInfo || 'Acesse o link da vaga para se candidatar.'), 180),
+        summary: truncate(stripNoise(result?.summary || job.summary), 160),
+        requirements: compactList(result?.requirements || job.requirements, 140),
+        applyInfo: truncate(stripNoise(result?.applyInfo || job.applyInfo || 'Acesse o link da vaga para se candidatar.'), 120),
         sourceLabel: job.sourceLabel,
         url: job.url
     };

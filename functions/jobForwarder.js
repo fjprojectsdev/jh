@@ -256,6 +256,16 @@ function truncate(value, maxLen) {
     return `${text.slice(0, maxLen - 3).trim()}...`;
 }
 
+function cleanLine(value, maxLen) {
+    return truncate(
+        normalizeSpace(String(value || '')
+            .replace(/\s*[|•·]\s*/g, ', ')
+            .replace(/,+/g, ', ')
+            .replace(/\s*,\s*/g, ', ')),
+        maxLen
+    );
+}
+
 function matchBlocks(value, regex) {
     return Array.from(String(value || '').matchAll(regex)).map((match) => match[1]).filter(Boolean);
 }
@@ -451,15 +461,14 @@ function resolveTargetGroup(groups) {
 function buildJobPayload(job) {
     const safeUrl = String(job.url || '').replace('https://', 'https://\u200B');
     const lines = [
-        `💼 *${job.title}*`,
-        job.company ? `🏢 Empresa: ${job.company}` : '',
-        job.location ? `📍 Local: ${job.location}` : '',
-        `🧭 Fonte: ${job.sourceLabel}`,
-        job.role ? `📌 Funcao: ${truncate(job.role, 100)}` : '',
-        job.summary ? `📝 Resumo: ${truncate(job.summary, 220)}` : '',
-        job.requirements ? `✅ Requisitos: ${truncate(job.requirements, 180)}` : '',
-        job.applyInfo ? `📨 Como se candidatar: ${truncate(job.applyInfo, 160)}` : '',
-        `🔗 ${safeUrl}`
+        `*Vaga:* ${cleanLine(job.title, 110)}`,
+        job.company ? `Empresa: ${cleanLine(job.company, 80)}` : '',
+        job.location ? `Local: ${cleanLine(job.location, 60)}` : '',
+        `Fonte: ${cleanLine(job.sourceLabel, 40)}`,
+        job.summary ? `Resumo: ${cleanLine(job.summary, 160)}` : '',
+        job.requirements ? `Requisitos: ${cleanLine(job.requirements, 140)}` : '',
+        job.applyInfo ? `Candidatura: ${cleanLine(job.applyInfo, 120)}` : '',
+        `Link: ${safeUrl}`
     ].filter(Boolean);
 
     return { text: lines.join('\n') };
