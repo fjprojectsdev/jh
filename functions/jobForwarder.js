@@ -115,7 +115,8 @@ const SOURCES = [
         listUrl: 'https://www.melhoresempregos.com/vagas-em-porto-velho-ro/',
         async collect() {
             const html = await fetchHtml(this.listUrl);
-            const links = extractUniqueLinks(html, this.listUrl)
+            const baseHref = readFirst(html, /<base href="([^"]+)"/i) || this.listUrl;
+            const links = extractUniqueLinks(html, baseHref)
                 .filter((item) => /\/vaga\//i.test(item.url) && /porto-velho-ro/i.test(item.url));
             const jobs = [];
 
@@ -205,11 +206,29 @@ function normalizeGroupName(value) {
 }
 
 function decodeHtml(value) {
+    const namedEntities = {
+        agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å',
+        egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
+        igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï',
+        ograve: 'ò', oacute: 'ó', ocirc: 'ô', otilde: 'õ', ouml: 'ö',
+        ugrave: 'ù', uacute: 'ú', ucirc: 'û', uuml: 'ü',
+        ccedil: 'ç', ntilde: 'ñ',
+        Agrave: 'À', Aacute: 'Á', Acirc: 'Â', Atilde: 'Ã', Auml: 'Ä', Aring: 'Å',
+        Egrave: 'È', Eacute: 'É', Ecirc: 'Ê', Euml: 'Ë',
+        Igrave: 'Ì', Iacute: 'Í', Icirc: 'Î', Iuml: 'Ï',
+        Ograve: 'Ò', Oacute: 'Ó', Ocirc: 'Ô', Otilde: 'Õ', Ouml: 'Ö',
+        Ugrave: 'Ù', Uacute: 'Ú', Ucirc: 'Û', Uuml: 'Ü',
+        Ccedil: 'Ç', Ntilde: 'Ñ',
+        ordm: 'º', ordf: 'ª', deg: '°', mdash: '-', ndash: '-', hellip: '...',
+        rsquo: "'", lsquo: "'", rdquo: '"', ldquo: '"', bull: '•'
+    };
+
     return String(value || '')
         .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
         .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
         .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
         .replace(/&nbsp;/gi, ' ')
+        .replace(/&([a-zA-Z][a-zA-Z0-9]+);/g, (match, entity) => namedEntities[entity] ?? match)
         .replace(/&amp;/g, '&')
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
