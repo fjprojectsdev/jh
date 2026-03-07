@@ -14,6 +14,7 @@ const DEFAULT_TARGET_GROUP = String(process.env.IMAVY_NEWS_TARGET_GROUP || 'DESE
 const DEFAULT_INTERVAL_MINUTES = Math.max(2, Number.parseInt(process.env.IMAVY_NEWS_INTERVAL_MINUTES || '10', 10) || 10);
 const DEFAULT_BOOTSTRAP_SEND = Math.max(0, Number.parseInt(process.env.IMAVY_NEWS_BOOTSTRAP_SEND || '0', 10) || 0);
 const MAX_SEEN_URLS = 500;
+const MAX_SENT_URLS = 500;
 const MAX_DESCRIPTION_LENGTH = 220;
 
 let pollTimer = null;
@@ -202,6 +203,7 @@ function getSubscriptionState(state, subscription) {
         state.subscriptions[key] = {
             initialized: false,
             seenUrls: [],
+            sentUrls: [],
             lastRunAt: null
         };
     }
@@ -264,11 +266,19 @@ function getSeenUrlsSnapshot(items) {
     return items.map((item) => item.url).slice(-MAX_SEEN_URLS);
 }
 
-function mergeSeenUrls(items, extraUrls = []) {
+function mergeSeenUrls(items, sentUrls = [], extraUrls = []) {
     return Array.from(new Set([
+        ...(Array.isArray(sentUrls) ? sentUrls : []).filter(Boolean),
         ...getSeenUrlsSnapshot(items),
         ...(Array.isArray(extraUrls) ? extraUrls : []).filter(Boolean)
-    ])).slice(-MAX_SEEN_URLS);
+    ])).slice(-Math.max(MAX_SEEN_URLS, MAX_SENT_URLS));
+}
+
+function mergeSentUrls(current = [], extraUrls = []) {
+    return Array.from(new Set([
+        ...(Array.isArray(current) ? current : []).filter(Boolean),
+        ...(Array.isArray(extraUrls) ? extraUrls : []).filter(Boolean)
+    ])).slice(-MAX_SENT_URLS);
 }
 
 function resolveSubscriptionTarget(groups, subscription) {
@@ -316,7 +326,11 @@ async function pollSubscription(sock, groups, subscription, state) {
     }
 
     const subscriptionState = getSubscriptionState(state, subscription);
-    const seenSet = new Set(Array.isArray(subscriptionState.seenUrls) ? subscriptionState.seenUrls : []);
+    const sentUrls = Array.isArray(subscriptionState.sentUrls) ? subscriptionState.sentUrls : [];
+    const seenSet = new Set([
+        ...(Array.isArray(subscriptionState.seenUrls) ? subscriptionState.seenUrls : []),
+        ...sentUrls
+    ]);
     const freshItems = items.filter((item) => !seenSet.has(item.url));
 
     if (!subscriptionState.initialized) {
@@ -329,7 +343,8 @@ async function pollSubscription(sock, groups, subscription, state) {
         }
 
         subscriptionState.initialized = true;
-        subscriptionState.seenUrls = mergeSeenUrls(items, bootstrapItems.map((item) => item.url));
+        subscriptionState.sentUrls = mergeSentUrls(sentUrls, bootstrapItems.map((item) => item.url));
+        subscriptionState.seenUrls = mergeSeenUrls(items, subscriptionState.sentUrls, bootstrapItems.map((item) => item.url));
         subscriptionState.lastRunAt = new Date().toISOString();
 
         logger.info('news_forwarder_initialized', {
@@ -343,7 +358,7 @@ async function pollSubscription(sock, groups, subscription, state) {
 
     if (freshItems.length === 0) {
         subscriptionState.lastRunAt = new Date().toISOString();
-        subscriptionState.seenUrls = getSeenUrlsSnapshot(items);
+        subscriptionState.seenUrls = mergeSeenUrls(items, sentUrls);
         return;
     }
 
@@ -351,7 +366,8 @@ async function pollSubscription(sock, groups, subscription, state) {
     await sendArticles(sock, targetGroup, [latestFreshItem]);
     subscriptionState.initialized = true;
     subscriptionState.lastRunAt = new Date().toISOString();
-    subscriptionState.seenUrls = mergeSeenUrls(items, [latestFreshItem.url]);
+    subscriptionState.sentUrls = mergeSentUrls(sentUrls, [latestFreshItem.url]);
+    subscriptionState.seenUrls = mergeSeenUrls(items, subscriptionState.sentUrls, [latestFreshItem.url]);
 }
 
 async function pollNews(sock) {
@@ -461,15 +477,22 @@ export function upsertMultipleNewsSubscriptions({ groupId = '', groupName = '', 
     };
 }
 
-export function removeNewsSubscription(groupId) {
+export function removeNewsSubscription(groupId, groupName = '') {
     const safeGroupId = String(groupId || '').trim();
-    if (!safeGroupId) {
+    const safeGroupName = normalizeGroupName(groupName);
+    if (!safeGroupId && !safeGroupName) {
         return { ok: false, removed: 0 };
     }
 
     const config = loadConfig();
     const before = config.subscriptions.length;
-    config.subscriptions = config.subscriptions.filter((item) => String(item.groupId || '').trim() !== safeGroupId);
+    config.subscriptions = config.subscriptions.filter((item) => {
+        const itemGroupId = String(item.groupId || '').trim();
+        const itemGroupName = normalizeGroupName(item.groupName);
+        const matchesById = safeGroupId && itemGroupId === safeGroupId;
+        const matchesByName = safeGroupName && itemGroupName === safeGroupName;
+        return !(matchesById || matchesByName);
+    });
     const removed = before - config.subscriptions.length;
     saveConfig(config);
 

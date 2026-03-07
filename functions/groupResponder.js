@@ -1652,7 +1652,7 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 }
 
                 if (newsState.action === '/stopnoticias') {
-                    const result = removeNewsSubscription(selected.id);
+                    const result = removeNewsSubscription(selected.id, selected.subject);
                     clearNewsWizard(senderId);
                     if (result.removed > 0) {
                         await sendSafeMessage(sock, senderId, { text: `🛑 Noticias desativadas em: ${selected.subject}` });
