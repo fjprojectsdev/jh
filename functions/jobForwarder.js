@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import cron from 'node-cron';
 
 import { sendSafeMessage } from './messageHandler.js';
+import { analyzeJobForPublishing } from './jobAnalyzer.js';
 import { logger } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -448,16 +449,17 @@ function resolveTargetGroup(groups) {
 }
 
 function buildJobPayload(job) {
+    const safeUrl = String(job.url || '').replace('https://', 'https://\u200B');
     const lines = [
         `💼 *${job.title}*`,
         job.company ? `🏢 Empresa: ${job.company}` : '',
         job.location ? `📍 Local: ${job.location}` : '',
         `🧭 Fonte: ${job.sourceLabel}`,
-        job.role ? `📌 Funcao: ${truncate(job.role, 120)}` : '',
-        job.summary ? `📝 Resumo: ${truncate(job.summary, MAX_SUMMARY_LENGTH)}` : '',
-        job.requirements ? `✅ Requisitos: ${truncate(job.requirements, MAX_REQUIREMENTS_LENGTH)}` : '',
-        job.applyInfo ? `📨 Como se candidatar: ${truncate(job.applyInfo, 260)}` : '',
-        `🔗 ${job.url}`
+        job.role ? `📌 Funcao: ${truncate(job.role, 100)}` : '',
+        job.summary ? `📝 Resumo: ${truncate(job.summary, 220)}` : '',
+        job.requirements ? `✅ Requisitos: ${truncate(job.requirements, 180)}` : '',
+        job.applyInfo ? `📨 Como se candidatar: ${truncate(job.applyInfo, 160)}` : '',
+        `🔗 ${safeUrl}`
     ].filter(Boolean);
 
     return { text: lines.join('\n') };
@@ -531,7 +533,29 @@ async function pollJobs(sock) {
             return;
         }
 
-        const jobsToSend = freshJobs.slice(0, MAX_JOBS_PER_RUN);
+        const analyzedFreshJobs = [];
+        for (const job of freshJobs) {
+            const analyzed = await analyzeJobForPublishing(job);
+            if (analyzed?.publish) {
+                analyzedFreshJobs.push(analyzed);
+            } else {
+                logger.info('job_forwarder_filtered', {
+                    source: job.sourceLabel,
+                    title: job.title,
+                    reason: analyzed?.reason || 'filtered'
+                });
+            }
+        }
+
+        if (analyzedFreshJobs.length === 0) {
+            state.seenUrls = mergeStateEntries(state.seenUrls, urlsSnapshot);
+            state.seenFingerprints = mergeStateEntries(state.seenFingerprints, fingerprintSnapshot);
+            state.lastRunAt = new Date().toISOString();
+            saveState(state);
+            return;
+        }
+
+        const jobsToSend = analyzedFreshJobs.slice(0, MAX_JOBS_PER_RUN);
         for (const job of jobsToSend) {
             const sent = await sendSafeMessage(sock, targetGroup.id, buildJobPayload(job));
             if (sent) {
