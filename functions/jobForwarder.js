@@ -281,9 +281,9 @@ function formatLocation(value) {
 function buildRequirementBullets(value) {
     const parts = normalizeSpace(String(value || ''))
         .split(',')
-        .map((item) => cleanLine(item, 90))
+        .map((item) => cleanLine(item, 180))
         .filter(Boolean)
-        .slice(0, 4);
+        .slice(0, 8);
 
     if (parts.length === 0) return '';
     return parts.map((item) => `• ${item}`).join('\n');
@@ -491,13 +491,14 @@ function buildJobPayload(job) {
         job.area ? `📖 Área: ${cleanLine(job.area, 80)}` : '',
         '',
         '📝 *Descrição:*',
-        cleanLine(job.summary, 220),
+        cleanLine(job.summary, 520),
         '',
         requirementBullets ? '✅ *Requisitos:*' : '',
         requirementBullets,
         job.salaryInfo ? `💰 Salário e benefícios: ${cleanLine(job.salaryInfo, 120)}` : '',
         '',
         '🔗 *Candidatura:*',
+        cleanLine(job.applyInfo, 220),
         safeUrl
     ].filter((line, index, array) => {
         if (line !== '') return true;

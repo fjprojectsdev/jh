@@ -141,7 +141,7 @@ function deterministicAnalysis(job) {
 
     const summary = truncate(
         cutAtSuspiciousMarker(cleanSummary) || `${job.title} em ${job.location}.`,
-        160
+        420
     );
     const extractedRequirements = extractAfterLabel(
         `${job.requirements || ''} ${job.summary || ''}`,
@@ -153,9 +153,9 @@ function deterministicAnalysis(job) {
             : cleanRequirements && !looksCodePolluted(cleanRequirements)
                 ? cutAtSuspiciousMarker(cleanRequirements)
                 : summary,
-        140
+        420
     );
-    const applyInfo = truncate(cleanApply || `A candidatura deve ser feita pelo link da vaga.`, 120);
+    const applyInfo = truncate(cleanApply || `A candidatura deve ser feita pelo link da vaga.`, 220);
 
     return {
         publish: true,
@@ -165,7 +165,7 @@ function deterministicAnalysis(job) {
         area: truncate(stripNoise(job.area || ''), 80),
         role: truncate(stripNoise(job.role || job.title), 120),
         summary,
-        requirements: compactList(removeSalaryInfo(requirements), 140),
+        requirements: compactList(removeSalaryInfo(requirements), 420),
         salaryInfo,
         applyInfo,
         sourceLabel: job.sourceLabel,
@@ -264,10 +264,10 @@ function normalizeAiResult(result, job) {
         location: truncate(stripNoise(result?.location || job.location || 'Porto Velho/RO'), 60),
         area: truncate(stripNoise(result?.area || job.area || ''), 80),
         role: truncate(stripNoise(result?.role || job.role || job.title), 120),
-        summary: truncate(stripNoise(result?.summary || job.summary), 160),
-        requirements: compactList(removeSalaryInfo(result?.requirements || job.requirements), 140),
+        summary: truncate(stripNoise(result?.summary || job.summary), 420),
+        requirements: compactList(removeSalaryInfo(result?.requirements || job.requirements), 420),
         salaryInfo: truncate(stripNoise(result?.salaryInfo || job.salaryInfo || extractSalaryInfo(job.requirements || '')), 120),
-        applyInfo: truncate(stripNoise(result?.applyInfo || job.applyInfo || 'Acesse o link da vaga para se candidatar.'), 120),
+        applyInfo: truncate(stripNoise(result?.applyInfo || job.applyInfo || 'Acesse o link da vaga para se candidatar.'), 220),
         sourceLabel: job.sourceLabel,
         url: job.url
     };
