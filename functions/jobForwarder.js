@@ -286,7 +286,7 @@ function buildRequirementBullets(value) {
         .slice(0, 8);
 
     if (parts.length === 0) return '';
-    return parts.map((item) => `• ${item}`).join('\n');
+    return parts.map((item) => `\u2022 ${item}`).join('\n');
 }
 
 function matchBlocks(value, regex) {
@@ -485,19 +485,19 @@ function buildJobPayload(job) {
     const safeUrl = String(job.url || '').replace('https://', 'https://\u200B');
     const requirementBullets = buildRequirementBullets(job.requirements);
     const lines = [
-        `📌 *VAGA:* ${cleanLine(job.title, 110)}`,
-        job.company ? `🏢 Empresa: ${cleanLine(job.company, 80)}` : '',
-        job.location ? `📍 Local: ${formatLocation(job.location)}` : '',
-        job.area ? `📖 Área: ${cleanLine(job.area, 80)}` : '',
+        `\u{1F4CC} *VAGA:* ${cleanLine(job.title, 110)}`,
+        job.company ? `\u{1F3E2} Empresa: ${cleanLine(job.company, 80)}` : '',
+        job.location ? `\u{1F4CD} Local: ${formatLocation(job.location)}` : '',
+        job.area ? `\u{1F4D6} Área: ${cleanLine(job.area, 80)}` : '',
         '',
-        '📝 *Descrição:*',
+        '\u{1F4DD} *Descrição:*',
         cleanLine(job.summary, 520),
         '',
-        requirementBullets ? '✅ *Requisitos:*' : '',
+        requirementBullets ? '\u2705 *Requisitos:*' : '',
         requirementBullets,
-        job.salaryInfo ? `💰 Salário e benefícios: ${cleanLine(job.salaryInfo, 120)}` : '',
+        job.salaryInfo ? `\u{1F4B0} Salário e benefícios: ${cleanLine(job.salaryInfo, 120)}` : '',
         '',
-        '🔗 *Candidatura:*',
+        '\u{1F517} *Candidatura:*',
         cleanLine(job.applyInfo, 220),
         safeUrl
     ].filter((line, index, array) => {
