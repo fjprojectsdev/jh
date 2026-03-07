@@ -1,6 +1,6 @@
-﻿// index.js
+// index.js
 import 'dotenv/config';
-import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } from "@whiskeysockets/baileys";
+import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, WAMessageStubType } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import http from 'http';
@@ -77,6 +77,7 @@ const leadEngine = createLeadEngine({
 });
 const DASHBOARD_SYNC_SECRET = String(process.env.DASHBOARD_SYNC_SECRET || '').trim();
 const DASHBOARD_SYNC_MAX_BODY_BYTES = Math.max(32 * 1024, parseInt(process.env.DASHBOARD_SYNC_MAX_BODY_BYTES || '262144', 10));
+const BUY_ALERT_ENABLED = String(process.env.BUY_ALERT_ENABLED || 'false').trim().toLowerCase() === 'true';
 const RUNTIME_FEATURE_KEYS = ['commandsEnabled', 'moderationEnabled', 'intelEnabled', 'leadsEnabled'];
 const runtimeControlState = {
     features: {
@@ -403,7 +404,53 @@ function isReminderPrivateCommandToken(commandToken) {
         || normalized === '/lembretefixo'
         || normalized === '/stoplembrete'
         || normalized === '/stoplembretefixo'
+        || normalized === '/testelembrete'
+        || normalized === '/editarlembrete'
+        || normalized === '/apagarlembrete'
         || normalized === '/agendar';
+}
+
+async function maybeHandleWelcomeParticipants(sock, groupId, participants) {
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeGroupId || !safeGroupId.endsWith('@g.us')) {
+        return;
+    }
+
+    const safeParticipants = (Array.isArray(participants) ? participants : [participants])
+        .map((participant) => {
+            if (!participant) return '';
+            if (typeof participant === 'string') return participant.trim();
+            if (typeof participant === 'object' && typeof participant.id === 'string') return participant.id.trim();
+            if (typeof participant === 'object' && typeof participant.jid === 'string') return participant.jid.trim();
+            if (typeof participant === 'object' && typeof participant.participant === 'string') return participant.participant.trim();
+            return '';
+        })
+        .filter(Boolean);
+
+    if (safeParticipants.length === 0) {
+        return;
+    }
+
+    let groupSubject = '';
+    try {
+        const groupMetadata = await sock.groupMetadata(safeGroupId);
+        groupSubject = groupMetadata?.subject || '';
+    } catch (e) {
+        console.warn('Nao foi possivel obter nome do grupo para filtro de boas-vindas:', e.message);
+    }
+
+    if (isRestrictedGroupName(groupSubject)) {
+        console.log(`Boas-vindas desativadas no grupo restrito: "${groupSubject}"`);
+        return;
+    }
+
+    const groupPermissions = await getAllowedGroupPermissions(groupSubject);
+    if (!groupPermissions?.welcome) {
+        console.log(`Boas-vindas desativadas por permissao no grupo: "${groupSubject}"`);
+        return;
+    }
+
+    await handleWelcomeEvent(sock, safeGroupId, safeParticipants);
 }
 
 function loadAllowedGroupNames() {
@@ -726,17 +773,24 @@ async function startBot() {
                 scheduleGroupMessages(sock);
                 scheduleBackups();
                 startScheduler(sock);
-                // Iniciar sistema de lembretes com socket valido
-                initLembretes(sock);
+                // Iniciar sistema de lembretes apenas uma vez por ciclo de conexao
+                if (!global.__imavyLembretesInitialized) {
+                    initLembretes(sock);
+                    global.__imavyLembretesInitialized = true;
+                }
                 scheduleSupabaseBackup();
                 startAutoPromo(sock);
                 startHealthMonitor();
                 startSessionBackup();
-                await startBuyAlertNotifier(sock, {
-                    onBuyProcessed: async (buyEvent) => {
-                        await intelEngine.registerOnchainBuy(buyEvent);
-                    }
-                });
+                if (BUY_ALERT_ENABLED) {
+                    await startBuyAlertNotifier(sock, {
+                        onBuyProcessed: async (buyEvent) => {
+                            await intelEngine.registerOnchainBuy(buyEvent);
+                        }
+                    });
+                } else {
+                    logger.info('BUY ALERT desabilitado por configuracao (BUY_ALERT_ENABLED=false).');
+                }
                 console.log('Todos os servicos iniciados com sucesso');
             } catch (e) {
                 console.error('Erro ao iniciar servicos:', e.message);
@@ -746,6 +800,7 @@ async function startBot() {
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
             setConnected(false);
+            global.__imavyLembretesInitialized = false;
             await stopBuyAlertNotifier();
 
             if (reason === DisconnectReason.loggedOut) {
@@ -784,11 +839,32 @@ async function startBot() {
 
         for (const message of messages) {
             // ========== 1. FILTROS INICIAIS (Fast Return) ==========
-            if (!message.message) continue;
             if (message.key.fromMe) continue;
             if (!message.key.remoteJid) continue;
             if (message.key.remoteJid === 'status@broadcast') continue;
             if (message.key.remoteJid.endsWith('@broadcast')) continue;
+
+            if (message.key.remoteJid.endsWith('@g.us')) {
+                const stubType = message.messageStubType;
+                if (
+                    stubType === WAMessageStubType.GROUP_PARTICIPANT_ADD
+                    || stubType === WAMessageStubType.GROUP_PARTICIPANT_INVITE
+                    || stubType === WAMessageStubType.GROUP_PARTICIPANT_ADD_REQUEST_JOIN
+                ) {
+                    const addedParticipants = Array.isArray(message.messageStubParameters)
+                        ? message.messageStubParameters
+                        : (message.key.participant ? [message.key.participant] : []);
+
+                    try {
+                        await maybeHandleWelcomeParticipants(sock, message.key.remoteJid, addedParticipants);
+                    } catch (error) {
+                        console.error('Erro ao processar boas-vindas via messageStubType:', error);
+                    }
+                    continue;
+                }
+            }
+
+            if (!message.message) continue;
             if (message.messageStubType !== undefined && message.messageStubType !== null) continue;
 
             const unwrappedContent = unwrapIncomingMessageContent(message.message);
@@ -877,43 +953,29 @@ async function startBot() {
                         continue;
                     }
 
-                    // Encaminhar qualquer slash-command no PV para o handler dedicado de comandos.
-                    if (privateCommandToken.startsWith('/') || isReminderPvCommand) {
-                        if (!runtimeControlState.features.commandsEnabled && !isReminderPvCommand) {
+                    // Encaminhar mensagens privadas para o handler dedicado.
+                    // O handler decide o que responder (comandos, respostas curtas, wizards, etc).
+                    if (hasText || hasPrivateWizard || isReminderPvCommand) {
+                        if (!runtimeControlState.features.commandsEnabled && (privateCommandToken.startsWith('/') || isReminderPvCommand)) {
                             await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
                             continue;
                         }
-                        logger.info('private_command_dispatch', {
+                        logger.info('private_dispatch', {
                             chatId,
                             senderId,
-                            command: privateCommandToken,
-                            reminderCommand: isReminderPvCommand
+                            command: privateCommandToken || null,
+                            reminderCommand: isReminderPvCommand,
+                            hasPrivateWizard
                         });
                         try {
                             await handleGroupMessages(sock, message, { isPrivate: true });
                         } catch (error) {
-                            console.error('[PV] Falha ao processar comando privado:', error?.stack || error?.message || String(error));
-                            await sendSafeMessage(sock, chatId, { text: 'Erro interno ao processar comando no PV. Tente novamente.' });
+                            console.error('[PV] Falha ao processar mensagem privada:', error?.stack || error?.message || String(error));
+                            await sendSafeMessage(sock, chatId, { text: 'Erro interno ao processar mensagem no PV. Tente novamente.' });
                         }
                         continue;
                     }
 
-                    // Encaminhar respostas de fluxos guiados ativos (ex.: /lamina, /adicionargrupo) no PV.
-                    if (hasPrivateWizard) {
-                        logger.info('private_wizard_dispatch', {
-                            chatId,
-                            senderId
-                        });
-                        try {
-                            await handleGroupMessages(sock, message, { isPrivate: true });
-                        } catch (error) {
-                            console.error('[PV] Falha ao processar resposta de wizard:', error?.stack || error?.message || String(error));
-                            await sendSafeMessage(sock, chatId, { text: 'Erro interno no fluxo do comando. Digite /cancelar e tente novamente.' });
-                        }
-                        continue;
-                    }
-
-                    // Ignorar mensagens privadas (atendimento desabilitado)
                     continue;
                 }
 
@@ -1176,27 +1238,8 @@ async function startBot() {
             const { id: groupId, participants, action } = update;
 
             // Delegar para o handler inteligente com batch
-            if (action === 'add') {
-                let groupSubject = '';
-                try {
-                    const groupMetadata = await sock.groupMetadata(groupId);
-                    groupSubject = groupMetadata?.subject || '';
-                } catch (e) {
-                    console.warn('Nao foi possivel obter nome do grupo para filtro de boas-vindas:', e.message);
-                }
-
-                if (isRestrictedGroupName(groupSubject)) {
-                    console.log(`Boas-vindas desativadas no grupo restrito: "${groupSubject}"`);
-                    return;
-                }
-
-                const groupPermissions = await getAllowedGroupPermissions(groupSubject);
-                if (!groupPermissions?.welcome) {
-                    console.log(`Boas-vindas desativadas por permissao no grupo: "${groupSubject}"`);
-                    return;
-                }
-
-                handleWelcomeEvent(sock, groupId, participants);
+            if (action === 'add' || action === 'invite' || action === 'join') {
+                await maybeHandleWelcomeParticipants(sock, groupId, participants);
             }
         } catch (error) {
             console.error('Erro no evento de participantes:', error);

@@ -10,6 +10,38 @@ const DEBOUNCE_TIME = 10000; // 10 segundos para acumular
 const recentlyWelcomed = new Map();
 const CACHE_TTL = 30 * 60 * 1000; // 30 minutos
 
+function extractParticipantJid(participant) {
+    if (!participant) return '';
+    if (typeof participant === 'string') return participant;
+    if (typeof participant === 'object' && typeof participant.id === 'string') return participant.id;
+    if (typeof participant === 'object' && typeof participant.jid === 'string') return participant.jid;
+    if (typeof participant === 'object' && typeof participant.participant === 'string') return participant.participant;
+    return '';
+}
+
+async function sendWelcomeWithFallback(sock, groupId, text, mentions = []) {
+    const cleanMentions = Array.from(new Set(
+        mentions
+            .map((jid) => String(jid || '').trim())
+            .filter(Boolean)
+    ));
+
+    if (cleanMentions.length > 0) {
+        const sentWithMentions = await sendSafeMessage(sock, groupId, {
+            text,
+            mentions: cleanMentions
+        });
+
+        if (sentWithMentions) {
+            return sentWithMentions;
+        }
+
+        console.warn(`Falha ao enviar boas-vindas com mencoes em ${groupId}. Tentando sem mencoes.`);
+    }
+
+    return sendSafeMessage(sock, groupId, { text });
+}
+
 export async function handleWelcomeEvent(sock, groupId, newParticipants) {
     if (!welcomeBuffer.has(groupId)) {
         welcomeBuffer.set(groupId, {
@@ -24,7 +56,7 @@ export async function handleWelcomeEvent(sock, groupId, newParticipants) {
     const candidates = Array.isArray(newParticipants) ? newParticipants : [newParticipants];
 
     for (const p of candidates) {
-        const jid = (typeof p === 'object' && p.id) ? p.id : p;
+        const jid = extractParticipantJid(p);
         if (!jid) continue;
 
         const cacheKey = `${groupId}:${jid}`;
@@ -101,10 +133,7 @@ Contamos com sua colaboração.
 
 Mensagem automática — iMavyAgent`;
 
-    await sendSafeMessage(sock, groupId, {
-        text: welcomeText,
-        mentions: [memberJid]
-    });
+    await sendWelcomeWithFallback(sock, groupId, welcomeText, [memberJid]);
 }
 
 async function sendBatchWelcome(sock, groupId, participants) {
@@ -123,8 +152,5 @@ Contamos com a colaboração de todos para manter uma boa convivência.
 
 Mensagem automática — iMavyAgent`;
 
-    await sendSafeMessage(sock, groupId, {
-        text: welcomeText,
-        mentions: mentions
-    });
+    await sendWelcomeWithFallback(sock, groupId, welcomeText, mentions);
 }
