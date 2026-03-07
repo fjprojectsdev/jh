@@ -177,46 +177,25 @@ async function resolveTargetGroup(sock, targetGroupName) {
 
 function buildNewsPayload(article) {
     const body = truncate(article.description || `Categoria: ${article.category || 'Última hora'}`, 140);
+    const displayUrl = article.url.replace('https://', 'https://\u200B');
     const caption = [
         `📰 *${article.title}*`,
         '',
         body,
         '',
-        `🔗 ${article.url}`,
+        `🔗 ${displayUrl}`,
         'Ler mais'
     ].join('\n');
 
     if (article.image) {
         return {
             image: { url: article.image },
-            caption,
-            contextInfo: {
-                externalAdReply: {
-                    showAdAttribution: false,
-                    title: article.title,
-                    body,
-                    sourceUrl: article.url,
-                    thumbnailUrl: article.image,
-                    mediaType: 1,
-                    renderLargerThumbnail: true
-                }
-            }
+            caption
         };
     }
 
     return {
-        text: caption,
-        contextInfo: {
-            externalAdReply: {
-                showAdAttribution: false,
-                title: article.title,
-                body,
-                sourceUrl: article.url,
-                thumbnailUrl: undefined,
-                mediaType: 1,
-                renderLargerThumbnail: true
-            }
-        }
+        text: caption
     };
 }
 
