@@ -6,6 +6,7 @@ import { sendSafeMessage } from './messageHandler.js';
 import { logger } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG_FILE = path.join(__dirname, '..', 'news_forwarder_config.json');
 const STATE_FILE = path.join(__dirname, '..', 'news_forwarder_state.json');
 
 const DEFAULT_FEED_URL = String(process.env.IMAVY_NEWS_FEED_URL || 'https://www.noticiasaominuto.com.br/rss/ultima-hora').trim();
@@ -50,6 +51,18 @@ function truncate(value, maxLen = MAX_DESCRIPTION_LENGTH) {
     if (!text) return '';
     if (text.length <= maxLen) return text;
     return `${text.slice(0, maxLen - 3).trim()}...`;
+}
+
+function normalizeFeedUrl(rawUrl) {
+    const safeUrl = String(rawUrl || '').trim();
+    if (!safeUrl) return '';
+    try {
+        const parsed = new URL(safeUrl);
+        parsed.hash = '';
+        return parsed.toString();
+    } catch (_) {
+        return '';
+    }
 }
 
 function readTag(block, tagName) {
@@ -111,37 +124,88 @@ function parseFeedItems(xml) {
         .sort((a, b) => a.publishedAt - b.publishedAt);
 }
 
+function getDefaultConfig() {
+    return {
+        subscriptions: DEFAULT_TARGET_GROUP && DEFAULT_FEED_URL
+            ? [{
+                groupId: '',
+                groupName: DEFAULT_TARGET_GROUP,
+                feedUrl: DEFAULT_FEED_URL,
+                active: true,
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+            }]
+            : []
+    };
+}
+
+function loadConfig() {
+    try {
+        if (!fs.existsSync(CONFIG_FILE)) {
+            const defaultConfig = getDefaultConfig();
+            fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2), 'utf8');
+            return defaultConfig;
+        }
+        const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+        const subscriptions = Array.isArray(parsed?.subscriptions) ? parsed.subscriptions : [];
+        return { subscriptions };
+    } catch (_) {
+        return getDefaultConfig();
+    }
+}
+
+function saveConfig(config) {
+    const safeConfig = {
+        updatedAt: new Date().toISOString(),
+        subscriptions: Array.isArray(config?.subscriptions) ? config.subscriptions : []
+    };
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(safeConfig, null, 2), 'utf8');
+}
+
+function subscriptionKey(subscription) {
+    return `${String(subscription?.groupId || subscription?.groupName || '').trim()}|${normalizeFeedUrl(subscription?.feedUrl)}`;
+}
+
 function loadState() {
     try {
         if (!fs.existsSync(STATE_FILE)) {
             return {
-                initialized: false,
-                seenUrls: [],
-                lastRunAt: null
+                subscriptions: {}
             };
         }
         const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
         return {
-            initialized: Boolean(parsed?.initialized),
-            seenUrls: Array.isArray(parsed?.seenUrls) ? parsed.seenUrls.filter(Boolean) : [],
-            lastRunAt: parsed?.lastRunAt || null
+            subscriptions: parsed?.subscriptions && typeof parsed.subscriptions === 'object'
+                ? parsed.subscriptions
+                : {}
         };
     } catch (_) {
         return {
-            initialized: false,
-            seenUrls: [],
-            lastRunAt: null
+            subscriptions: {}
         };
     }
 }
 
 function saveState(state) {
     const safeState = {
-        initialized: Boolean(state?.initialized),
-        seenUrls: Array.isArray(state?.seenUrls) ? state.seenUrls.slice(-MAX_SEEN_URLS) : [],
-        lastRunAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        subscriptions: state?.subscriptions && typeof state.subscriptions === 'object'
+            ? state.subscriptions
+            : {}
     };
     fs.writeFileSync(STATE_FILE, JSON.stringify(safeState, null, 2), 'utf8');
+}
+
+function getSubscriptionState(state, subscription) {
+    const key = subscriptionKey(subscription);
+    if (!state.subscriptions[key]) {
+        state.subscriptions[key] = {
+            initialized: false,
+            seenUrls: [],
+            lastRunAt: null
+        };
+    }
+    return state.subscriptions[key];
 }
 
 async function fetchFeedXml(feedUrl) {
@@ -156,23 +220,6 @@ async function fetchFeedXml(feedUrl) {
     }
 
     return response.text();
-}
-
-async function resolveTargetGroup(sock, targetGroupName) {
-    const normalizedTarget = normalizeGroupName(targetGroupName);
-    if (!normalizedTarget) return null;
-
-    const groups = await sock.groupFetchAllParticipating();
-    const match = Object.values(groups || {}).find((group) => normalizeGroupName(group?.subject) === normalizedTarget);
-
-    if (!match) {
-        return null;
-    }
-
-    return {
-        id: String(match.id || '').trim(),
-        subject: String(match.subject || '').trim()
-    };
 }
 
 function buildNewsPayload(article) {
@@ -213,72 +260,182 @@ async function sendArticles(sock, targetGroup, articles) {
     }
 }
 
+function resolveSubscriptionTarget(groups, subscription) {
+    const byId = String(subscription?.groupId || '').trim();
+    const byName = normalizeGroupName(subscription?.groupName);
+
+    if (byId && groups[byId]) {
+        const group = groups[byId];
+        return { id: byId, subject: String(group?.subject || byId).trim() || byId };
+    }
+
+    if (!byName) return null;
+
+    for (const [id, group] of Object.entries(groups || {})) {
+        if (normalizeGroupName(group?.subject) === byName) {
+            return { id, subject: String(group?.subject || id).trim() || id };
+        }
+    }
+
+    return null;
+}
+
+async function pollSubscription(sock, groups, subscription, state) {
+    const targetGroup = resolveSubscriptionTarget(groups, subscription);
+    if (!targetGroup) {
+        logger.warn('news_forwarder_group_not_found', {
+            groupId: subscription?.groupId || '',
+            groupName: subscription?.groupName || '',
+            feedUrl: subscription?.feedUrl || ''
+        });
+        return;
+    }
+
+    const feedUrl = normalizeFeedUrl(subscription?.feedUrl);
+    if (!feedUrl) {
+        logger.warn('news_forwarder_invalid_feed', { subscription });
+        return;
+    }
+
+    const xml = await fetchFeedXml(feedUrl);
+    const items = parseFeedItems(xml);
+    if (items.length === 0) {
+        logger.warn('news_forwarder_empty_feed', { feedUrl, group: targetGroup.subject });
+        return;
+    }
+
+    const subscriptionState = getSubscriptionState(state, subscription);
+    const seenSet = new Set(Array.isArray(subscriptionState.seenUrls) ? subscriptionState.seenUrls : []);
+    const freshItems = items.filter((item) => !seenSet.has(item.url));
+
+    if (!subscriptionState.initialized) {
+        const bootstrapItems = DEFAULT_BOOTSTRAP_SEND > 0
+            ? freshItems.slice(-DEFAULT_BOOTSTRAP_SEND)
+            : [];
+
+        if (bootstrapItems.length > 0) {
+            await sendArticles(sock, targetGroup, bootstrapItems);
+        }
+
+        subscriptionState.initialized = true;
+        subscriptionState.seenUrls = items.map((item) => item.url).slice(-MAX_SEEN_URLS);
+        subscriptionState.lastRunAt = new Date().toISOString();
+
+        logger.info('news_forwarder_initialized', {
+            targetGroup: targetGroup.subject,
+            feedUrl,
+            bootstrapSent: bootstrapItems.length,
+            trackedItems: items.length
+        });
+        return;
+    }
+
+    if (freshItems.length === 0) {
+        subscriptionState.lastRunAt = new Date().toISOString();
+        subscriptionState.seenUrls = Array.from(seenSet).slice(-MAX_SEEN_URLS);
+        return;
+    }
+
+    await sendArticles(sock, targetGroup, freshItems);
+    subscriptionState.initialized = true;
+    subscriptionState.lastRunAt = new Date().toISOString();
+    subscriptionState.seenUrls = [...subscriptionState.seenUrls, ...freshItems.map((item) => item.url)].slice(-MAX_SEEN_URLS);
+}
+
 async function pollNews(sock) {
     if (pollingInFlight) return;
     pollingInFlight = true;
 
     try {
-        const targetGroup = await resolveTargetGroup(sock, DEFAULT_TARGET_GROUP);
-        if (!targetGroup) {
-            logger.warn('news_forwarder_group_not_found', { targetGroup: DEFAULT_TARGET_GROUP });
+        const config = loadConfig();
+        const subscriptions = (config.subscriptions || []).filter((item) => item && item.active !== false && normalizeFeedUrl(item.feedUrl));
+        if (!subscriptions.length) {
             return;
         }
 
-        const xml = await fetchFeedXml(DEFAULT_FEED_URL);
-        const items = parseFeedItems(xml);
-        if (items.length === 0) {
-            logger.warn('news_forwarder_empty_feed', { feedUrl: DEFAULT_FEED_URL });
-            return;
-        }
-
+        const groups = await sock.groupFetchAllParticipating();
         const state = loadState();
-        const seenSet = new Set(state.seenUrls || []);
-        const freshItems = items.filter((item) => !seenSet.has(item.url));
 
-        if (!state.initialized) {
-            const bootstrapItems = DEFAULT_BOOTSTRAP_SEND > 0
-                ? freshItems.slice(-DEFAULT_BOOTSTRAP_SEND)
-                : [];
-
-            if (bootstrapItems.length > 0) {
-                await sendArticles(sock, targetGroup, bootstrapItems);
+        for (const subscription of subscriptions) {
+            try {
+                await pollSubscription(sock, groups, subscription, state);
+            } catch (error) {
+                logger.error('news_forwarder_subscription_failed', {
+                    error: error?.message || String(error),
+                    groupId: subscription?.groupId || '',
+                    groupName: subscription?.groupName || '',
+                    feedUrl: subscription?.feedUrl || ''
+                });
             }
-
-            saveState({
-                initialized: true,
-                seenUrls: items.map((item) => item.url)
-            });
-
-            logger.info('news_forwarder_initialized', {
-                targetGroup: targetGroup.subject,
-                feedUrl: DEFAULT_FEED_URL,
-                bootstrapSent: bootstrapItems.length,
-                trackedItems: items.length
-            });
-            return;
         }
 
-        if (freshItems.length === 0) {
-            saveState({
-                initialized: true,
-                seenUrls: [...state.seenUrls]
-            });
-            return;
-        }
-
-        await sendArticles(sock, targetGroup, freshItems);
-        saveState({
-            initialized: true,
-            seenUrls: [...state.seenUrls, ...freshItems.map((item) => item.url)]
-        });
+        saveState(state);
     } catch (error) {
         logger.error('news_forwarder_poll_failed', {
-            error: error?.message || String(error),
-            feedUrl: DEFAULT_FEED_URL
+            error: error?.message || String(error)
         });
     } finally {
         pollingInFlight = false;
     }
+}
+
+export function listNewsSubscriptions() {
+    return loadConfig().subscriptions || [];
+}
+
+export function upsertNewsSubscription({ groupId = '', groupName = '', feedUrl = '' } = {}) {
+    const normalizedFeed = normalizeFeedUrl(feedUrl);
+    if (!normalizedFeed) {
+        return { ok: false, message: 'Link invalido. Envie um URL HTTP/HTTPS valido.' };
+    }
+
+    const safeGroupId = String(groupId || '').trim();
+    const safeGroupName = String(groupName || '').trim();
+    if (!safeGroupId && !safeGroupName) {
+        return { ok: false, message: 'Grupo invalido.' };
+    }
+
+    const config = loadConfig();
+    const now = Date.now();
+    const existingIndex = config.subscriptions.findIndex((item) => String(item.groupId || '').trim() === safeGroupId);
+    const subscription = {
+        groupId: safeGroupId,
+        groupName: safeGroupName,
+        feedUrl: normalizedFeed,
+        active: true,
+        createdAt: existingIndex >= 0 ? config.subscriptions[existingIndex].createdAt || now : now,
+        updatedAt: now
+    };
+
+    if (existingIndex >= 0) {
+        config.subscriptions[existingIndex] = subscription;
+    } else {
+        config.subscriptions.push(subscription);
+    }
+    saveConfig(config);
+
+    return {
+        ok: true,
+        subscription
+    };
+}
+
+export function removeNewsSubscription(groupId) {
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeGroupId) {
+        return { ok: false, removed: 0 };
+    }
+
+    const config = loadConfig();
+    const before = config.subscriptions.length;
+    config.subscriptions = config.subscriptions.filter((item) => String(item.groupId || '').trim() !== safeGroupId);
+    const removed = before - config.subscriptions.length;
+    saveConfig(config);
+
+    return {
+        ok: removed > 0,
+        removed
+    };
 }
 
 export async function startNewsForwarder(sock) {
@@ -287,8 +444,6 @@ export async function startNewsForwarder(sock) {
     }
 
     logger.info('news_forwarder_started', {
-        feedUrl: DEFAULT_FEED_URL,
-        targetGroup: DEFAULT_TARGET_GROUP,
         intervalMinutes: DEFAULT_INTERVAL_MINUTES
     });
 
