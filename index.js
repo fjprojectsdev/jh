@@ -35,6 +35,7 @@ import { scheduleSupabaseBackup } from './functions/supabaseBackup.js';
 import { analyzeMessage, isAIEnabled } from './functions/aiModeration.js';
 import { analyzeLeadIntent, isAISalesEnabled } from './functions/aiSales.js';
 import { startAutoPromo } from './functions/autoPromo.js';
+import { startNewsForwarder, stopNewsForwarder } from './functions/newsForwarder.js';
 import { handleConnectionUpdate, resetReconnectAttempts } from './functions/connectionManager.js';
 import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup, clearSessionBackup } from './keepalive.js';
 import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from './functions/devCommands.js';
@@ -780,6 +781,7 @@ async function startBot() {
                 }
                 scheduleSupabaseBackup();
                 startAutoPromo(sock);
+                await startNewsForwarder(sock);
                 startHealthMonitor();
                 startSessionBackup();
                 if (BUY_ALERT_ENABLED) {
@@ -801,6 +803,7 @@ async function startBot() {
             const reason = lastDisconnect?.error?.output?.statusCode;
             setConnected(false);
             global.__imavyLembretesInitialized = false;
+            stopNewsForwarder();
             await stopBuyAlertNotifier();
 
             if (reason === DisconnectReason.loggedOut) {
