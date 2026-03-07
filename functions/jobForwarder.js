@@ -49,8 +49,10 @@ const SOURCES = [
                     title,
                     company: 'SINE Porto Velho',
                     location: 'Porto Velho/RO',
+                    area: '',
                     summary: meta || observation || 'Vaga publicada pelo SINE Porto Velho.',
                     requirements,
+                    salaryInfo: '',
                     role: title,
                     applyInfo: `Encaminhamento pelo SINE Porto Velho: ${url}`,
                     url,
@@ -95,12 +97,13 @@ const SOURCES = [
                     title,
                     company: company || 'Empresa anunciada no portal',
                     location: 'Porto Velho/RO',
+                    area: stripHtml(details['Área de atuação'] || details['Area de atuacao'] || ''),
                     summary: summary || 'Vaga publicada no portal Rondônia ao Vivo Empregos.',
                     requirements: [
                         stripHtml(details['Detalhes de Vaga']),
-                        stripHtml(details['Nível de Escolaridade']),
-                        salary ? `Salário e benefícios: ${salary}` : ''
+                        stripHtml(details['Nível de Escolaridade'])
                     ].filter(Boolean).join(' '),
+                    salaryInfo: salary,
                     role: title,
                     applyInfo,
                     url: item.url,
@@ -142,8 +145,10 @@ const SOURCES = [
                     title: stripHtml(title),
                     company: 'Empresa anunciada no Melhores Empregos',
                     location: 'Porto Velho/RO',
+                    area: '',
                     summary: [description, responsibilities].filter(Boolean).join(' '),
-                    requirements: [requirements, salary ? `Salário: ${salary}` : ''].filter(Boolean).join(' '),
+                    requirements,
+                    salaryInfo: salary,
                     role: stripHtml(title),
                     applyInfo,
                     url: item.url,
@@ -179,8 +184,10 @@ const SOURCES = [
                     title: stripHtml(schema.title),
                     company: stripHtml(schema?.hiringOrganization?.name || 'Empresa anunciada no BNE'),
                     location: `${stripHtml(schema?.jobLocation?.address?.addressLocality || 'Porto Velho')}/${stripHtml(schema?.jobLocation?.address?.addressRegion || 'RO')}`,
+                    area: stripHtml(schema?.occupationalCategory || ''),
                     summary: stripHtml(schema?.description || ''),
-                    requirements: [stripHtml(schema?.description || ''), salary ? `Faixa salarial: ${salary}` : ''].filter(Boolean).join(' '),
+                    requirements: stripHtml(schema?.description || ''),
+                    salaryInfo: salary,
                     role: stripHtml(schema.title),
                     applyInfo: `Candidate-se pelo BNE no link da vaga: ${item.url}`,
                     url: item.url,
@@ -264,6 +271,22 @@ function cleanLine(value, maxLen) {
             .replace(/\s*,\s*/g, ', ')),
         maxLen
     );
+}
+
+function formatLocation(value) {
+    const safe = cleanLine(value, 60);
+    return safe.replace(/\s*\/\s*/g, ' - ');
+}
+
+function buildRequirementBullets(value) {
+    const parts = normalizeSpace(String(value || ''))
+        .split(',')
+        .map((item) => cleanLine(item, 90))
+        .filter(Boolean)
+        .slice(0, 4);
+
+    if (parts.length === 0) return '';
+    return parts.map((item) => `• ${item}`).join('\n');
 }
 
 function matchBlocks(value, regex) {
@@ -460,16 +483,26 @@ function resolveTargetGroup(groups) {
 
 function buildJobPayload(job) {
     const safeUrl = String(job.url || '').replace('https://', 'https://\u200B');
+    const requirementBullets = buildRequirementBullets(job.requirements);
     const lines = [
-        `*Vaga:* ${cleanLine(job.title, 110)}`,
-        job.company ? `Empresa: ${cleanLine(job.company, 80)}` : '',
-        job.location ? `Local: ${cleanLine(job.location, 60)}` : '',
-        `Fonte: ${cleanLine(job.sourceLabel, 40)}`,
-        job.summary ? `Resumo: ${cleanLine(job.summary, 160)}` : '',
-        job.requirements ? `Requisitos: ${cleanLine(job.requirements, 140)}` : '',
-        job.applyInfo ? `Candidatura: ${cleanLine(job.applyInfo, 120)}` : '',
-        `Link: ${safeUrl}`
-    ].filter(Boolean);
+        `📌 *VAGA:* ${cleanLine(job.title, 110)}`,
+        job.company ? `🏢 Empresa: ${cleanLine(job.company, 80)}` : '',
+        job.location ? `📍 Local: ${formatLocation(job.location)}` : '',
+        job.area ? `📖 Área: ${cleanLine(job.area, 80)}` : '',
+        '',
+        '📝 *Descrição:*',
+        cleanLine(job.summary, 220),
+        '',
+        requirementBullets ? '✅ *Requisitos:*' : '',
+        requirementBullets,
+        job.salaryInfo ? `💰 Salário e benefícios: ${cleanLine(job.salaryInfo, 120)}` : '',
+        '',
+        '🔗 *Candidatura:*',
+        safeUrl
+    ].filter((line, index, array) => {
+        if (line !== '') return true;
+        return array[index - 1] !== '' && array[index + 1] !== '';
+    });
 
     return { text: lines.join('\n') };
 }

@@ -78,6 +78,19 @@ function compactList(value, maxLen) {
     return truncate(Array.from(new Set(parts)).join(', '), maxLen);
 }
 
+function extractSalaryInfo(value) {
+    const safe = normalizeSpace(String(value || ''));
+    if (!safe) return '';
+    const match = safe.match(/(?:sal[aá]rio|faixa salarial|sal[aá]rio e benef[íi]cios|benef[íi]cios)\s*:\s*([^|]+)$/i);
+    return match ? truncate(stripNoise(match[1]), 120) : '';
+}
+
+function removeSalaryInfo(value) {
+    return normalizeSpace(String(value || '')
+        .replace(/(?:sal[aá]rio|faixa salarial|sal[aá]rio e benef[íi]cios|benef[íi]cios)\s*:\s*[^|]+/gi, ' ')
+        .replace(/\s+[|,;]\s*$/g, ' '));
+}
+
 function looksRemoteOrForeign(text) {
     const safe = normalizeSpace(text).toLowerCase();
     if (!safe) return false;
@@ -124,6 +137,7 @@ function deterministicAnalysis(job) {
     const cleanSummary = stripNoise(job.summary);
     const cleanRequirements = stripNoise(job.requirements);
     const cleanApply = stripNoise(job.applyInfo);
+    const salaryInfo = extractSalaryInfo(`${job.salaryInfo || ''} | ${job.requirements || ''} | ${job.summary || ''}`);
 
     const summary = truncate(
         cutAtSuspiciousMarker(cleanSummary) || `${job.title} em ${job.location}.`,
@@ -148,9 +162,11 @@ function deterministicAnalysis(job) {
         title: truncate(stripNoise(job.title), 120),
         company: truncate(stripNoise(job.company || 'Empresa nao informada'), 80),
         location: truncate(stripNoise(job.location || 'Porto Velho/RO'), 60),
+        area: truncate(stripNoise(job.area || ''), 80),
         role: truncate(stripNoise(job.role || job.title), 120),
         summary,
-        requirements: compactList(requirements, 140),
+        requirements: compactList(removeSalaryInfo(requirements), 140),
+        salaryInfo,
         applyInfo,
         sourceLabel: job.sourceLabel,
         url: job.url
@@ -207,7 +223,7 @@ function buildMessages(job) {
                 'Responda somente JSON valido com as chaves:',
                 'publish (boolean),',
                 'reason (string curta),',
-                'title, company, location, role, summary, requirements, applyInfo.',
+                'title, company, location, area, role, summary, requirements, salaryInfo, applyInfo.',
                 'Objetivo: enviar vagas de Porto Velho/RO em portugues claro, sem HTML, sem codigo, sem lixo visual.',
                 'Regras:',
                 '- Rejeite vagas em ingles, internacionais, europeias, claramente remotas ou sem relacao real com Porto Velho/RO.',
@@ -226,9 +242,11 @@ function buildMessages(job) {
                 title: job.title,
                 company: job.company,
                 location: job.location,
+                area: job.area,
                 role: job.role,
                 summary: job.summary,
                 requirements: job.requirements,
+                salaryInfo: job.salaryInfo,
                 applyInfo: job.applyInfo,
                 sourceLabel: job.sourceLabel,
                 url: job.url
@@ -244,9 +262,11 @@ function normalizeAiResult(result, job) {
         title: truncate(stripNoise(result?.title || job.title), 120),
         company: truncate(stripNoise(result?.company || job.company || 'Empresa nao informada'), 80),
         location: truncate(stripNoise(result?.location || job.location || 'Porto Velho/RO'), 60),
+        area: truncate(stripNoise(result?.area || job.area || ''), 80),
         role: truncate(stripNoise(result?.role || job.role || job.title), 120),
         summary: truncate(stripNoise(result?.summary || job.summary), 160),
-        requirements: compactList(result?.requirements || job.requirements, 140),
+        requirements: compactList(removeSalaryInfo(result?.requirements || job.requirements), 140),
+        salaryInfo: truncate(stripNoise(result?.salaryInfo || job.salaryInfo || extractSalaryInfo(job.requirements || '')), 120),
         applyInfo: truncate(stripNoise(result?.applyInfo || job.applyInfo || 'Acesse o link da vaga para se candidatar.'), 120),
         sourceLabel: job.sourceLabel,
         url: job.url
