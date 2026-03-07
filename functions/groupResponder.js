@@ -46,7 +46,6 @@ const agendarLaminaWizardState = new Map();
 const rankingWizardState = new Map();
 const laminaShillWizardState = new Map();
 const shillWizardState = new Map();
-const reminderWizardState = new Map();
 const newsWizardState = new Map();
 let laminaSchedulerTimer = null;
 let shillSchedulerTimer = null;
@@ -370,15 +369,6 @@ function clearShillWizard(senderId) {
     persistPrivateWizardsState();
 }
 
-function getReminderWizard(senderId) {
-    return reminderWizardState.get(senderId);
-}
-
-function clearReminderWizard(senderId) {
-    reminderWizardState.delete(senderId);
-    persistPrivateWizardsState();
-}
-
 function getNewsWizard(senderId) {
     return newsWizardState.get(senderId);
 }
@@ -423,7 +413,6 @@ function persistPrivateWizardsState() {
             ranking: Array.from(rankingWizardState.entries()),
             laminaShill: Array.from(laminaShillWizardState.entries()).map(([senderId, state]) => [senderId, toSerializableLaminaState(state)]),
             shill: Array.from(shillWizardState.entries()),
-            reminder: Array.from(reminderWizardState.entries()),
             news: Array.from(newsWizardState.entries())
         };
         fs.writeFileSync(PRIVATE_WIZARDS_FILE, JSON.stringify(payload, null, 2), 'utf8');
@@ -466,11 +455,6 @@ function loadPrivateWizardsState() {
                 if (senderId && state && typeof state === 'object') shillWizardState.set(senderId, state);
             }
         }
-        if (Array.isArray(parsed?.reminder)) {
-            for (const [senderId, state] of parsed.reminder) {
-                if (senderId && state && typeof state === 'object') reminderWizardState.set(senderId, state);
-            }
-        }
         if (Array.isArray(parsed?.news)) {
             for (const [senderId, state] of parsed.news) {
                 if (senderId && state && typeof state === 'object') newsWizardState.set(senderId, state);
@@ -508,11 +492,6 @@ function setLaminaShillWizard(senderId, state) {
 
 function setShillWizard(senderId, state) {
     shillWizardState.set(senderId, state);
-    persistPrivateWizardsState();
-}
-
-function setReminderWizard(senderId, state) {
-    reminderWizardState.set(senderId, state);
     persistPrivateWizardsState();
 }
 
@@ -1189,28 +1168,6 @@ function getIncomingImageMessageContent(message) {
     return unwrapped?.imageMessage || null;
 }
 
-function getIncomingTextMessageContent(message) {
-    let current = message?.message || {};
-
-    for (let i = 0; i < 6; i += 1) {
-        const unwrapped =
-            current?.ephemeralMessage?.message
-            || current?.viewOnceMessage?.message
-            || current?.viewOnceMessageV2?.message
-            || current?.viewOnceMessageV2Extension?.message
-            || current?.documentWithCaptionMessage?.message;
-
-        if (!unwrapped || unwrapped === current) break;
-        current = unwrapped;
-    }
-
-    if (typeof current?.conversation === 'string') return current.conversation;
-    if (typeof current?.extendedTextMessage?.text === 'string') return current.extendedTextMessage.text;
-    if (typeof current?.imageMessage?.caption === 'string') return current.imageMessage.caption;
-    if (typeof current?.videoMessage?.caption === 'string') return current.videoMessage.caption;
-    return '';
-}
-
 function stripImavyMention(text) {
     return String(text || '')
         .replace(/^@?(imavy|imavyagent)\b[\s,:-]*/i, '')
@@ -1289,154 +1246,303 @@ function readRecentLogs(lines = 20) {
     return { ok: true, text: clipped, safeLines };
 }
 
-const REMINDER_WIZARD_ACTIONS = new Set([
-    '/lembrete',
-    '/lembretefixo',
-    '/stoplembrete',
-    '/stoplembretefixo',
-    '/lembretes',
-    '/testelembrete',
-    '/editarlembrete',
-    '/apagarlembrete'
-]);
+let lembretesAtivos = {};
+let lembretesFixosAtivos = {};
 
-const NEWS_WIZARD_ACTIONS = new Set([
-    '/noticias',
-    '/stopnoticias'
-]);
-
-function getPrivateCommandToken(text) {
-    return String(text || '').trim().toLowerCase().split(/\s+/)[0] || '';
-}
-
-function isReminderWizardCommand(text) {
-    return REMINDER_WIZARD_ACTIONS.has(getPrivateCommandToken(text));
-}
-
-function isNewsWizardCommand(text) {
-    return NEWS_WIZARD_ACTIONS.has(getPrivateCommandToken(text));
-}
-
-function parseReminderHoursInput(value) {
-    const safe = String(value || '').trim().toLowerCase().replace(',', '.');
-    const parsed = safe.endsWith('h') ? safe.slice(0, -1) : safe;
-    const num = Number.parseFloat(parsed);
-    if (!Number.isFinite(num)) return null;
-    return num;
-}
-
-async function fetchGroupsForReminderWizard(sock) {
-    const groupsRaw = await sock.groupFetchAllParticipating();
-    return Object.entries(groupsRaw || {})
-        .map(([id, data]) => ({ id, subject: String(data?.subject || '').trim() || id }))
-        .sort((a, b) => a.subject.localeCompare(b.subject, 'pt-BR'));
-}
-
-function buildReminderWizardGroupPrompt(groups) {
-    const maxList = 30;
-    const shown = groups.slice(0, maxList);
-    const lines = shown.map((g, i) => `${i + 1}. ${g.subject} | ${g.id}`).join('\n');
-    let text = `Escolha o grupo:\n\n${lines}\n\nResponda com numero, nome ou ID @g.us.`;
-    if (groups.length > maxList) {
-        text += `\n\nMostrando ${maxList} de ${groups.length} grupos.`;
+function saveLembretes() {
+    try {
+        const data = { interval: {}, daily: {} };
+        for (const [groupId, interval] of Object.entries(lembretesAtivos)) {
+            if (interval.config) data.interval[groupId] = interval.config;
+        }
+        for (const [groupId, daily] of Object.entries(lembretesFixosAtivos)) {
+            if (daily.config) data.daily[groupId] = daily.config;
+        }
+        fs.writeFileSync(LEMBRETES_FILE, JSON.stringify(data, null, 2));
+    } catch (e) {
+        console.error('Erro ao salvar lembretes:', e);
     }
-    return { shown, text };
 }
 
-function resolveReminderGroupSelection(inputText, groups = []) {
-    const raw = String(inputText || '').trim();
-    if (!raw) return null;
-
-    const byNumber = Number.parseInt(raw, 10);
-    if (Number.isFinite(byNumber) && byNumber >= 1 && byNumber <= groups.length) {
-        return groups[byNumber - 1];
-    }
-
-    const lowered = raw.toLowerCase();
-    const exactId = groups.find((g) => String(g.id || '').toLowerCase() === lowered);
-    if (exactId) return exactId;
-
-    const exactName = groups.find((g) => String(g.subject || '').toLowerCase() === lowered);
-    if (exactName) return exactName;
-
-    const partial = groups.filter((g) => String(g.subject || '').toLowerCase().includes(lowered));
-    if (partial.length === 1) return partial[0];
-
-    return null;
-}
-
-function buildReminderStatusText(groupId) {
-    const parts = [];
-
-    if (lembretesAtivos[groupId]) {
-        const config = lembretesAtivos[groupId].config;
-        const startTime = new Date(config.startTime);
-        const now = Date.now();
-
-        const nextTrigger = lembretesAtivos[groupId].config.nextTrigger || (now + (config.intervalo * 3600000));
-        const timeToNext = Math.max(0, nextTrigger - now);
-
-        const hours = Math.floor(timeToNext / 3600000);
-        const minutes = Math.floor((timeToNext % 3600000) / 60000);
-        const seconds = Math.floor((timeToNext % 60000) / 1000);
-
-        const remainingDuration = Math.max(0, (config.startTime + (config.encerramento * 3600000)) - now);
-        const remainingHours = (remainingDuration / 3600000).toFixed(1);
-
-        const msg = `*LEMBRETE ATIVO*\n\n`
-            + `Mensagem: ${config.comando}\n`
-            + `Intervalo: ${config.intervalo}h\n`
-            + `Proximo envio em: ${hours}h ${minutes}m ${seconds}s\n`
-            + `Encerra em: ${remainingHours}h\n`
-            + `Inicio: ${startTime.toLocaleString('pt-BR')}`;
-
-        parts.push(msg);
-    }
-
-    if (lembretesFixosAtivos[groupId]) {
-        const config = lembretesFixosAtivos[groupId].config;
-        const horarios = Array.isArray(config.horarios) ? config.horarios : [];
-        const now = new Date();
-        const nextLines = horarios.map((h) => {
-            const nextTs = getNextDailyTrigger(h, now).nextTs;
-            const when = new Date(nextTs).toLocaleString('pt-BR');
-            return `- ${h} (proximo: ${when})`;
-        }).join('\n');
-
-        const startTxt = config.startTime ? new Date(config.startTime).toLocaleString('pt-BR') : 'N/D';
-
-        const msg = `*LEMBRETE FIXO DIARIO*\n\n`
-            + `Mensagem: ${config.comando}\n`
-            + `Horarios: ${horarios.join(', ')}\n`
-            + `Inicio: ${startTxt}`
-            + (nextLines ? `\n\nProximos envios:\n${nextLines}` : '');
-
-        parts.push(msg);
-    }
-
-    if (!parts.length) return 'Nenhum lembrete ativo no momento.';
-    return parts.join('\n\n');
-}
-
-async function applyIntervalReminder(sock, groupId, payload) {
-    const comando = String(payload?.comando || '').trim();
-    const intervalo = Number(payload?.intervalo);
-    const encerramento = Number(payload?.encerramento);
-
-    if (!comando || !intervalo || !encerramento) {
-        return { ok: false, message: '❗ Use: /lembrete + mensagem 1h 24h' };
-    }
-    if (intervalo < 1 || intervalo > 24) {
-        return { ok: false, message: '⛔ O intervalo deve ser entre *1 e 24 horas*.' };
-    }
-    if (encerramento < 24 || encerramento > 168) {
-                    await sendSafeMessage(sock, groupId, { text: 'A duracao (encerramento) deve ser no minimo 24h e no maximo 168h.' });
-                    return;
+// Exported initialization function
+export function initLembretes(sock) {
+    try {
+        if (fs.existsSync(LEMBRETES_FILE)) {
+            const raw = JSON.parse(fs.readFileSync(LEMBRETES_FILE, 'utf8'));
+            if (raw && typeof raw === 'object') {
+                if (raw.interval || raw.daily) {
+                    const intervalData = raw.interval || {};
+                    const dailyData = raw.daily || {};
+                    for (const [groupId, config] of Object.entries(intervalData)) {
+                        restartLembrete(sock, groupId, config);
+                    }
+                    for (const [groupId, config] of Object.entries(dailyData)) {
+                        restartLembreteFixo(sock, groupId, config);
+                    }
+                } else {
+                    // Compatibilidade com formato antigo (apenas intervalos)
+                    for (const [groupId, config] of Object.entries(raw)) {
+                        restartLembrete(sock, groupId, config);
+                    }
                 }
+            }
+        }
+    } catch (e) {
+        console.error('Erro ao carregar lembretes:', e);
+    }
+}
 
-    let text = getIncomingTextMessageContent(message);
+// Função auxiliar para iniciar timer com persistência
+function startReminderTimer(sock, groupId, config) {
+    const { comando, intervalo, nextTrigger } = config;
+    const intervaloMs = intervalo * 60 * 60 * 1000;
+    const now = Date.now();
+
+    // Se o próximo trigger já passou, agenda para "agora" (catch-up) ou define novo
+    let timeToNext = nextTrigger - now;
+    if (timeToNext < 0) {
+        // Se passou do horário, envia IMEDIATAMENTE e então retoma o ciclo
+        console.log(`⚠️ Lembrete do grupo ${groupId} atrasado em ${Math.abs(timeToNext)}ms. Enviando agora...`);
+        timeToNext = 0;
+    }
+
+    lembretesAtivos[groupId] = {
+        config: { ...config, nextTrigger: now + timeToNext }, // Atualiza estado
+        timer: setTimeout(async () => {
+            const msgText = `*NOTIFICAÇÃO AUTOMÁTICA*\n\n${comando}\n\n_iMavyAgent | Sistema de Lembretes_`;
+
+            await sendPlainText(sock, groupId, msgText);
+
+            // Depois do primeiro envio (recuperado ou novo), configura intervalo regular
+            lembretesAtivos[groupId].timer = setInterval(async () => {
+                await sendPlainText(sock, groupId, msgText);
+
+                // Atualizar nextTrigger no estado para persistência
+                if (lembretesAtivos[groupId]) {
+                    lembretesAtivos[groupId].config.nextTrigger = Date.now() + intervaloMs;
+                    saveLembretes();
+                }
+            }, intervaloMs);
+
+            // Atualizar trigger do intervalo
+            if (lembretesAtivos[groupId]) {
+                lembretesAtivos[groupId].config.nextTrigger = Date.now() + intervaloMs;
+                saveLembretes();
+            }
+        }, timeToNext)
+    };
+}
+
+function stopReminder(groupId, sock = null) {
+    if (lembretesAtivos[groupId]) {
+        clearTimeout(lembretesAtivos[groupId].timer); // Limpa timeout inicial
+        clearInterval(lembretesAtivos[groupId].timer); // Limpa intervalo se já existir (mesma prop)
+        delete lembretesAtivos[groupId];
+        saveLembretes();
+        if (sock) {
+            sendSafeMessage(sock, groupId, { text: '⏰ *Lembrete encerrado automaticamente*\n\n*_iMavyAgent — Automação Inteligente_*' }).catch(() => { });
+        }
+    }
+}
+
+function restartLembrete(sock, groupId, config) {
+    const { encerramento, startTime } = config;
+    const encerramentoMs = encerramento * 60 * 60 * 1000;
+    const elapsed = Date.now() - startTime;
+
+    if (elapsed >= encerramentoMs) return;
+
+    // Recalcula nextTrigger se não existir (compatibilidade)
+    if (!config.nextTrigger) {
+        const intervaloMs = config.intervalo * 60 * 60 * 1000;
+        const cycles = Math.ceil(elapsed / intervaloMs);
+        config.nextTrigger = startTime + (cycles * intervaloMs);
+    }
+
+    startReminderTimer(sock, groupId, config);
+
+    setTimeout(() => {
+        stopReminder(groupId, sock);
+    }, encerramentoMs - elapsed);
+}
+
+
+const MAX_DAILY_TIMES = 6;
+
+function normalizeTimeToken(token) {
+    if (!/^\d{1,2}:\d{2}$/.test(token)) return { ok: false };
+    const parts = token.split(':');
+    const h = Number(parts[0]);
+    const m = Number(parts[1]);
+    if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) {
+        return { ok: false };
+    }
+    return { ok: true, value: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}` };
+}
+
+function splitMessageAndTimes(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return { ok: false, error: 'Use: /lembretefixo + mensagem 08:00 21:00' };
+
+    const tokens = raw.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+    const times = [];
+
+    while (tokens.length > 0) {
+        const token = tokens[tokens.length - 1];
+        if (!/^\d{1,2}:\d{2}$/.test(token)) break;
+        const parsed = normalizeTimeToken(token);
+        if (!parsed.ok) {
+            return { ok: false, error: `Horário inválido: ${token}` };
+        }
+        if (!times.includes(parsed.value)) times.unshift(parsed.value);
+        tokens.pop();
+    }
+
+    const message = tokens.join(' ').trim();
+    if (!message || times.length === 0) {
+        return { ok: false, error: 'Use: /lembretefixo + mensagem 08:00 21:00' };
+    }
+
+    return { ok: true, message, times };
+}
+
+function getNextDailyTrigger(timeStr, nowDate = new Date()) {
+    const now = (nowDate instanceof Date) ? nowDate : new Date(nowDate);
+    const parts = timeStr.split(':');
+    const h = Number(parts[0]);
+    const m = Number(parts[1]);
+    const next = new Date(now);
+    next.setHours(h, m, 0, 0);
+    if (next.getTime() <= now.getTime()) {
+        next.setDate(next.getDate() + 1);
+    }
+    return { nextTs: next.getTime(), delayMs: next.getTime() - now.getTime() };
+}
+
+function scheduleDailyTime(sock, groupId, config, timeStr) {
+    const { nextTs, delayMs } = getNextDailyTrigger(timeStr);
+    if (lembretesFixosAtivos[groupId]) {
+        lembretesFixosAtivos[groupId].nextTriggers[timeStr] = nextTs;
+    }
+
+    return setTimeout(async () => {
+        const msgText = `*NOTIFICAÇÃO AUTOMÁTICA*
+
+${config.comando}
+
+_iMavyAgent | Sistema de Lembretes_`;
+        await sendPlainText(sock, groupId, msgText);
+
+        if (lembretesFixosAtivos[groupId]) {
+            const timer = scheduleDailyTime(sock, groupId, config, timeStr);
+            lembretesFixosAtivos[groupId].timers[timeStr] = timer;
+            saveLembretes();
+        }
+    }, delayMs);
+}
+
+function startLembreteFixo(sock, groupId, config) {
+    const rawTimes = Array.isArray(config.horarios) ? config.horarios : [];
+    const horarios = [];
+    for (const t of rawTimes) {
+        const parsed = normalizeTimeToken(String(t).trim());
+        if (parsed.ok && !horarios.includes(parsed.value)) horarios.push(parsed.value);
+    }
+    if (!horarios.length || !config.comando) return;
+
+    lembretesFixosAtivos[groupId] = {
+        config: { ...config, horarios },
+        timers: {},
+        nextTriggers: {}
+    };
+
+    for (const timeStr of horarios) {
+        const timer = scheduleDailyTime(sock, groupId, lembretesFixosAtivos[groupId].config, timeStr);
+        lembretesFixosAtivos[groupId].timers[timeStr] = timer;
+    }
+
+    saveLembretes();
+}
+
+function stopLembreteFixo(groupId, sock = null) {
+    const current = lembretesFixosAtivos[groupId];
+    if (!current) return;
+
+    for (const timer of Object.values(current.timers || {})) {
+        clearTimeout(timer);
+    }
+
+    delete lembretesFixosAtivos[groupId];
+    saveLembretes();
+
+    if (sock) {
+        sendSafeMessage(sock, groupId, { text: `🛑 *Lembrete fixo desativado*
+
+*_iMavyAgent — Automação Inteligente_*` }).catch(() => { });
+    }
+}
+
+function restartLembreteFixo(sock, groupId, config) {
+    if (!config || !config.comando || !Array.isArray(config.horarios) || config.horarios.length === 0) return;
+    startLembreteFixo(sock, groupId, config);
+}
+
+
+
+// Respostas pré-definidas
+const RESPONSES = {
+    'oi': '👋 Olá! Como posso ajudar?',
+    'ajuda': 'Use /comandos para ver o menu completo.',
+    'status': '✅ Bot online e funcionando!',
+    'info': '🤖 iMavyAgent - Bot para WhatsApp',
+    '/snappy': '0x3a9e15b28E099708D0812E0843a9Ed70c508FB4b',
+    '/nix': '0xBe96fcF736AD906b1821Ef74A0e4e346C74e6221',
+    '/coffee': '0x2cAA9De4E4BB8202547afFB19b5830DC16184451',
+    '/lux': '0xa3baAAD9C19805f52cFa2490700C297359b4fA52',
+    '/kenesis': '0x76d7966227939b67D66FDB1373A0808ac53Ca9ad',
+    '/dcar': '0xe1f7DD2812e91D1f92a8Fa1115f3ACA4aff82Fe5',
+    '/fsx': '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a',
+    '/nlc': '0x5f320c3b8f82acfe8f2bb1c85d63aa66a7ff524f',
+    '/masaka': '96jWXh7S6Yh1Lkj4Fss14q1jRMwhTKkVpSFzRaunsMKT',
+    '/valyrafi': VALYRAFI_MESSAGE
+};
+
+loadPrivateWizardsState();
+
+// Inicialização movida para index.js
+// if (!global.lembretesLoaded) {
+//     global.lembretesLoaded = true;
+//     setTimeout(() => loadLembretes(global.sock), 2000);
+// }
+
+export async function handleGroupMessages(sock, message, context = {}) {
+    if (!global.sock) global.sock = sock;
+    ensureLaminaScheduler(sock);
+    ensureShillScheduler(sock);
+    const groupId = message.key.remoteJid;
+    const isGroup = groupId.endsWith('@g.us');
+    const senderId = message.key.participant || message.key.remoteJid;
+
+    // Modo manutenção - só admins
+    if (isMaintenanceMode()) {
+        const authorized = await isAuthorized(senderId);
+        if (!authorized) return;
+    }
+
+    const contentType = Object.keys(message.message)[0];
+    let text = '';
     const imageMessageContent = getIncomingImageMessageContent(message);
     const hasIncomingImage = Boolean(imageMessageContent);
+
+    // Permitir /comandos no PV
+    switch (contentType) {
+        case 'conversation':
+            text = message.message.conversation;
+            break;
+        case 'extendedTextMessage':
+            text = message.message.extendedTextMessage.text;
+            break;
+    }
 
     // Bloquear mensagens vazias
     if ((!text || text.trim().length === 0) && !(hasIncomingImage && !isGroup)) return;
@@ -1519,196 +1625,6 @@ async function applyIntervalReminder(sock, groupId, payload) {
             return;
         }
 
-        const reminderState = getReminderWizard(senderId);
-        if (reminderState) {
-            if (textLower === '/cancelar' || textLower === 'cancelar') {
-                clearReminderWizard(senderId);
-                await sendSafeMessage(sock, senderId, { text: 'Fluxo de lembrete cancelado.' });
-                return;
-            }
-
-            if (reminderState.step === 'chooseGroup') {
-                const selected = resolveReminderGroupSelection(text, reminderState.groups || []);
-                if (!selected) {
-                    await sendSafeMessage(sock, senderId, { text: 'Grupo invalido. Responda com numero, nome ou ID @g.us.' });
-                    return;
-                }
-
-                reminderState.group = selected;
-                if (reminderState.action === '/stoplembrete') {
-                    clearReminderWizard(senderId);
-                    if (lembretesAtivos[selected.id]) {
-                        stopReminder(selected.id);
-                        await sendSafeMessage(sock, senderId, { text: `🛑 Lembrete desativado em: ${selected.subject}` });
-                    } else {
-                        await sendSafeMessage(sock, senderId, { text: `ℹ️ Não há lembrete ativo em: ${selected.subject}` });
-                    }
-                    return;
-                }
-                if (reminderState.action === '/stoplembretefixo') {
-                    clearReminderWizard(senderId);
-                    if (lembretesFixosAtivos[selected.id]) {
-                        stopLembreteFixo(selected.id);
-                        await sendSafeMessage(sock, senderId, { text: `🛑 Lembrete fixo desativado em: ${selected.subject}` });
-                    } else {
-                        await sendSafeMessage(sock, senderId, { text: `ℹ️ Não há lembrete fixo ativo em: ${selected.subject}` });
-                    }
-                    return;
-                }
-                if (reminderState.action === '/lembretes') {
-                    clearReminderWizard(senderId);
-                    await sendSafeMessage(sock, senderId, { text: `📋 *${selected.subject}*\n\n${buildReminderStatusText(selected.id)}` });
-                    return;
-                }
-
-                reminderState.step = 'message';
-                setReminderWizard(senderId, reminderState);
-                if (reminderState.action === '/testelembrete') {
-                    await sendSafeMessage(sock, senderId, { text: `Qual mensagem do teste para o grupo "${selected.subject}"?` });
-                } else if (reminderState.action === '/lembretefixo') {
-                    await sendSafeMessage(sock, senderId, { text: `Qual mensagem do lembrete fixo para o grupo "${selected.subject}"?` });
-                } else {
-                    await sendSafeMessage(sock, senderId, { text: `Qual mensagem do lembrete para o grupo "${selected.subject}"?` });
-                }
-                return;
-            }
-
-            if (reminderState.step === 'message') {
-                const body = String(text || '').trim();
-                if (!body) {
-                    await sendSafeMessage(sock, senderId, { text: 'Mensagem vazia. Envie a mensagem do lembrete.' });
-                    return;
-                }
-                reminderState.comando = body;
-
-                if (reminderState.action === '/testelembrete') {
-                    const groupId = reminderState.group.id;
-                    clearReminderWizard(senderId);
-
-                    if (lembretesAtivos[groupId]) {
-                        stopReminder(groupId);
-                    }
-                    const config = {
-                        comando: body,
-                        intervalo: 0.0166666,
-                        encerramento: 0.166666,
-                        startTime: Date.now()
-                    };
-
-                    await sendPlainText(sock, groupId, `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuracao: 10 minutos\n\n${body}`);
-                    startReminderTimer(sock, groupId, { ...config, nextTrigger: Date.now() + 60000 });
-                    saveLembretes();
-                    setTimeout(() => {
-                        stopReminder(groupId, sock);
-                    }, 600000);
-                    await sendSafeMessage(sock, senderId, { text: `✅ Teste iniciado em: ${reminderState.group.subject}` });
-                    return;
-                }
-
-                if (reminderState.action === '/lembretefixo') {
-                    reminderState.step = 'times';
-                    setReminderWizard(senderId, reminderState);
-                    await sendSafeMessage(sock, senderId, { text: 'Informe os horários no formato HH:MM separados por espaço. Ex: 08:00 15:00 21:00' });
-                    return;
-                }
-
-                reminderState.step = 'interval';
-                setReminderWizard(senderId, reminderState);
-                await sendSafeMessage(sock, senderId, { text: 'Qual intervalo em horas? (1 a 24)' });
-                return;
-            }
-
-            if (reminderState.step === 'interval') {
-                const parsed = parseReminderHoursInput(text);
-                if (!parsed || parsed < 1 || parsed > 24) {
-                    await sendSafeMessage(sock, senderId, { text: 'Intervalo invalido. Informe um valor entre 1 e 24 horas.' });
-                    return;
-                }
-                reminderState.intervalo = parsed;
-                reminderState.step = 'duration';
-                setReminderWizard(senderId, reminderState);
-                await sendSafeMessage(sock, senderId, { text: 'Qual duração total (encerramento) em horas? (24 a 168)' });
-                return;
-            }
-
-            if (reminderState.step === 'duration') {
-                const parsed = parseReminderHoursInput(text);
-                if (!parsed || parsed < 24 || parsed > 168) {
-                    await sendSafeMessage(sock, senderId, { text: 'Duração invalida. Informe um valor entre 24 e 168 horas.' });
-                    return;
-                }
-                const groupLabel = reminderState.group?.subject || reminderState.group?.id || 'grupo';
-                reminderState.encerramento = parsed;
-                reminderState.step = 'confirm';
-                setReminderWizard(senderId, reminderState);
-                await sendSafeMessage(sock, senderId, {
-                    text: `Confirma este lembrete?\n\nGrupo: ${groupLabel}\nMensagem: ${reminderState.comando}\nIntervalo: ${reminderState.intervalo}h\nDuração: ${reminderState.encerramento}h\n\nResponda sim ou nao.`
-                });
-                return;
-            }
-
-            if (reminderState.step === 'times') {
-                const parsed = splitMessageAndTimes(`x ${text}`);
-                if (!parsed.ok) {
-                    await sendSafeMessage(sock, senderId, { text: `⚠️ ${parsed.error}` });
-                    return;
-                }
-                if (parsed.times.length > MAX_DAILY_TIMES) {
-                    await sendSafeMessage(sock, senderId, { text: `⚠️ Máximo de horários por lembrete fixo: ${MAX_DAILY_TIMES}.` });
-                    return;
-                }
-
-                const groupLabel = reminderState.group?.subject || reminderState.group?.id || 'grupo';
-                reminderState.horarios = parsed.times;
-                reminderState.step = 'confirm';
-                setReminderWizard(senderId, reminderState);
-                await sendSafeMessage(sock, senderId, {
-                    text: `Confirma este lembrete fixo?\n\nGrupo: ${groupLabel}\nMensagem: ${reminderState.comando}\nHorários: ${parsed.times.join(', ')}\n\nResponda sim ou nao.`
-                });
-                return;
-            }
-
-            if (reminderState.step === 'confirm') {
-                const confirmed = parseYesNo(textLower);
-                if (confirmed === null) {
-                    await sendSafeMessage(sock, senderId, { text: 'Resposta invalida. Digite sim ou nao.' });
-                    return;
-                }
-                if (!confirmed) {
-                    clearReminderWizard(senderId);
-                    await sendSafeMessage(sock, senderId, { text: 'Criação de lembrete cancelada.' });
-                    return;
-                }
-
-                const groupId = reminderState.group?.id;
-                const groupName = reminderState.group?.subject || groupId;
-                if (!groupId) {
-                    clearReminderWizard(senderId);
-                    await sendSafeMessage(sock, senderId, { text: 'Grupo inválido. Inicie o fluxo novamente.' });
-                    return;
-                }
-
-                if (reminderState.action === '/lembretefixo') {
-                    const result = await applyFixedReminder(sock, groupId, {
-                        comando: reminderState.comando,
-                        horarios: reminderState.horarios
-                    });
-                    clearReminderWizard(senderId);
-                    await sendSafeMessage(sock, senderId, { text: `${result.message}\nGrupo: ${groupName}` });
-                    return;
-                }
-
-                const result = await applyIntervalReminder(sock, groupId, {
-                    comando: reminderState.comando,
-                    intervalo: reminderState.intervalo,
-                    encerramento: reminderState.encerramento
-                });
-                clearReminderWizard(senderId);
-                await sendSafeMessage(sock, senderId, { text: `${result.message}\nGrupo: ${groupName}` });
-                return;
-            }
-        }
-
         const newsState = getNewsWizard(senderId);
         if (newsState) {
             if (textLower === '/cancelar' || textLower === 'cancelar') {
@@ -1718,25 +1634,26 @@ async function applyIntervalReminder(sock, groupId, payload) {
             }
 
             if (newsState.step === 'chooseGroup') {
-                const selected = resolveReminderGroupSelection(text, newsState.groups || []);
+                const selected = resolveRankingGroupSelection(text, newsState.groups || []);
                 if (!selected) {
-                    await sendSafeMessage(sock, senderId, { text: 'Grupo invalido. Responda com numero, nome ou ID @g.us.' });
+                    await sendSafeMessage(sock, senderId, {
+                        text: 'Grupo invalido. Responda com numero, nome exato ou ID @g.us.'
+                    });
                     return;
                 }
-
-                newsState.group = selected;
 
                 if (newsState.action === '/stopnoticias') {
                     const result = removeNewsSubscription(selected.id);
                     clearNewsWizard(senderId);
                     if (result.removed > 0) {
-                        await sendSafeMessage(sock, senderId, { text: `🛑 Captacao de noticias desativada em: ${selected.subject}` });
+                        await sendSafeMessage(sock, senderId, { text: `🛑 Noticias desativadas em: ${selected.subject}` });
                     } else {
-                        await sendSafeMessage(sock, senderId, { text: `ℹ️ Nenhuma captacao de noticias ativa em: ${selected.subject}` });
+                        await sendSafeMessage(sock, senderId, { text: `ℹ️ Nao havia captacao ativa em: ${selected.subject}` });
                     }
                     return;
                 }
 
+                newsState.group = selected;
                 newsState.step = 'feedUrl';
                 setNewsWizard(senderId, newsState);
                 await sendSafeMessage(sock, senderId, { text: `Qual link deve captar as noticias para o grupo "${selected.subject}"?` });
@@ -1744,97 +1661,59 @@ async function applyIntervalReminder(sock, groupId, payload) {
             }
 
             if (newsState.step === 'feedUrl') {
-                const feedUrl = String(text || '').trim();
-                if (!/^https?:\/\//i.test(feedUrl)) {
-                    await sendSafeMessage(sock, senderId, { text: 'Link invalido. Envie um URL HTTP/HTTPS valido.' });
-                    return;
-                }
-
                 const result = upsertNewsSubscription({
                     groupId: newsState.group?.id,
                     groupName: newsState.group?.subject,
-                    feedUrl
+                    feedUrl: text
                 });
-
                 clearNewsWizard(senderId);
                 if (!result.ok) {
                     await sendSafeMessage(sock, senderId, { text: result.message || 'Falha ao salvar captacao de noticias.' });
                     return;
                 }
-
                 await sendSafeMessage(sock, senderId, {
-                    text: `✅ Captacao de noticias ativada.\n\nGrupo: ${newsState.group?.subject || newsState.group?.id}\nFeed: ${result.subscription.feedUrl}`
+                    text: `✅ Captacao de noticias ativada.\n\nGrupo: ${result.subscription.groupName}\nFeed: ${result.subscription.feedUrl}`
                 });
                 return;
             }
         }
 
-        if (isReminderWizardCommand(textLower)) {
+        if (textLower.startsWith('/noticias') || textLower.startsWith('/stopnoticias')) {
             const authorized = await isAuthorized(senderId);
             if (!authorized) {
                 await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
                 return;
             }
 
-            let groups;
+            let groupsRaw;
             try {
-                groups = await fetchGroupsForReminderWizard(sock);
+                groupsRaw = await sock.groupFetchAllParticipating();
             } catch (error) {
                 await sendSafeMessage(sock, senderId, { text: `Falha ao listar grupos: ${error.message}` });
                 return;
             }
 
-            if (!groups.length) {
-                await sendSafeMessage(sock, senderId, { text: 'Nao encontrei grupos para configurar lembretes.' });
-                return;
-            }
-
-            const commandToken = getPrivateCommandToken(textLower);
-            const action = commandToken === '/editarlembrete'
-                ? '/lembrete'
-                : (commandToken === '/apagarlembrete' ? '/stoplembrete' : commandToken);
-            const prompt = buildReminderWizardGroupPrompt(groups);
-            setReminderWizard(senderId, {
-                step: 'chooseGroup',
-                action,
-                groups: prompt.shown
-            });
-            await sendSafeMessage(sock, senderId, { text: prompt.text });
-            return;
-        }
-
-        if (isNewsWizardCommand(textLower)) {
-            const authorized = await isAuthorized(senderId);
-            if (!authorized) {
-                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
-                return;
-            }
-
-            let groups;
-            try {
-                groups = await fetchGroupsForReminderWizard(sock);
-            } catch (error) {
-                await sendSafeMessage(sock, senderId, { text: `Falha ao listar grupos: ${error.message}` });
-                return;
-            }
+            const groups = Object.entries(groupsRaw || {})
+                .map(([id, data]) => ({ id, subject: String(data?.subject || '').trim() || id }))
+                .sort((a, b) => a.subject.localeCompare(b.subject, 'pt-BR'));
 
             if (!groups.length) {
                 await sendSafeMessage(sock, senderId, { text: 'Nao encontrei grupos para configurar noticias.' });
                 return;
             }
 
-            const action = getPrivateCommandToken(textLower);
-            const prompt = buildReminderWizardGroupPrompt(groups);
-            setNewsWizard(senderId, {
-                step: 'chooseGroup',
-                action,
-                groups: prompt.shown
-            });
-            await sendSafeMessage(sock, senderId, {
-                text: action === '/stopnoticias'
-                    ? `Para qual grupo deseja parar as noticias?\n\n${prompt.text.replace(/^Escolha o grupo:\n\n/, '')}`
-                    : `Enviar noticias para qual grupo?\n\n${prompt.text.replace(/^Escolha o grupo:\n\n/, '')}`
-            });
+            const shown = groups.slice(0, 30);
+            const lines = shown.map((g, i) => `${i + 1}. ${g.subject} | ${g.id}`).join('\n');
+            const action = textLower.startsWith('/stopnoticias') ? '/stopnoticias' : '/noticias';
+            setNewsWizard(senderId, { step: 'chooseGroup', action, groups: shown });
+
+            let prompt = action === '/stopnoticias'
+                ? `Para qual grupo deseja dar stop nas noticias?\n\n${lines}\n\nResponda com numero, nome ou ID do grupo.`
+                : `Enviar noticias para qual grupo?\n\n${lines}\n\nResponda com numero, nome ou ID do grupo.`;
+            if (groups.length > shown.length) {
+                prompt += `\n\nMostrando ${shown.length} de ${groups.length} grupos.`;
+            }
+            await sendSafeMessage(sock, senderId, { text: prompt });
             return;
         }
 
@@ -2509,15 +2388,22 @@ async function applyIntervalReminder(sock, groupId, payload) {
             }
         }
 
-        // Fallback no PV: nunca ficar em silêncio para mensagem válida.
-        await sendSafeMessage(sock, senderId, {
-            text: 'Recebi sua mensagem. Digite /comandos para ver o menu.'
-        });
+        // Caso não seja um comando conhecido em PV, ignorar
         return;
     }
 
-    text = getIncomingTextMessageContent(message);
-    if (!text || !String(text).trim()) return;
+    text = '';
+
+    switch (contentType) {
+        case 'conversation':
+            text = message.message.conversation;
+            break;
+        case 'extendedTextMessage':
+            text = message.message.extendedTextMessage.text;
+            break;
+        default:
+            return;
+    }
 
     console.log(`💬 Mensagem de ${senderId}: "${text}"`);
     const normalizedText = text.trim().toLowerCase();
@@ -3103,16 +2989,443 @@ ${messageToPin}
 | 🕓HORA: ${hora}`;
                     await sendSafeMessage(sock, groupId, { text: pinnedMsg, mentions: mentionedJids });
                 } else {
-                    await sendSafeMessage(sock, groupId, { text: 'Uso incorreto. Use: /fixar sua mensagem aqui' });
+                    await sendSafeMessage(sock, groupId, { text: '❌ *Uso incorreto!*\n\n📝 Use: `/fixar sua mensagem aqui`' });
+                }
+            } else if (normalizedText.startsWith('/aviso')) {
+                const avisoMsg = text.replace(/\/aviso/i, '').trim();
+                if (!avisoMsg) {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/aviso sua mensagem`' });
+                    return;
+                }
+
+                try {
+                    // Montar lista de membros para mentions
+                    const metadata = await sock.groupMetadata(groupId);
+                    if (!metadata || !metadata.participants) {
+                        throw new Error('Metadados do grupo inválidos ou vazios');
+                    }
+                    const members = metadata.participants.map(m => m.id);
+                    await sendSafeMessage(sock, groupId, { text: avisoMsg, mentions: members });
+                    console.log(`✅ Aviso enviado para ${members.length} membros no grupo ${groupId}`);
+                } catch (err) {
+                    console.error('❌ Erro ao enviar aviso:', err);
+                    await sendSafeMessage(sock, groupId, {
+                        text: '❌ Erro ao processar o comando de aviso. Verifique os logs ou tente novamente em alguns instantes.'
+                    });
+                }
+            } else if (normalizedText.startsWith('/addpair')) {
+                // /addpair <alias> <chain> <pairAddress> <label opcional...>
+                // Ex: /addpair pnix bsc 0x... NIX/WBNB
+                const args = text.replace(/\/addpair/i, '').trim();
+                const parts = args.split(/\s+/);
+                const alias = parts.shift();
+                const chain = parts.shift();
+                const pair = parts.shift();
+                const label = parts.join(' ').trim();
+
+                const res = await addCryptoAlias(alias, chain, pair, label);
+                if (!res.ok) {
+                    await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}\n\nUso: /addpair pnix bsc 0x... NIX/WBNB` });
+                    return;
+                }
+                await sendSafeMessage(sock, groupId, { text: `✅ Atalho criado: /${alias.replace(/^\//, '').toLowerCase()} → ${res.value.label} (${String(res.value.chain).toUpperCase()})` });
+                return;
+
+            } else if (normalizedText.startsWith('/delpair')) {
+                // /delpair <alias>
+                const alias = text.replace(/\/delpair/i, '').trim();
+                const res = await removeCryptoAlias(alias);
+                if (!res.ok) {
+                    await sendSafeMessage(sock, groupId, { text: `❌ ${res.error}\n\nUso: /delpair pnix` });
+                    return;
+                }
+                await sendSafeMessage(sock, groupId, { text: `🗑️ Atalho removido: /${String(alias).replace(/^\//, '').toLowerCase()}` });
+                return;
+
+            } else if (normalizedText.startsWith('/todos')) {
+                const msg = text.replace(/\/todos/i, '').trim();
+                const metadata = await sock.groupMetadata(groupId);
+                const members = metadata.participants.map(m => m.id);
+
+                if (msg) {
+                    await sendSafeMessage(sock, groupId, { text: msg, mentions: members });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: 'Atenção membros do grupo.', mentions: members });
+                }
+            } else if (normalizedText.startsWith('/link')) {
+                try {
+                    const inviteCode = await sock.groupInviteCode(groupId);
+                    const link = `https://chat.whatsapp.com/${inviteCode}`;
+                    await sendSafeMessage(sock, groupId, { text: `🔗 *Link do Grupo:*\n\n${link}` });
+                } catch (e) {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Erro ao gerar link. Bot precisa ser admin.' });
+                }
+            } else if (normalizedText.startsWith('/promover')) {
+                const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                if (mentionedJids.length > 0) {
+                    try {
+                        await sock.groupParticipantsUpdate(groupId, mentionedJids, 'promote');
+                        await sendSafeMessage(sock, groupId, { text: '✅ Membro promovido a admin!' });
+                    } catch (e) {
+                        await sendSafeMessage(sock, groupId, { text: '❌ Erro ao promover. Bot precisa ser admin.' });
+                    }
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/promover @usuario`' });
+                }
+            } else if (normalizedText.startsWith('/rebaixar')) {
+                const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                if (mentionedJids.length > 0) {
+                    try {
+                        await sock.groupParticipantsUpdate(groupId, mentionedJids, 'demote');
+                        await sendSafeMessage(sock, groupId, { text: '✅ Admin rebaixado a membro!' });
+                    } catch (e) {
+                        await sendSafeMessage(sock, groupId, { text: '❌ Erro ao rebaixar. Bot precisa ser admin.' });
+                    }
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/rebaixar @usuario`' });
+                }
+            } else if (normalizedText.startsWith('/agendar')) {
+                const parts = text.replace(/\/agendar/i, '').trim().split(' ');
+                const time = parts[0];
+                const msg = parts.slice(1).join(' ');
+
+                if (time && msg && /^\d{1,2}:\d{2}$/.test(time)) {
+                    const result = scheduleMessage(groupId, time, msg);
+                    await sendSafeMessage(sock, groupId, { text: `⏰ Mensagem agendada para ${result.scheduledFor}` });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/agendar 14:30 Sua mensagem`' });
+                }
+            } else if (normalizedText.startsWith('/manutencao')) {
+                const mode = text.replace(/\/manutencao/i, '').trim().toLowerCase();
+                if (mode === 'on') {
+                    enableMaintenance();
+                    await sendSafeMessage(sock, groupId, { text: '🔧 Modo manutenção ATIVADO. Apenas admins podem usar o bot.' });
+                } else if (mode === 'off') {
+                    disableMaintenance();
+                    await sendSafeMessage(sock, groupId, { text: '✅ Modo manutenção DESATIVADO.' });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/manutencao on` ou `/manutencao off`' });
+                }
+            } else if (normalizedText.startsWith('/banir')) {
+                const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                if (mentionedJids.length > 0) {
+                    const groupMetadata = await sock.groupMetadata(groupId);
+                    for (const memberId of mentionedJids) {
+                        const memberNumber = memberId.split('@')[0];
+                        await sock.groupParticipantsUpdate(groupId, [memberId], 'remove');
+                        await sendSafeMessage(sock, groupId, { text: `🚫 Membro banido com sucesso!` });
+
+                        // Notificar administradores
+                        const admins = groupMetadata.participants.filter(p => p.admin && p.id !== memberId).map(p => p.id);
+                        const dataHora = new Date().toLocaleString('pt-BR');
+                        const adminNotification = `🔥👮 *ATENÇÃO, ADMINISTRADORES!* 👮🔥
+
+Um membro foi banido do grupo:
+
+📌 *Informações:*
+• 🆔 ID: ${memberId}
+• 📱 Número: ${memberNumber}
+• 🕓 Data/Hora: ${dataHora}
+
+🚫 Ação executada por comando administrativo.`;
+
+                        for (const adminId of admins) {
+                            await sendSafeMessage(sock, adminId, { text: adminNotification });
+                        }
+                    }
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/banir @membro`' });
+                }
+            } else if (normalizedText.startsWith('/testbot')) {
+                try {
+                    const groupMetadata = await sock.groupMetadata(groupId);
+                    const botJid = sock.user.id;
+                    const botParticipant = groupMetadata.participants.find(p => p.id === botJid);
+                    const isAdmin = botParticipant?.admin ? 'SIM' : 'NÃO';
+                    await sendSafeMessage(sock, groupId, { text: `🤖 Bot ID: ${botJid}\n👮 É admin: ${isAdmin}` });
+                } catch (e) {
+                    await sendSafeMessage(sock, groupId, { text: `Erro: ${e.message}` });
+                }
+            } else if (normalizedText.startsWith('/adicionargrupo')) {
+                let param = text.replace(/\/adicionargrupo/i, '').trim();
+                if (!param && isGroup) {
+                    const gm = await sock.groupMetadata(groupId);
+                    param = gm.subject || '';
+                }
+                setAddGroupWizard(senderId, {
+                    step: 'openClose',
+                    groupName: param,
+                    permissions: { openClose: true, spam: true, reminders: true, promo: true, moderation: true, engagement: true, leadsRead: true }
+                });
+                await sendSafeMessage(sock, senderId, {
+                    text: `Configurando grupo: ${param}\nPermitir abertura/fechamento automatico? (sim/nao)\n\nResponda no privado.`
+                });
+                await sendSafeMessage(sock, groupId, { text: 'Enviei no seu privado a configuracao de permissoes deste grupo.' });
+            } else if (normalizedText.startsWith('/removergrupo')) {
+                let param = text.replace(/\/removergrupo/i, '').trim();
+                if (!param && isGroup) {
+                    const gm = await sock.groupMetadata(groupId);
+                    param = gm.subject || '';
+                }
+                const result = await removeAllowedGroup(senderId, param);
+                await sendSafeMessage(sock, senderId, { text: result.message });
+                if (result.success) {
+                    await sendSafeMessage(sock, groupId, { text: '✅ Grupo removido da lista!' });
+                }
+            } else if (normalizedText.startsWith('/listargrupos')) {
+                const allowed = await listAllowedGroups();
+                if (!allowed || allowed.length === 0) {
+                    await sendSafeMessage(sock, senderId, { text: 'ℹ️ Lista de grupos vazia.' });
+                } else {
+                    const formatted = allowed.map((g, i) => `${i + 1}. ${g}`).join('\n');
+                    await sendSafeMessage(sock, senderId, { text: `📋 Grupos permitidos:\n\n${formatted}` });
+                }
+            } else if (normalizedText.startsWith('/adicionaradmin')) {
+                const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                let param = text.replace(/\/adicionaradmin/i, '').trim();
+                if (mentionedJids.length > 0) param = mentionedJids[0];
+                if (!param) {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/adicionaradmin @usuario`' });
+                    return;
+                }
+                const result = await addAdmin(senderId, param);
+                await sendSafeMessage(sock, senderId, { text: result.message });
+                if (result.success) {
+                    await sendSafeMessage(sock, groupId, { text: '✅ Admin adicionado!' });
+                }
+            } else if (normalizedText.startsWith('/removeradmin')) {
+                const mentionedJids = message.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                let param = text.replace(/\/removeradmin/i, '').trim();
+                if (mentionedJids.length > 0) param = mentionedJids[0];
+                if (!param) {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/removeradmin @usuario`' });
+                    return;
+                }
+                const result = await removeAdmin(senderId, param);
+                await sendSafeMessage(sock, senderId, { text: result.message });
+                if (result.success) {
+                    await sendSafeMessage(sock, groupId, { text: '✅ Admin removido!' });
+                }
+            } else if (normalizedText.startsWith('/listaradmins')) {
+                const admins = await listAdmins();
+                if (admins.length === 0) {
+                    await sendSafeMessage(sock, senderId, { text: 'ℹ️ Nenhum admin configurado.' });
+                } else {
+                    let adminList = `👮 *ADMINISTRADORES*\n━━━━━━━━━━━━━━━━\n\n`;
+                    admins.forEach((admin, index) => {
+                        adminList += `${index + 1}. ${admin.id}\n`;
+                    });
+                    await sendSafeMessage(sock, senderId, { text: adminList });
+                }
+            } else if (normalizedText.startsWith('/adicionartermo') || normalizedText.startsWith('/adicionartemo') || normalizedText.startsWith('/addtermo')) {
+                const termo = text.replace(/^\/(adicionartermo|adicionartemo|addtermo)/i, '').trim();
+                if (termo) {
+                    const result = addBannedWord(termo);
+                    await sendSafeMessage(sock, groupId, { text: result.message });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/adicionartermo palavra ou frase`' });
+                }
+            } else if (normalizedText.startsWith('/removertermo') || normalizedText.startsWith('/removertemo')) {
+                const termo = text.replace(/^\/(removertermo|removertemo)/i, '').trim();
+                if (termo) {
+                    const result = removeBannedWord(termo);
+                    await sendSafeMessage(sock, groupId, { text: result.message });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: '❌ Use: `/removertermo palavra ou frase`' });
+                }
+            } else if (normalizedText.startsWith('/listartermos')) {
+                const termos = listBannedWords();
+                if (termos.length === 0) {
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum termo proibido cadastrado.' });
+                } else {
+                    const lista = termos.map((t, i) => `${i + 1}. ${t}`).join('\n');
+                    await sendSafeMessage(sock, groupId, { text: `🚫 *TERMOS PROIBIDOS*\n\n${lista}\n\n📊 Total: ${termos.length}` });
+                }
+            } else if (normalizedText.startsWith('/lembretefixo')) {
+                const partes = text.split(' + ');
+
+                if (partes.length < 2) {
+                    await sendSafeMessage(sock, groupId, { text: `❗ Use: /lembretefixo + mensagem 08:00 21:00
+Ex: /lembretefixo + LEMBRETE DIÁRIO 08:00 15:00 21:00` });
+                    return;
+                }
+
+                const parsed = splitMessageAndTimes(partes[1]);
+                if (!parsed.ok) {
+                    await sendSafeMessage(sock, groupId, { text: `⚠️ ${parsed.error}
+Ex: /lembretefixo + LEMBRETE DIÁRIO 08:00 15:00 21:00` });
+                    return;
+                }
+
+                if (parsed.times.length > MAX_DAILY_TIMES) {
+                    await sendSafeMessage(sock, groupId, { text: `⚠️ Máximo de horários por lembrete fixo: ${MAX_DAILY_TIMES}.` });
+                    return;
+                }
+
+                // Se existir lembrete fixo ativo, substitui
+                if (lembretesFixosAtivos[groupId]) {
+                    stopLembreteFixo(groupId);
+                }
+
+                const config = {
+                    comando: parsed.message,
+                    horarios: parsed.times,
+                    startTime: Date.now()
+                };
+
+                startLembreteFixo(sock, groupId, config);
+
+                await sendSafeMessage(sock, groupId, {
+                    text: `✅ Lembrete fixo diário ativado.
+
+Horários: ${parsed.times.join(', ')}
+Para desativar: /stoplembretefixo`
+                });
+            } else if (normalizedText.startsWith('/lembrete') && !normalizedText.startsWith('/lembretes') && !normalizedText.startsWith('/lembretefixo')) {
+                const partes = text.split(' + ');
+
+                if (partes.length < 2) {
+                    await sendSafeMessage(sock, groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
+                    return;
+                }
+
+                const resto = partes[1].trim().split(' ');
+                const tempos = resto.slice(-2); // últimos 2 elementos (1h 24h)
+                const comando = resto.slice(0, -2).join(' '); // tudo menos os 2 últimos
+
+                const intervalo = parseFloat(tempos[0].replace('h', ''));
+                const encerramento = parseFloat(tempos[1].replace('h', ''));
+
+                if (!comando || !intervalo || !encerramento) {
+                    await sendSafeMessage(sock, groupId, { text: '❗ Use: /lembrete + mensagem 1h 24h\nEx: /lembrete + REUNIÃO HOJE! 1h 24h' });
+                    return;
+                }
+
+                // Validações
+                if (intervalo < 1 || intervalo > 24) {
+                    await sendSafeMessage(sock, groupId, { text: '⛔ O intervalo deve ser entre *1 e 24 horas*.' });
+                    return;
+                }
+
+                if (encerramento < 24 || encerramento > 168) {
+                    await sendSafeMessage(sock, groupId, { text: '⛔ A duração (encerramento) deve ser de no mínimo *24 horas* e no máximo *7 dias (168h)*.' });
+                    return;
+                }
+
+                const intervaloMs = intervalo * 60 * 60 * 1000;
+                const encerramentoMs = encerramento * 60 * 60 * 1000;
+
+                // cancelar lembrete existente
+                if (lembretesAtivos[groupId]) {
+                    clearInterval(lembretesAtivos[groupId].interval);
+                    delete lembretesAtivos[groupId];
+                }
+
+                // MENSAGEM FORMATADA
+                const data = new Date();
+                const dia = `${data.getDate()}`.padStart(2, '0');
+                const mes = `${data.getMonth() + 1}`.padStart(2, '0');
+                const ano = data.getFullYear();
+                const hora = `${data.getHours()}`.padStart(2, '0');
+                const min = `${data.getMinutes()}`.padStart(2, '0');
+
+                const msgFormatada = `*NOTIFICAÇÃO AUTOMÁTICA*
+
+${comando}
+
+_iMavyAgent | Sistema de Lembretes_`;
+
+                // Enviar primeira vez
+                await sendPlainText(sock, groupId, msgFormatada);
+
+                const config = { comando, intervalo, encerramento, startTime: Date.now() };
+
+
+                // Lógica de agendamento robusta
+                const nextTrigger = Date.now() + intervaloMs;
+                startReminderTimer(sock, groupId, { ...config, nextTrigger });
+
+                saveLembretes();
+
+                // Encerramento automático
+                setTimeout(async () => {
+                    stopReminder(groupId, sock);
+                }, encerramentoMs);
+            } else if (normalizedText === '/stoplembrete') {
+                if (lembretesAtivos[groupId]) {
+                    stopReminder(groupId);
+                    await sendSafeMessage(sock, groupId, { text: '🛑 O lembrete automático foi *desativado* com sucesso!' });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Não há nenhum lembrete ativo neste grupo.' });
+                }
+            } else if (normalizedText === '/stoplembretefixo') {
+                if (lembretesFixosAtivos[groupId]) {
+                    stopLembreteFixo(groupId);
+                    await sendSafeMessage(sock, groupId, { text: '🛑 O lembrete fixo foi *desativado* com sucesso!' });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Não há nenhum lembrete fixo ativo neste grupo.' });
                 }
             } else if (normalizedText === '/lembretes') {
-                await sendSafeMessage(sock, groupId, { text: buildReminderStatusText(groupId) });
+                const parts = [];
+
+                if (lembretesAtivos[groupId]) {
+                    const config = lembretesAtivos[groupId].config;
+                    const startTime = new Date(config.startTime);
+                    const now = Date.now();
+
+                    // Calcular tempo restante
+                    const nextTrigger = lembretesAtivos[groupId].config.nextTrigger || (now + (config.intervalo * 3600000));
+                    const timeToNext = Math.max(0, nextTrigger - now);
+
+                    const hours = Math.floor(timeToNext / 3600000);
+                    const minutes = Math.floor((timeToNext % 3600000) / 60000);
+                    const seconds = Math.floor((timeToNext % 60000) / 1000);
+
+                    const remainingDuration = Math.max(0, (config.startTime + (config.encerramento * 3600000)) - now);
+                    const remainingHours = (remainingDuration / 3600000).toFixed(1);
+
+                    const msg = `⏰ *LEMBRETE ATIVO*\n\n` +
+                        `📝 *Mensagem:* ${config.comando}\n` +
+                        `⏱️ *Intervalo:* ${config.intervalo}h\n` +
+                        `⏭️ *Próximo envio em:* ${hours}h ${minutes}m ${seconds}s\n` +
+                        `⏳ *Encerra em:* ${remainingHours}h\n` +
+                        `📅 *Início:* ${startTime.toLocaleString('pt-BR')}`;
+
+                    parts.push(msg);
+                }
+
+                if (lembretesFixosAtivos[groupId]) {
+                    const config = lembretesFixosAtivos[groupId].config;
+                    const horarios = Array.isArray(config.horarios) ? config.horarios : [];
+                    const now = new Date();
+                    const nextLines = horarios.map((h) => {
+                        const nextTs = getNextDailyTrigger(h, now).nextTs;
+                        const when = new Date(nextTs).toLocaleString('pt-BR');
+                        return `• ${h} (próximo: ${when})`;
+                    }).join('\n');
+
+                    const startTxt = config.startTime ? new Date(config.startTime).toLocaleString('pt-BR') : 'N/D';
+
+                    const msg = `📅 *LEMBRETE FIXO DIÁRIO*\n\n` +
+                        `📝 *Mensagem:* ${config.comando}\n` +
+                        `⏰ *Horários:* ${horarios.join(', ')}\n` +
+                        `📅 *Início:* ${startTxt}` +
+                        (nextLines ? `\n\n🔜 *Próximos envios:*\n${nextLines}` : '');
+
+                    parts.push(msg);
+                }
+
+                if (parts.length === 0) {
+                    await sendSafeMessage(sock, groupId, { text: 'ℹ️ Nenhum lembrete ativo no momento.' });
+                } else {
+                    await sendSafeMessage(sock, groupId, { text: parts.join('\n\n') });
+                }
             } else if (normalizedText.startsWith('/testelembrete')) {
                 // Remove o comando, suportando singular e plural (/testelembrete ou /testelembretes)
                 const comando = text.replace(/^\/testelembretes?/i, '').trim();
 
                 if (!comando) {
-                    await sendSafeMessage(sock, groupId, { text: 'Use: /testelembrete [mensagem]' });
+                    await sendSafeMessage(sock, groupId, { text: '❗ Use: /testelembrete [mensagem]' });
                     return;
                 }
 
@@ -3129,7 +3442,7 @@ ${messageToPin}
                     stopReminder(groupId);
                 }
 
-                const msgText = `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuracao: 10 minutos\n\n${comando}`;
+                const msgText = `✅ *Teste Iniciado*\nIntervalo: 1 minuto\nDuração: 10 minutos\n\n${comando}`;
 
                 await sendPlainText(sock, groupId, msgText);
 
@@ -3231,7 +3544,6 @@ export function hasPendingPrivateWizard(senderId) {
         || rankingWizardState.has(senderId)
         || laminaShillWizardState.has(senderId)
         || shillWizardState.has(senderId)
-        || reminderWizardState.has(senderId)
         || newsWizardState.has(senderId);
 }
 
