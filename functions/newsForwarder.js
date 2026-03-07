@@ -260,6 +260,10 @@ async function sendArticles(sock, targetGroup, articles) {
     }
 }
 
+function getSeenUrlsSnapshot(items) {
+    return items.map((item) => item.url).slice(-MAX_SEEN_URLS);
+}
+
 function resolveSubscriptionTarget(groups, subscription) {
     const byId = String(subscription?.groupId || '').trim();
     const byName = normalizeGroupName(subscription?.groupName);
@@ -318,7 +322,7 @@ async function pollSubscription(sock, groups, subscription, state) {
         }
 
         subscriptionState.initialized = true;
-        subscriptionState.seenUrls = items.map((item) => item.url).slice(-MAX_SEEN_URLS);
+        subscriptionState.seenUrls = getSeenUrlsSnapshot(items);
         subscriptionState.lastRunAt = new Date().toISOString();
 
         logger.info('news_forwarder_initialized', {
@@ -332,14 +336,15 @@ async function pollSubscription(sock, groups, subscription, state) {
 
     if (freshItems.length === 0) {
         subscriptionState.lastRunAt = new Date().toISOString();
-        subscriptionState.seenUrls = Array.from(seenSet).slice(-MAX_SEEN_URLS);
+        subscriptionState.seenUrls = getSeenUrlsSnapshot(items);
         return;
     }
 
-    await sendArticles(sock, targetGroup, freshItems);
+    const latestFreshItem = freshItems[freshItems.length - 1];
+    await sendArticles(sock, targetGroup, [latestFreshItem]);
     subscriptionState.initialized = true;
     subscriptionState.lastRunAt = new Date().toISOString();
-    subscriptionState.seenUrls = [...subscriptionState.seenUrls, ...freshItems.map((item) => item.url)].slice(-MAX_SEEN_URLS);
+    subscriptionState.seenUrls = getSeenUrlsSnapshot(items);
 }
 
 async function pollNews(sock) {
