@@ -402,7 +402,10 @@ export function upsertNewsSubscription({ groupId = '', groupName = '', feedUrl =
 
     const config = loadConfig();
     const now = Date.now();
-    const existingIndex = config.subscriptions.findIndex((item) => String(item.groupId || '').trim() === safeGroupId);
+    const existingIndex = config.subscriptions.findIndex((item) => (
+        String(item.groupId || '').trim() === safeGroupId
+        && normalizeFeedUrl(item.feedUrl) === normalizedFeed
+    ));
     const subscription = {
         groupId: safeGroupId,
         groupName: safeGroupName,
@@ -422,6 +425,32 @@ export function upsertNewsSubscription({ groupId = '', groupName = '', feedUrl =
     return {
         ok: true,
         subscription
+    };
+}
+
+export function upsertMultipleNewsSubscriptions({ groupId = '', groupName = '', feedUrls = [] } = {}) {
+    const uniqueFeeds = Array.from(new Set(
+        (Array.isArray(feedUrls) ? feedUrls : [])
+            .map((item) => normalizeFeedUrl(item))
+            .filter(Boolean)
+    ));
+
+    if (!uniqueFeeds.length) {
+        return { ok: false, message: 'Nenhum link valido foi informado.' };
+    }
+
+    const saved = [];
+    for (const feedUrl of uniqueFeeds) {
+        const result = upsertNewsSubscription({ groupId, groupName, feedUrl });
+        if (!result.ok) {
+            return result;
+        }
+        saved.push(result.subscription);
+    }
+
+    return {
+        ok: true,
+        subscriptions: saved
     };
 }
 

@@ -8,7 +8,7 @@ import { analyzeLeadIntent, getLeads } from './aiSales.js';
 import { analyzeMessage } from './aiModeration.js';
 import { checkRateLimit } from './rateLimiter.js';
 import { logger } from './logger.js';
-import { upsertNewsSubscription, removeNewsSubscription } from './newsForwarder.js';
+import { upsertMultipleNewsSubscriptions, removeNewsSubscription } from './newsForwarder.js';
 import { formatStats } from './stats.js';
 import { enableMaintenance, disableMaintenance, isMaintenanceMode } from './maintenance.js';
 import { scheduleMessage } from './scheduler2.js';
@@ -498,6 +498,15 @@ function setShillWizard(senderId, state) {
 function setNewsWizard(senderId, state) {
     newsWizardState.set(senderId, state);
     persistPrivateWizardsState();
+}
+
+function parseNewsFeedUrls(text) {
+    return Array.from(new Set(
+        String(text || '')
+            .split(/[\s,;]+/)
+            .map((item) => item.trim())
+            .filter((item) => /^https?:\/\//i.test(item))
+    ));
 }
 
 function getRequiredPermissionForAdminCommand(commandToken) {
@@ -1656,23 +1665,33 @@ export async function handleGroupMessages(sock, message, context = {}) {
                 newsState.group = selected;
                 newsState.step = 'feedUrl';
                 setNewsWizard(senderId, newsState);
-                await sendSafeMessage(sock, senderId, { text: `Qual link deve captar as noticias para o grupo "${selected.subject}"?` });
+                await sendSafeMessage(sock, senderId, {
+                    text: `Qual link deve captar as noticias para o grupo "${selected.subject}"?\n\nVoce pode enviar um ou mais links na mesma mensagem.\nSepare por linha, espaco, virgula ou ponto e virgula.`
+                });
                 return;
             }
 
             if (newsState.step === 'feedUrl') {
-                const result = upsertNewsSubscription({
+                const feedUrls = parseNewsFeedUrls(text);
+                const result = upsertMultipleNewsSubscriptions({
                     groupId: newsState.group?.id,
                     groupName: newsState.group?.subject,
-                    feedUrl: text
+                    feedUrls
                 });
                 clearNewsWizard(senderId);
                 if (!result.ok) {
                     await sendSafeMessage(sock, senderId, { text: result.message || 'Falha ao salvar captacao de noticias.' });
                     return;
                 }
+                const feedsList = (result.subscriptions || [])
+                    .map((item, index) => `${index + 1}. ${item.feedUrl}`)
+                    .join('\n');
                 await sendSafeMessage(sock, senderId, {
-                    text: `✅ Captacao de noticias ativada.\n\nGrupo: ${result.subscription.groupName}\nFeed: ${result.subscription.feedUrl}`
+                    text: `Captacao de noticias ativada.
+
+Grupo: ${newsState.group?.subject}
+Feeds salvos:
+${feedsList}`
                 });
                 return;
             }
