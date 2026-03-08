@@ -9,6 +9,7 @@ import { analyzeMessage } from './aiModeration.js';
 import { checkRateLimit } from './rateLimiter.js';
 import { logger } from './logger.js';
 import { upsertMultipleNewsSubscriptions, removeNewsSubscription } from './newsForwarder.js';
+import { stopJobPublishing, isJobPublishingEnabled } from './jobForwarder.js';
 import { formatStats } from './stats.js';
 import { enableMaintenance, disableMaintenance, isMaintenanceMode } from './maintenance.js';
 import { scheduleMessage } from './scheduler2.js';
@@ -1733,6 +1734,25 @@ ${feedsList}`
                 prompt += `\n\nMostrando ${shown.length} de ${groups.length} grupos.`;
             }
             await sendSafeMessage(sock, senderId, { text: prompt });
+            return;
+        }
+
+        if (textLower.startsWith('/stopvagas')) {
+            const authorized = await isAuthorized(senderId);
+            if (!authorized) {
+                await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
+                return;
+            }
+
+            if (!isJobPublishingEnabled()) {
+                await sendSafeMessage(sock, senderId, { text: 'As vagas ja estao pausadas.' });
+                return;
+            }
+
+            stopJobPublishing();
+            await sendSafeMessage(sock, senderId, {
+                text: 'Captacao e envio de vagas pausados com sucesso.\n\nGrupos afetados:\n- DESENVOLVIMENTO IA\n- EMPREGOS PVH 2.0\n- EMPREGOS PVH'
+            });
             return;
         }
 

@@ -9,10 +9,11 @@ import { analyzeJobForPublishing } from './jobAnalyzer.js';
 import { logger } from './logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG_FILE = path.join(__dirname, '..', 'job_forwarder_config.json');
 const STATE_FILE = path.join(__dirname, '..', 'job_forwarder_state.json');
 
 const TARGET_GROUPS = Array.from(new Set(
-    String(process.env.IMAVY_JOB_TARGET_GROUPS || process.env.IMAVY_JOB_TARGET_GROUP || 'DESENVOLVIMENTO IA,EMPREGOS PVH 2.0')
+    String(process.env.IMAVY_JOB_TARGET_GROUPS || process.env.IMAVY_JOB_TARGET_GROUP || 'DESENVOLVIMENTO IA,EMPREGOS PVH 2.0,EMPREGOS PVH')
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean)
@@ -207,6 +208,35 @@ const SOURCES = [
 
 let cronTask = null;
 let pollingInFlight = false;
+
+function getDefaultConfig() {
+    return {
+        enabled: true
+    };
+}
+
+function loadConfig() {
+    try {
+        if (!fs.existsSync(CONFIG_FILE)) {
+            const config = getDefaultConfig();
+            fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
+            return config;
+        }
+        const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+        return {
+            enabled: parsed?.enabled !== false
+        };
+    } catch (_) {
+        return getDefaultConfig();
+    }
+}
+
+function saveConfig(config) {
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify({
+        updatedAt: new Date().toISOString(),
+        enabled: config?.enabled !== false
+    }, null, 2), 'utf8');
+}
 
 function normalizeSpace(value) {
     return String(value || '')
@@ -548,6 +578,12 @@ async function pollJobs(sock) {
     pollingInFlight = true;
 
     try {
+        const config = loadConfig();
+        if (config.enabled === false) {
+            logger.info('job_forwarder_paused');
+            return;
+        }
+
         const groups = await sock.groupFetchAllParticipating();
         const { resolved: targetGroups, missing: missingGroups } = resolveTargetGroups(groups);
         if (targetGroups.length === 0) {
@@ -647,10 +683,13 @@ async function pollJobs(sock) {
 export async function startJobForwarder(sock) {
     if (cronTask) return;
 
+    const config = loadConfig();
+
     logger.info('job_forwarder_started', {
         cron: JOB_CRON,
         timezone: JOB_TIMEZONE,
         maxJobsPerRun: MAX_JOBS_PER_RUN,
+        enabled: config.enabled !== false,
         targetGroups: TARGET_GROUPS,
         sources: SOURCES.map((source) => source.label)
     });
@@ -676,4 +715,20 @@ export function stopJobForwarder() {
 
 export async function runJobForwarderNow(sock) {
     await pollJobs(sock);
+}
+
+export function stopJobPublishing() {
+    const nextConfig = { ...loadConfig(), enabled: false };
+    saveConfig(nextConfig);
+    return nextConfig;
+}
+
+export function startJobPublishing() {
+    const nextConfig = { ...loadConfig(), enabled: true };
+    saveConfig(nextConfig);
+    return nextConfig;
+}
+
+export function isJobPublishingEnabled() {
+    return loadConfig().enabled !== false;
 }
