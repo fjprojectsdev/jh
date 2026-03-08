@@ -11,7 +11,12 @@ import { logger } from './logger.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STATE_FILE = path.join(__dirname, '..', 'job_forwarder_state.json');
 
-const TARGET_GROUP = String(process.env.IMAVY_JOB_TARGET_GROUP || 'DESENVOLVIMENTO IA').trim();
+const TARGET_GROUPS = Array.from(new Set(
+    String(process.env.IMAVY_JOB_TARGET_GROUPS || process.env.IMAVY_JOB_TARGET_GROUP || 'DESENVOLVIMENTO IA,EMPREGOS PVH 2.0')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+));
 const JOB_TIMEZONE = String(process.env.IMAVY_JOB_TIMEZONE || 'America/Porto_Velho').trim();
 const JOB_CRON = String(process.env.IMAVY_JOB_CRON || '0 */3 * * *').trim();
 const MAX_JOBS_PER_RUN = Math.max(1, Number.parseInt(process.env.IMAVY_JOB_MAX_PER_RUN || '3', 10) || 3);
@@ -471,14 +476,22 @@ async function fetchHtml(url) {
     return response.text();
 }
 
-function resolveTargetGroup(groups) {
-    const byName = normalizeGroupName(TARGET_GROUP);
+function resolveTargetGroups(groups) {
+    const remaining = new Set(TARGET_GROUPS.map((item) => normalizeGroupName(item)));
+    const resolved = [];
+
     for (const [id, group] of Object.entries(groups || {})) {
-        if (normalizeGroupName(group?.subject) === byName) {
-            return { id, subject: String(group?.subject || id).trim() || id };
-        }
+        const subject = String(group?.subject || id).trim() || id;
+        const normalized = normalizeGroupName(subject);
+        if (!remaining.has(normalized)) continue;
+        resolved.push({ id, subject });
+        remaining.delete(normalized);
     }
-    return null;
+
+    return {
+        resolved,
+        missing: TARGET_GROUPS.filter((item) => remaining.has(normalizeGroupName(item)))
+    };
 }
 
 function buildJobPayload(job) {
@@ -536,10 +549,13 @@ async function pollJobs(sock) {
 
     try {
         const groups = await sock.groupFetchAllParticipating();
-        const targetGroup = resolveTargetGroup(groups);
-        if (!targetGroup) {
-            logger.warn('job_forwarder_group_not_found', { targetGroup: TARGET_GROUP });
+        const { resolved: targetGroups, missing: missingGroups } = resolveTargetGroups(groups);
+        if (targetGroups.length === 0) {
+            logger.warn('job_forwarder_group_not_found', { targetGroups: TARGET_GROUPS });
             return;
+        }
+        if (missingGroups.length > 0) {
+            logger.warn('job_forwarder_groups_missing', { targetGroups: missingGroups });
         }
 
         const state = loadState();
@@ -554,7 +570,7 @@ async function pollJobs(sock) {
             state.lastRunAt = new Date().toISOString();
             saveState(state);
             logger.info('job_forwarder_initialized', {
-                targetGroup: targetGroup.subject,
+                targetGroups: targetGroups.map((group) => group.subject),
                 trackedJobs: jobs.length
             });
             return;
@@ -600,16 +616,18 @@ async function pollJobs(sock) {
 
         const jobsToSend = analyzedFreshJobs.slice(0, MAX_JOBS_PER_RUN);
         for (const job of jobsToSend) {
-            const sent = await sendSafeMessage(sock, targetGroup.id, buildJobPayload(job));
-            if (sent) {
-                logger.info('job_forwarder_sent', {
-                    group: targetGroup.subject,
-                    source: job.sourceLabel,
-                    title: job.title,
-                    url: job.url
-                });
+            for (const targetGroup of targetGroups) {
+                const sent = await sendSafeMessage(sock, targetGroup.id, buildJobPayload(job));
+                if (sent) {
+                    logger.info('job_forwarder_sent', {
+                        group: targetGroup.subject,
+                        source: job.sourceLabel,
+                        title: job.title,
+                        url: job.url
+                    });
+                }
+                await new Promise((resolve) => setTimeout(resolve, 1200));
             }
-            await new Promise((resolve) => setTimeout(resolve, 1200));
         }
 
         state.initialized = true;
@@ -633,6 +651,7 @@ export async function startJobForwarder(sock) {
         cron: JOB_CRON,
         timezone: JOB_TIMEZONE,
         maxJobsPerRun: MAX_JOBS_PER_RUN,
+        targetGroups: TARGET_GROUPS,
         sources: SOURCES.map((source) => source.label)
     });
 
