@@ -37,6 +37,7 @@ import { analyzeLeadIntent, isAISalesEnabled } from './functions/aiSales.js';
 import { startAutoPromo } from './functions/autoPromo.js';
 import { startNewsForwarder, stopNewsForwarder } from './functions/newsForwarder.js';
 import { startJobForwarder, stopJobForwarder } from './functions/jobForwarder.js';
+import { startPrivateJobAlerts, stopPrivateJobAlerts } from './functions/privateJobAlerts.js';
 import { handleConnectionUpdate, resetReconnectAttempts } from './functions/connectionManager.js';
 import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup, clearSessionBackup } from './keepalive.js';
 import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from './functions/devCommands.js';
@@ -784,6 +785,7 @@ async function startBot() {
                 startAutoPromo(sock);
                 await startNewsForwarder(sock);
                 await startJobForwarder(sock);
+                await startPrivateJobAlerts(sock);
                 startHealthMonitor();
                 startSessionBackup();
                 if (BUY_ALERT_ENABLED) {
@@ -807,6 +809,7 @@ async function startBot() {
             global.__imavyLembretesInitialized = false;
             stopNewsForwarder();
             stopJobForwarder();
+            stopPrivateJobAlerts();
             await stopBuyAlertNotifier();
 
             if (reason === DisconnectReason.loggedOut) {

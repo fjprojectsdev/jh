@@ -524,7 +524,7 @@ function resolveTargetGroups(groups) {
     };
 }
 
-function buildJobPayload(job) {
+export function buildJobPayload(job) {
     const safeUrl = String(job.url || '').replace('https://', 'https://\u200B');
     const requirementBullets = buildRequirementBullets(job.requirements);
     const lines = [
@@ -551,7 +551,7 @@ function buildJobPayload(job) {
     return { text: lines.join('\n') };
 }
 
-async function collectJobs() {
+export async function collectJobs() {
     const jobs = [];
     for (const source of SOURCES) {
         try {
