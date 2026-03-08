@@ -9,6 +9,10 @@ import { getNumberFromJid } from './utils.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEV_FEATURE_ENABLED = String(process.env.IMAVY_DEV_FEATURE || 'false').toLowerCase() === 'true';
 const GLOBAL_DEV_MODE = String(process.env.IMAVY_DEV_MODE || 'false').toLowerCase() === 'true';
+const JARVIS_ADMIN_IDS = (process.env.IMAVY_JARVIS_ADMINS || '246265120075930@lid')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
 
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY || 'your-groq-api-key-here'
@@ -61,8 +65,18 @@ export function isDev(userId) {
         const adminNumber = getNumberFromJid(adminId);
         return Boolean(userNumber) && Boolean(adminNumber) && userNumber === adminNumber;
     });
-    const isAuthorized = isExplicitDev || isAdmin;
+    const isJarvis = isJarvisAdmin(userId);
+    const isAuthorized = isExplicitDev || isAdmin || isJarvis;
     return isAuthorized;
+}
+
+export function isJarvisAdmin(userId) {
+    const userNumber = getNumberFromJid(userId);
+    return JARVIS_ADMIN_IDS.some((adminId) => {
+        if (userId === adminId) return true;
+        const adminNumber = getNumberFromJid(adminId);
+        return Boolean(userNumber) && Boolean(adminNumber) && userNumber === adminNumber;
+    });
 }
 
 export function isDevModeActive(userId) {

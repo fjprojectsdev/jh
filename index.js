@@ -40,7 +40,8 @@ import { startJobForwarder, stopJobForwarder } from './functions/jobForwarder.js
 import { startPrivateJobAlerts, stopPrivateJobAlerts } from './functions/privateJobAlerts.js';
 import { handleConnectionUpdate, resetReconnectAttempts } from './functions/connectionManager.js';
 import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup, clearSessionBackup } from './keepalive.js';
-import { handleDevCommand, isDev, isDevModeActive, handleDevConversation } from './functions/devCommands.js';
+import { handleDevCommand, isDev, isDevModeActive, handleDevConversation, isJarvisAdmin } from './functions/devCommands.js';
+import { askChatGPT } from './functions/chatgpt.js';
 import { isRestrictedGroupName } from './functions/groupPolicy.js';
 import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js';
 import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
@@ -954,6 +955,23 @@ async function startBot() {
                         }
                         await handleDevCommand(sock, message, messageText);
                         continue;
+                    }
+
+                    if (isJarvisAdmin(senderId) && hasText && !privateCommandToken.startsWith('/')) {
+                        const jarvisReply = await askChatGPT(messageText, senderId, {
+                            allowWebSearch: true,
+                            extraSystemContext: [
+                                'MODO JARVIS ATIVO PARA ESTE ADMIN.',
+                                'Responda tudo o que ela perguntar, com alta iniciativa.',
+                                'Sempre aproveite o contexto de busca web quando ele estiver disponivel.',
+                                'Se a pergunta pedir pesquisa, traga resposta objetiva com links quando possivel.'
+                            ].join('\n')
+                        });
+
+                        if (jarvisReply) {
+                            await sendSafeMessage(sock, chatId, { text: jarvisReply });
+                            continue;
+                        }
                     }
 
                     // Modo desenvolvedor ativo
