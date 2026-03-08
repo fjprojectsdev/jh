@@ -9,7 +9,7 @@ import { analyzeMessage } from './aiModeration.js';
 import { checkRateLimit } from './rateLimiter.js';
 import { logger } from './logger.js';
 import { upsertMultipleNewsSubscriptions, removeNewsSubscription } from './newsForwarder.js';
-import { stopJobPublishing, isJobPublishingEnabled } from './jobForwarder.js';
+import { stopJobPublishing, startJobPublishing, isJobPublishingEnabled } from './jobForwarder.js';
 import { formatStats } from './stats.js';
 import { enableMaintenance, disableMaintenance, isMaintenanceMode } from './maintenance.js';
 import { scheduleMessage } from './scheduler2.js';
@@ -1737,10 +1737,25 @@ ${feedsList}`
             return;
         }
 
-        if (textLower.startsWith('/stopvagas')) {
+        if (textLower.startsWith('/stopvagas') || textLower.startsWith('/startvagas')) {
             const authorized = await isAuthorized(senderId);
             if (!authorized) {
                 await sendSafeMessage(sock, senderId, { text: 'Acesso negado. Apenas administradores autorizados.' });
+                return;
+            }
+
+            const wantsStart = textLower.startsWith('/startvagas');
+
+            if (wantsStart) {
+                if (isJobPublishingEnabled()) {
+                    await sendSafeMessage(sock, senderId, { text: 'As vagas ja estao ativas.' });
+                    return;
+                }
+
+                startJobPublishing();
+                await sendSafeMessage(sock, senderId, {
+                    text: 'Captacao e envio de vagas reativados com sucesso.\n\nGrupos afetados:\n- DESENVOLVIMENTO IA\n- EMPREGOS PVH 2.0\n- EMPREGOS PVH'
+                });
                 return;
             }
 
