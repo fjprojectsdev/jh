@@ -113,43 +113,10 @@ export async function notifyDeveloper(sock, clientId, clientNumber, messagePrevi
     }
 }
 
-// Compatibilidade retroativa — notifica admins genéricos (mantido para não quebrar chamadas existentes)
+// Compatibilidade retroativa — notifica apenas o desenvolvedor diretamente
 export async function notifyAttendants(sock, clientId, clientNumber, getAdmins, messagePreview = '') {
     // Notifica o desenvolvedor diretamente
     await notifyDeveloper(sock, clientId, clientNumber, messagePreview);
-
-    // Também notifica a lista de admins, excluindo o próprio dev para não duplicar
-    try {
-        const admins = await getAdmins();
-        const excludedJids = new Set([DEVELOPER_JID].filter(Boolean));
-        const excludedPhones = ['225919675449527'];
-
-        for (const admin of admins) {
-            try {
-                const adminJidRaw = String(admin?.id || admin?.user_id || '').trim();
-                if (!adminJidRaw) continue;
-                const adminJid = adminJidRaw.includes('@') ? adminJidRaw : `${adminJidRaw}@s.whatsapp.net`;
-
-                if (excludedJids.has(adminJid)) continue;
-                if (excludedPhones.some(p => adminJid.includes(p))) continue;
-
-                const notifMsg = [
-                    '🔔 *NOVO CONTATO COMERCIAL!*',
-                    '',
-                    `👤 Cliente: ${clientNumber}`,
-                    `🆔 JID: ${clientId}`,
-                    '',
-                    `⏰ ${new Date().toLocaleString('pt-BR')}`
-                ].join('\n');
-
-                await sendSafeMessage(sock, adminJid, { text: notifMsg });
-            } catch (e) {
-                console.error('Erro ao notificar admin:', e);
-            }
-        }
-    } catch (e) {
-        console.warn('[AUTO-ATENDIMENTO] Falha ao carregar admins para notificação:', e?.message || e);
-    }
 }
 
 // Funções de verificação mantidas por compatibilidade
