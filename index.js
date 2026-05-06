@@ -1,6 +1,6 @@
 // index.js
 import 'dotenv/config';
-import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, WAMessageStubType } from "@whiskeysockets/baileys";
+import makeWASocket, { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, WAMessageStubType, downloadMediaMessage } from "@whiskeysockets/baileys";
 import qrcode from "qrcode-terminal";
 import QRCode from "qrcode";
 import http from 'http';
@@ -21,8 +21,8 @@ const debugLog = (...args) => {
     if (DEBUG_MODE) console.log(...args);
 };
 
-import { handleGroupMessages, initLembretes, hasPendingPrivateWizard } from './functions/groupResponder.js';
-import { isAuthorized, getAllowedGroupPermissions } from './functions/adminCommands.js';
+import { handleGroupMessages, initGroupResponderSchedulers, initLembretes, resetLembretesRuntime, hasPendingPrivateWizard, flushScheduledAutomationState, flushScheduledAutomationStateWithoutReminders } from './functions/groupResponder.js';
+import { isAuthorized, getAllowedGroupPermissions, bindAllowedGroupId } from './functions/adminCommands.js';
 import { getNumberFromJid, formatNumberInternational } from './functions/utils.js';
 import { scheduleGroupMessages } from './functions/scheduler.js';
 import { ensureCoreConfigFiles } from './functions/configBootstrap.js';
@@ -36,15 +36,21 @@ import { analyzeMessage, isAIEnabled } from './functions/aiModeration.js';
 import { analyzeLeadIntent, isAISalesEnabled } from './functions/aiSales.js';
 import { startAutoPromo } from './functions/autoPromo.js';
 import { startNewsForwarder, stopNewsForwarder } from './functions/newsForwarder.js';
-import { startJobForwarder, stopJobForwarder } from './functions/jobForwarder.js';
-import { startPrivateJobAlerts, stopPrivateJobAlerts } from './functions/privateJobAlerts.js';
+import { startJobForwarder, stopJobForwarder, collectJobs, buildJobPayload, sendJobToConfiguredTargets } from './functions/jobForwarder.js';
+import { matchesConfiguredJobSourceChannel, registerIncomingJobChannelMessage } from './functions/jobChannelSource.js';
+import { startPrivateJobAlerts, stopPrivateJobAlerts, broadcastPrivateProfileRefresh, sendPrivateProfileRefreshFollowUp, sendHistoricalPrivateJobsForJid, notifyProfilesMoreJobsAvailable, syncExternalPrivateJobProfile } from './functions/privateJobAlerts.js';
+import { startJobTestPublisher, stopJobTestPublisher } from './functions/jobTestPublisher.js';
 import { handleConnectionUpdate, resetReconnectAttempts } from './functions/connectionManager.js';
-import { startHealthMonitor, startSessionBackup, setConnected, updateHeartbeat, restoreSessionFromBackup, clearSessionBackup } from './keepalive.js';
+import { startHealthMonitor, startSessionBackup, setConnected, setHealthEscalationHandler, updateHeartbeat, restoreSessionFromBackup, clearSessionBackup } from './keepalive.js';
 import { handleDevCommand, isDev, isDevModeActive, handleDevConversation, isJarvisAdmin } from './functions/devCommands.js';
+import { handleCap } from './functions/custom/cap.js';
+import { handleCurso } from './functions/custom/curso.js';
 import { askChatGPT } from './functions/chatgpt.js';
 import { isRestrictedGroupName } from './functions/groupPolicy.js';
 import { publishRealtimeInteraction } from './functions/realtimeRankingStore.js';
-import { startBuyAlertNotifier, stopBuyAlertNotifier } from './functions/buyAlertNotifier.js';
+import { startBuyAlertNotifier, stopBuyAlertNotifier, sendBuyAlertPayloadDirect, buildConfig, resolveBuyAlertGroups } from './functions/buyAlertNotifier.js';
+import { startCryptoCacheWarmer, stopCryptoCacheWarmer } from './functions/crypto/cacheWarmer.js';
+import { removeBrokenSessionFiles, sanitizeAuthStateDir } from './functions/waSessionHygiene.js';
 import { createIntelEngine, getIntelEventBuffer, storeIntelEvent } from './src/intelligence/intelEngine.js';
 import { createLeadEngine } from './src/intelligence/leadEngine.js';
 import { trackGroupMessage, backfillRankingFromCurrentMonth } from './functions/groupRanking.js';
@@ -58,10 +64,19 @@ const DEFAULT_INTEL_GROUPS = [
     "120363394030123512@g.us",
     "120363418891665714@g.us"
 ];
+const DEFAULT_FSX_OFFICIAL_SOURCE_GROUPS = [
+    "120363418810171705@g.us"
+];
 const INTEL_GROUPS = String(process.env.INTEL_GROUPS || DEFAULT_INTEL_GROUPS.join(','))
     .split(',')
     .map((groupId) => groupId.trim())
     .filter(Boolean);
+const FSX_OFFICIAL_SOURCE_GROUPS = new Set(
+    String(process.env.FSX_OFFICIAL_SOURCE_GROUPS || DEFAULT_FSX_OFFICIAL_SOURCE_GROUPS.join(','))
+        .split(',')
+        .map((groupId) => groupId.trim())
+        .filter(Boolean)
+);
 const INTEL_GROUP_NAMES = {
     "120363394030123512@g.us": "CriptoNoPix \u00E9 Vellora (1)",
     "120363418891665714@g.us": "CriptoNoPix \u00E9 Vellora (2)"
@@ -95,6 +110,146 @@ const runtimeControlState = {
     lastEventId: null,
     lastAppliedTypes: []
 };
+const fsxOfficialRelayDedup = new Map();
+const privateMessageDedup = new Map();
+const FSX_OFFICIAL_RELAY_BOOT_GRACE_MS = 15_000;
+const FSX_OFFICIAL_RELAY_MAX_MESSAGE_AGE_MS = 10 * 60 * 1000;
+const PRIVATE_MESSAGE_DEDUP_TTL_MS = 2 * 60 * 1000;
+
+function cleanupPrivateMessageDedup(now = Date.now()) {
+    for (const [key, ts] of privateMessageDedup.entries()) {
+        if ((now - ts) > PRIVATE_MESSAGE_DEDUP_TTL_MS) {
+            privateMessageDedup.delete(key);
+        }
+    }
+}
+
+function buildPrivateMessageDedupKey(message, text = '') {
+    const chatId = String(message?.key?.remoteJid || '').trim();
+    const senderId = String(resolveSenderIdFromMessage(message) || '').trim();
+    const messageId = String(message?.key?.id || '').trim();
+    if (chatId && messageId) {
+        return `${chatId}:${messageId}`;
+    }
+
+    const safeText = String(text || '').trim().toLowerCase().slice(0, 160);
+    const timestamp = Number(message?.messageTimestamp || 0);
+    return `${chatId}:${senderId}:${timestamp}:${safeText}`;
+}
+
+function shouldSkipDuplicatePrivateMessage(message, text = '') {
+    const key = buildPrivateMessageDedupKey(message, text);
+    if (!key) return false;
+    const now = Date.now();
+    cleanupPrivateMessageDedup(now);
+    if (privateMessageDedup.has(key)) {
+        return true;
+    }
+    privateMessageDedup.set(key, now);
+    return false;
+}
+
+function cleanupFsxOfficialRelayDedup(now = Date.now()) {
+    for (const [key, ts] of fsxOfficialRelayDedup.entries()) {
+        if ((now - ts) > 24 * 60 * 60 * 1000) {
+            fsxOfficialRelayDedup.delete(key);
+        }
+    }
+}
+
+function looksLikeFsxOfficialPurchaseAlert(text) {
+    const safe = String(text || '').trim().toLowerCase();
+    if (!safe) return false;
+    return safe.includes('fsx global presale')
+        && safe.includes('new purchase')
+        && safe.includes('token acquired')
+        && safe.includes('amount received')
+        && safe.includes('tx:');
+}
+
+function extractFsxOfficialAlertKey(messageText, message) {
+    const safe = String(messageText || '');
+    const txMatch = safe.match(/tx:\s*(0x[a-fA-F0-9]{64})/i);
+    if (txMatch?.[1]) {
+        return `tx:${txMatch[1].toLowerCase()}`;
+    }
+    return `msg:${String(message?.key?.id || '').trim()}`;
+}
+
+function normalizeFsxOfficialRelayText(messageText) {
+    const stageText = String(process.env.FSX_PRESALE_STAGE_TEXT || 'Fase 7').trim() || 'Fase 7';
+    const stageTextEn = stageText === 'Fase 7' ? 'Phase 7' : stageText;
+    let text = String(messageText || '');
+    text = text.replace(/Current Stage:[^\n]*/gi, (match) => {
+        if (/Phase/i.test(match)) return `Current Stage: ${stageTextEn}`;
+        return `Current Stage: ${stageText}`;
+    });
+    text = text.replace(/\bFase\s*\d+\b/gi, stageText);
+    text = text.replace(/\bPhase\s*\d+\b/gi, stageTextEn);
+    return text;
+}
+
+async function maybeRelayFsxOfficialPurchase(sock, message, unwrappedContent, messageText, options = {}) {
+    const upsertType = String(options.upsertType || '').trim().toLowerCase();
+    if (upsertType && upsertType !== 'notify') return false;
+    if (Date.now() - botStartTime < FSX_OFFICIAL_RELAY_BOOT_GRACE_MS) return false;
+
+    const chatId = String(message?.key?.remoteJid || '').trim();
+    if (!FSX_OFFICIAL_SOURCE_GROUPS.has(chatId)) return false;
+    if (!looksLikeFsxOfficialPurchaseAlert(messageText)) return false;
+
+    const messageTimestampMs = Number(message?.messageTimestamp || 0) * 1000;
+    if (Number.isFinite(messageTimestampMs) && messageTimestampMs > 0) {
+        const ageMs = Date.now() - messageTimestampMs;
+        if (ageMs > FSX_OFFICIAL_RELAY_MAX_MESSAGE_AGE_MS) {
+            logger.info('FSX official relay ignorado por mensagem antiga.', {
+                chatId,
+                ageMinutes: Number((ageMs / 60_000).toFixed(3)),
+                maxAgeMinutes: Number((FSX_OFFICIAL_RELAY_MAX_MESSAGE_AGE_MS / 60_000).toFixed(3))
+            });
+            return false;
+        }
+    }
+
+    const dedupKey = extractFsxOfficialAlertKey(messageText, message);
+    const now = Date.now();
+    cleanupFsxOfficialRelayDedup(now);
+    if (fsxOfficialRelayDedup.has(dedupKey)) {
+        return true;
+    }
+
+    const normalizedRelayText = normalizeFsxOfficialRelayText(messageText).trim();
+    let payload = { text: normalizedRelayText };
+    const hasMedia = Boolean(unwrappedContent?.imageMessage || unwrappedContent?.videoMessage);
+
+    if (hasMedia) {
+        try {
+            const media = typeof sock.downloadMediaMessage === 'function'
+                ? await sock.downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage })
+                : await downloadMediaMessage(message, 'buffer', {}, { reuploadRequest: sock.updateMediaMessage });
+            if (media && Buffer.isBuffer(media) && media.length > 0) {
+                payload = {
+                    image: media,
+                    caption: normalizedRelayText
+                };
+            }
+        } catch (error) {
+            logger.warn('FSX official relay sem midia; fallback para texto.', {
+                chatId,
+                error: error?.message || String(error)
+            });
+        }
+    }
+
+    await sendBuyAlertPayloadDirect(sock, payload);
+    fsxOfficialRelayDedup.set(dedupKey, now);
+    logger.info('FSX official purchase relayed to buy alert groups', {
+        chatId,
+        dedupKey,
+        withMedia: Boolean(payload?.image)
+    });
+    return true;
+}
 
 function hasDashboardWebhookConfigured() {
     return String(process.env.DASHBOARD_WEBHOOK_URL || '').trim() !== '';
@@ -160,15 +315,54 @@ function isDashboardSyncAuthorized(req) {
     return headerSecret === DASHBOARD_SYNC_SECRET || bearerSecret === DASHBOARD_SYNC_SECRET;
 }
 
-async function readJsonBody(req, maxBytes = 64 * 1024) {
-    let body = '';
-    for await (const chunk of req) {
-        body += chunk;
-        if (body.length > maxBytes) {
-            throw new Error('Payload muito grande para /intel-event');
-        }
+function getPrivateJobProfileSyncSecret() {
+    return String(process.env.PRIVATE_JOB_PROFILE_SYNC_SECRET || DASHBOARD_SYNC_SECRET || '').trim();
+}
+
+function isPrivateJobProfileSyncAuthorized(req) {
+    const syncSecret = getPrivateJobProfileSyncSecret();
+    if (!syncSecret) {
+        return false;
     }
 
+    const headerSecret = String(
+        req.headers['x-private-job-sync-key']
+        || req.headers['x-dashboard-sync-key']
+        || ''
+    ).trim();
+    const authHeader = String(req.headers.authorization || '').trim();
+    const bearerSecret = authHeader.toLowerCase().startsWith('bearer ')
+        ? authHeader.slice(7).trim()
+        : '';
+
+    return headerSecret === syncSecret || bearerSecret === syncSecret;
+}
+
+async function startBootService(name, starter) {
+    try {
+        await starter();
+        logger.info(`[BOOT] ${name} iniciado.`);
+        return true;
+    } catch (error) {
+        const message = error?.message || String(error);
+        console.error(`[BOOT] Falha ao iniciar ${name}:`, message);
+        return false;
+    }
+}
+
+async function readJsonBody(req, maxBytes = 64 * 1024) {
+    const chunks = [];
+    let totalBytes = 0;
+    for await (const chunk of req) {
+        const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        totalBytes += bufferChunk.length;
+        if (totalBytes > maxBytes) {
+            throw new Error('Payload muito grande para /intel-event');
+        }
+        chunks.push(bufferChunk);
+    }
+
+    const body = Buffer.concat(chunks).toString('utf8');
     if (!body.trim()) {
         return {};
     }
@@ -185,6 +379,303 @@ http.createServer(async (req, res) => {
 
     if (requestPath === '/dashboard-sync') {
         await handleDashboardSyncEndpoint(req, res);
+        return;
+    }
+
+    if (requestPath === '/private-job-profile-sync') {
+        await handlePrivateJobProfileSyncEndpoint(req, res);
+        return;
+    }
+
+    if (requestPath === '/internal/test-buy-alerts') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        try {
+            const groupId = String(parsedRequestUrl.searchParams.get('groupId') || '').trim();
+            const startIndex = Number(parsedRequestUrl.searchParams.get('start') || '0');
+            const count = Number(parsedRequestUrl.searchParams.get('count') || '10');
+            const delayMs = Number(parsedRequestUrl.searchParams.get('delayMs') || '2200');
+
+            if (!groupId) {
+                throw new Error('groupId obrigatorio.');
+            }
+
+            const result = await sendInternalTestBuyAlerts(groupId, { startIndex, count, delayMs });
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/send-news-preview') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        if (req.method !== 'POST') {
+            res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Metodo nao permitido.' }));
+            return;
+        }
+
+        try {
+            const payload = await readJsonBody(req, 256 * 1024);
+            const groupId = String(payload?.groupId || '').trim();
+            const delayMs = Number(payload?.delayMs || 3500);
+            const items = Array.isArray(payload?.items) ? payload.items : [];
+
+            if (!groupId) {
+                throw new Error('groupId obrigatorio.');
+            }
+
+            const result = await sendInternalNewsPreview(groupId, items, { delayMs });
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/test-fsx-cnp-alert') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        try {
+            const groupId = String(parsedRequestUrl.searchParams.get('groupId') || '').trim();
+            if (!groupId) {
+                throw new Error('groupId obrigatorio.');
+            }
+
+            const symbol = String(parsedRequestUrl.searchParams.get('symbol') || 'SNAP').trim();
+            const result = await sendInternalCriptoNoPixPreview(groupId, symbol);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+if (requestPath === '/internal/broadcast-private-profile-refresh') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+    }
+
+    if (requestPath === '/api/cnp-purchase-alert') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1', '10.0.0.0', '172.16.0.0', '192.168.0.0'].includes(remoteAddress) && !remoteAddress.startsWith('10.') && !remoteAddress.startsWith('172.') && !remoteAddress.startsWith('192.168')) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso negado.' }));
+            return;
+        }
+
+        try {
+            const body = [];
+            for await (const chunk of req) {
+                body.push(chunk);
+            }
+            const payload = JSON.parse(Buffer.concat(body).toString());
+            const result = await sendCnpSitePurchaseAlert(activeSock, payload);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/test-cnp-site-alert') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        try {
+            const batchSize = Number(parsedRequestUrl.searchParams.get('batchSize') || '10');
+            const delayMs = Number(parsedRequestUrl.searchParams.get('delayMs') || '30000');
+            const force = String(parsedRequestUrl.searchParams.get('force') || '').trim().toLowerCase() === 'true';
+            const result = await broadcastPrivateProfileRefresh(activeSock, { batchSize, delayMs, force });
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/private-profile-refresh-followup') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        try {
+            const jids = String(parsedRequestUrl.searchParams.get('jids') || '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean);
+            const force = String(parsedRequestUrl.searchParams.get('force') || '').trim().toLowerCase() === 'true';
+            const result = await sendPrivateProfileRefreshFollowUp(activeSock, jids, { force });
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/private-old-jobs') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        try {
+            const jid = String(parsedRequestUrl.searchParams.get('jid') || '').trim();
+            const limit = Number(parsedRequestUrl.searchParams.get('limit') || '10');
+            if (!jid) {
+                throw new Error('jid obrigatorio.');
+            }
+            const result = await sendHistoricalPrivateJobsForJid(activeSock, jid, { limit, delayMs: 1200 });
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: true, jid, ...result }));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/private-more-jobs-notice') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        try {
+            const jids = String(parsedRequestUrl.searchParams.get('jids') || '')
+                .split(',')
+                .map((item) => item.trim())
+                .filter(Boolean);
+            const result = await notifyProfilesMoreJobsAvailable(activeSock, jids);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/backfill-march-jobs') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        if (req.method !== 'POST') {
+            res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Metodo nao permitido.' }));
+            return;
+        }
+
+        try {
+            const payload = await readJsonBody(req, 32 * 1024);
+            const delayMs = Number(payload?.delayMs || '180000');
+            const includeUndated = payload?.includeUndated !== false;
+            const result = await startMarchJobsBackfill({ delayMs, includeUndated });
+            res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(result));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
+        return;
+    }
+
+    if (requestPath === '/internal/backfill-march-jobs-status') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: true, ...marchJobsBackfillStatus }));
+        return;
+    }
+
+    if (requestPath === '/internal/resend-job-to-targets') {
+        const remoteAddress = String(req.socket?.remoteAddress || '');
+        if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress)) {
+            res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Acesso permitido apenas localmente.' }));
+            return;
+        }
+
+        if (req.method !== 'POST') {
+            res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: 'Metodo nao permitido.' }));
+            return;
+        }
+
+        try {
+            if (!activeSock) {
+                throw new Error('Sessao principal do WhatsApp indisponivel no momento.');
+            }
+
+            const payload = await readJsonBody(req, 128 * 1024);
+            const job = payload?.job && typeof payload.job === 'object' ? payload.job : null;
+            const includeGroups = payload?.includeGroups !== false;
+            const delayMs = Math.max(500, Number(payload?.delayMs || '1200'));
+
+            if (!job?.title || !job?.url) {
+                throw new Error('job.title e job.url sao obrigatorios.');
+            }
+
+            const result = await sendJobToConfiguredTargets(activeSock, job, { includeGroups, delayMs });
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: true, result }));
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: error.message || String(error) }));
+        }
         return;
     }
 
@@ -237,6 +728,22 @@ http.createServer(async (req, res) => {
 // Variavel para armazenar o servidor HTTP temporario
 let qrServer = null;
 let qrCodeData = null;
+let activeSock = null;
+let startBotInFlight = false;
+let pendingFullRestartTimer = null;
+let marchJobsBackfillStatus = {
+    running: false,
+    startedAt: null,
+    finishedAt: null,
+    targetId: '',
+    targetName: '',
+    delayMs: 0,
+    total: 0,
+    sent: 0,
+    failed: 0,
+    includeUndated: true,
+    errors: []
+};
 
 // Timestamp de inicializacao do bot para ignorar mensagens antigas
 const botStartTime = Date.now();
@@ -246,6 +753,313 @@ const ALLOWED_GROUPS_CACHE_TTL_MS = Math.max(5_000, parseInt(process.env.ALLOWED
 const featureDisabledNoticeCooldown = new Map();
 const FEATURE_DISABLED_NOTICE_MS = Math.max(30_000, parseInt(process.env.FEATURE_DISABLED_NOTICE_MS || '120000', 10));
 
+function buildTestBuyAlertsPayloads() {
+    return [
+        { title: '\uD83D\uDC0B WHALE ALERT | NIX', usd: '842.50', tokens: '132,845.10', wallet: '0xA1b2...9F01', count: 7, holderSince: '12/02/2026', tx: '0x1111111111111111111111111111111111111111111111111111111111111111', token: '0xbe96fcf736ad906b1821ef74a0e4e346c74e6221', chart: '0x7f01f344b1950a3c5ea3b9db7017f93ab0c8f88e' },
+        { title: '\uD83C\uDD95 NOVO HOLDER | NIX', usd: '63.20', tokens: '9,874.44', wallet: '0xB2c3...8A12', count: 1, holderSince: '22/03/2026', tx: '0x2222222222222222222222222222222222222222222222222222222222222222', chart: '0x7f01f344b1950a3c5ea3b9db7017f93ab0c8f88e' },
+        { title: '\uD83D\uDD01 COMPRANDO NOVAMENTE | SNAP', usd: '118.90', tokens: '24,115.77', wallet: '0xC3d4...7B23', count: 2, holderSince: '18/03/2026', tx: '0x3333333333333333333333333333333333333333333333333333333333333333', token: '0x3a9e15b28e099708d0812e0843a9ed70c508fb4b', chart: '0x7646c457a2c4d260f678f3126fa41e20bfdd1f95' },
+        { title: '\uD83C\uDFE6 HOLDER ANTIGO | NIX', usd: '91.35', tokens: '14,901.08', wallet: '0xD4e5...6C34', count: 5, holderSince: '03/03/2026', tx: '0x4444444444444444444444444444444444444444444444444444444444444444', chart: '0x7f01f344b1950a3c5ea3b9db7017f93ab0c8f88e' },
+        { title: '\uD83D\uDC0B BALEIA COMPRANDO NOVAMENTE | SNAP', usd: '1,204.11', tokens: '231,440.55', wallet: '0xE5f6...5D45', count: 9, holderSince: '27/01/2026', tx: '0x5555555555555555555555555555555555555555555555555555555555555555', chart: '0x7646c457a2c4d260f678f3126fa41e20bfdd1f95' },
+        { title: '\uD83C\uDD95 NOVO HOLDER | SNAP', usd: '54.78', tokens: '10,322.10', wallet: '0xF607...4E56', count: 1, holderSince: '22/03/2026', tx: '0x6666666666666666666666666666666666666666666666666666666666666666', chart: '0x7646c457a2c4d260f678f3126fa41e20bfdd1f95' },
+        { title: '\uD83D\uDD01 COMPRANDO NOVAMENTE | NIX', usd: '75.44', tokens: '11,880.90', wallet: '0x0A17...3F67', count: 2, holderSince: '20/03/2026', tx: '0x7777777777777777777777777777777777777777777777777777777777777777', chart: '0x7f01f344b1950a3c5ea3b9db7017f93ab0c8f88e' },
+        { title: '\uD83C\uDFE6 HOLDER ANTIGO | SNAP', usd: '140.07', tokens: '27,901.31', wallet: '0x1B28...2A78', count: 4, holderSince: '11/03/2026', tx: '0x8888888888888888888888888888888888888888888888888888888888888888', chart: '0x7646c457a2c4d260f678f3126fa41e20bfdd1f95' },
+        { title: '\uD83D\uDC0B WHALE ALERT | SNAP', usd: '690.33', tokens: '129,440.00', wallet: '0x2C39...1B89', count: 1, holderSince: '22/03/2026', tx: '0x9999999999999999999999999999999999999999999999999999999999999999', chart: '0x7646c457a2c4d260f678f3126fa41e20bfdd1f95' },
+        { title: '\uD83C\uDFE6 HOLDER ANTIGO | NIX', usd: '88.12', tokens: '13,706.54', wallet: '0x3D4A...0C90', count: 6, holderSince: '09/02/2026', tx: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', chart: '0x7f01f344b1950a3c5ea3b9db7017f93ab0c8f88e' }
+    ];
+}
+
+async function sendInternalTestBuyAlerts(groupId, options = {}) {
+    if (!activeSock) {
+        throw new Error('Socket principal indisponivel.');
+    }
+
+    const alerts = buildTestBuyAlertsPayloads();
+    const startIndex = Math.max(0, Number(options.startIndex || 0));
+    const count = Math.max(1, Number(options.count || alerts.length));
+    const delayMs = Math.max(500, Number(options.delayMs || 2200));
+    const selected = alerts.slice(startIndex, startIndex + count);
+    const imagePath = path.join(__dirname, 'assets', 'buy-alert-vellora.png');
+    const imageBuffer = fs.readFileSync(imagePath);
+
+    for (const [index, item] of selected.entries()) {
+        const caption = [
+            item.title,
+            '',
+            `\uD83D\uDCB0 USD: $${item.usd}`,
+            `\uD83E\uDE99 Tokens: ${item.tokens}`,
+            `\uD83D\uDC64 Wallet: ${item.wallet}`,
+            `\uD83D\uDCDA Compras on-chain dessa wallet: ${item.count}`,
+            `\uD83D\uDDD3\uFE0F Holder desde: ${item.holderSince}`,
+            '\uD83C\uDFF7\uFE0F Origem: DEX',
+            `\uD83D\uDD17 Tx: https://bscscan.com/tx/${item.tx}`,
+            `\uD83D\uDCCA Chart: https://dexscreener.com/bsc/${item.chart}`,
+            '\uD83C\uDF10 BSC'
+        ].join('\n');
+
+        const sent = await sendSafeMessage(activeSock, groupId, {
+            image: imageBuffer,
+            caption
+        });
+
+        if (!sent) {
+            throw new Error(`Falha ao enviar alerta de teste ${startIndex + index + 1}.`);
+        }
+
+        if (index < selected.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+
+    return {
+        ok: true,
+        sent: selected.length,
+        startIndex,
+        count: selected.length,
+        groupId
+    };
+}
+
+async function fetchImageBuffer(imageUrl) {
+    const safeUrl = String(imageUrl || '').trim();
+    if (!safeUrl) return null;
+
+    try {
+        const response = await fetch(safeUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 iMavyBot/1.0'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`Falha HTTP ${response.status}`);
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        return Buffer.from(arrayBuffer);
+    } catch (error) {
+        logger.warn('internal_news_preview_image_failed', {
+            imageUrl: safeUrl,
+            error: error?.message || String(error)
+        });
+        return null;
+    }
+}
+
+async function sendInternalNewsPreview(groupId, items = [], options = {}) {
+    if (!activeSock) {
+        throw new Error('Socket principal indisponivel.');
+    }
+
+    const safeItems = Array.isArray(items)
+        ? items
+            .map((item) => (item && typeof item === 'object' ? item : null))
+            .filter(Boolean)
+            .slice(0, 10)
+        : [];
+
+    if (!safeItems.length) {
+        throw new Error('Nenhuma noticia enviada.');
+    }
+
+    const delayMs = Math.max(1000, Number(options.delayMs || 3500));
+    let sentCount = 0;
+
+    for (const [index, item] of safeItems.entries()) {
+        const title = String(item.title || '').trim();
+        const summary = String(item.summary || item.description || '').trim();
+        const link = String(item.link || item.url || '').trim();
+        const source = String(item.source || 'CriptoJornal').trim();
+        const imageUrl = String(item.imageUrl || item.image || '').trim();
+
+        if (!title || !link) {
+            throw new Error(`Noticia ${index + 1} sem titulo ou link.`);
+        }
+
+        const caption = [
+            '\uD83D\uDCF0 *CriptoJornal*',
+            '',
+            `*${title}*`,
+            '',
+            summary,
+            '',
+            `\uD83D\uDD17 ${link}`,
+            `\uD83C\uDFF7\uFE0F Fonte: ${source}`
+        ].join('\n');
+
+        const imageBuffer = await fetchImageBuffer(imageUrl);
+        const payload = imageBuffer
+            ? { image: imageBuffer, caption }
+            : { text: caption };
+
+        const sent = await sendSafeMessage(activeSock, groupId, payload);
+        if (!sent) {
+            throw new Error(`Falha ao enviar noticia ${index + 1}.`);
+        }
+
+        sentCount += 1;
+        if (index < safeItems.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+
+    return {
+        ok: true,
+        sent: sentCount,
+        groupId
+    };
+}
+
+async function sendInternalCriptoNoPixPreview(groupId, symbol = 'SNAP') {
+    if (!activeSock) {
+        throw new Error('Socket principal indisponivel.');
+    }
+
+    const imagePath = path.join(__dirname, 'assets', 'buy-alert-vellora.png');
+    const imageBuffer = fs.readFileSync(imagePath);
+    const safeSymbol = String(symbol || 'SNAP').trim().toUpperCase();
+    const previewMap = {
+        SNAP: {
+            tokenName: 'Snappy',
+            symbol: 'SNAP',
+            brl: '1.000,00',
+            cashback: '122,6181',
+            ref: '122,6181',
+            burn: '27,2485',
+            tx: '0x79e2e7390000000000000000000000000000000000000000000000007ed9cc89',
+            chart: '0x7646c457a2c4d260f678f3126fa41e20bfdd1f95'
+        },
+        NIX: {
+            tokenName: 'NIX',
+            symbol: 'NIX',
+            brl: '9.575,261',
+            cashback: '',
+            ref: '',
+            burn: '',
+            tx: '0x618aaa42fd1805d37ae45dcf66355003fc8013e974ce0561f547812e2a28e9cc',
+            chart: '0x7f01f344b1950a3c5ea3b9db7017f93ab0c8f88e'
+        },
+        FSX: {
+            tokenName: 'ForeSight',
+            symbol: 'FSX',
+            brl: '33,39',
+            cashback: '4,6063',
+            ref: '4,6063',
+            burn: '1,0236',
+            tx: '0xb13a96cc70f174d998a3a3451424789ff24853ec4615f085e21b69df8df1a7c0',
+            chart: '0xcD4fA13B6f5Cad65534DC244668C5270EC7e961a'
+        }
+    };
+    const selected = previewMap[safeSymbol] || previewMap.SNAP;
+    const caption = safeSymbol === 'FSX'
+        ? [
+            '\u{1F525} FSX GLOBAL Presale - New Purchase!',
+            '',
+            `\u{1F4B8} Payment: $6.360 in USDT`,
+            `\u{1FA99} Token acquired: FSX`,
+            `\u{1F4E6} Amount received: 205.75885 FSX`,
+            `\u{1F3C1} Current Stage: Fase 7`,
+            `\u{1F464} Wallet used: 0xe241...AC8f`,
+            `\u{1F517} TX: https://bscscan.com/tx/${selected.tx}`
+        ].join('\n')
+        : [
+            '---------------------------',
+            'COMPRA NO PIX',
+            '---------------------------',
+            `\u{1F4B0} Valor: R$${selected.brl} via PIX!`,
+            `\u{1FA99} Token: ${selected.tokenName} (${selected.symbol})`,
+            '\u{1F3F7}\uFE0F Origem: Via Pix',
+            `\u{1F310} Tx: https://bscscan.com/tx/${selected.tx}`,
+            `\u{1F4CA} Dexscreener: https://dexscreener.com/bsc/${selected.chart}`,
+            '\u26D3\uFE0F Chain: BSC',
+            '',
+            '\u{1F48E} Compre voc\u00ea tamb\u00e9m!',
+            '\u{1F310} Site: criptonopix.app.br'
+        ].join('\n');
+
+    const sent = await sendSafeMessage(activeSock, groupId, {
+        image: imageBuffer,
+        caption
+    });
+
+    if (!sent) {
+        throw new Error('Falha ao enviar preview Cripto no Pix.');
+    }
+
+    return {
+        ok: true,
+        sent: 1,
+        groupId,
+        symbol: selected.symbol
+    };
+}
+
+async function sendCnpSitePurchaseAlert(sock, payload = {}) {
+    if (!sock) {
+        throw new Error('Socket indisponivel.');
+    }
+
+    const {
+        brlValue = 0,
+        symbol = 'NIX',
+        cashback = 0,
+        ref = 0,
+        burn = 0,
+        txHash = '',
+        walletAddress = ''
+    } = payload;
+
+    const brl = Number(brlValue) || 0;
+    if (brl < 1) {
+        throw new Error('Valor minimo e R$1,00.');
+    }
+
+    const safeSymbol = String(symbol || 'NIX').trim().toUpperCase();
+    const cashbackVal = Number(cashback) || 0;
+    const refVal = Number(ref) || 0;
+    const burnVal = Number(burn) || 0;
+    const tokenNames = { NIX: 'NIX', SNAP: 'Snappy', FSX: 'ForeSight' };
+    const tokenName = tokenNames[safeSymbol] || safeSymbol;
+
+    const parts = [];
+    parts.push('---------------------------');
+    parts.push('COMPRA NO PIX');
+    parts.push('---------------------------');
+    parts.push(`\u{1F4B0} Valor: R$${brl.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} via PIX!`);
+    parts.push(`\u{1FA99} Token: ${tokenName} (${safeSymbol})`);
+    if (cashbackVal > 0) parts.push(`\u{1F3F7}\uFE0F Cashback: ${cashbackVal.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${safeSymbol}`);
+    if (refVal > 0) parts.push(`\u{1F517} Ref: ${refVal.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${safeSymbol}`);
+    if (burnVal > 0) parts.push(`\u{1F525} Burn: ${burnVal.toLocaleString('pt-BR', { minimumFractionDigits: 4 })} ${safeSymbol}`);
+    if (txHash) parts.push(`\u{1F310} Tx: https://bscscan.com/tx/${txHash}`);
+    parts.push('\u{1F4CA} Chart: https://dexscreener.com/bsc/nix');
+    parts.push('\u26D3\uFE0F Chain: BSC');
+    parts.push('');
+    parts.push('\u{1F48E} Compre voce tambem!');
+    parts.push('\u{1F310} Site: criptonopix.app.br');
+    parts.push('\u{1F4F4} Grupo: @comprecriptonopixchat');
+
+    const messageText = parts.join('\n');
+
+    const config = buildConfig();
+    const groups = resolveBuyAlertGroups();
+
+    const delivery = { delivered: [], failed: [] };
+    for (const groupId of groups) {
+        const sent = await sendSafeMessage(sock, groupId, { text: messageText });
+        if (sent) {
+            delivery.delivered.push(groupId);
+        } else {
+            delivery.failed.push(groupId);
+        }
+    }
+
+    return {
+        ok: delivery.delivered.length > 0,
+        delivered: delivery.delivered.length,
+        failed: delivery.failed.length,
+        groups
+    };
+}
+
 const allowedGroupsState = {
     normalizedNames: new Set(),
     groupIds: new Set(),
@@ -253,6 +1067,100 @@ const allowedGroupsState = {
     loadingPromise: null,
     source: 'file'
 };
+const groupMetadataCache = new Map();
+const GROUP_METADATA_CACHE_TTL_MS = Math.max(15_000, parseInt(process.env.GROUP_METADATA_CACHE_TTL_MS || '180000', 10));
+
+async function getGroupMetadataCached(sock, chatId, options = {}) {
+    const force = options.force === true;
+    const key = String(chatId || '').trim();
+    if (!key) return null;
+
+    const now = Date.now();
+    const cached = groupMetadataCache.get(key);
+    if (!force && cached?.value && (now - cached.ts) < GROUP_METADATA_CACHE_TTL_MS) {
+        return cached.value;
+    }
+
+    if (!force && cached?.promise) {
+        return cached.promise;
+    }
+
+    const promise = sock.groupMetadata(key)
+        .then((metadata) => {
+            groupMetadataCache.set(key, {
+                value: metadata,
+                ts: Date.now(),
+                promise: null
+            });
+            return metadata;
+        })
+        .catch((error) => {
+            if (cached?.value) {
+                return cached.value;
+            }
+            throw error;
+        })
+        .finally(() => {
+            const latest = groupMetadataCache.get(key);
+            if (latest?.promise) {
+                groupMetadataCache.set(key, {
+                    value: latest.value || null,
+                    ts: latest.ts || now,
+                    promise: null
+                });
+            }
+        });
+
+    groupMetadataCache.set(key, {
+        value: cached?.value || null,
+        ts: cached?.ts || 0,
+        promise
+    });
+
+    return promise;
+}
+
+function resolveParticipantBySender(metadata, senderId) {
+    const senderDigits = getNumberFromJid(senderId);
+    return (metadata?.participants || []).find((participant) => {
+        const candidates = [participant?.id, participant?.jid, participant?.lid].filter(Boolean);
+        return candidates.some((candidate) => {
+            if (candidate === senderId) return true;
+            const candidateDigits = getNumberFromJid(candidate);
+            return Boolean(senderDigits && candidateDigits && senderDigits === candidateDigits);
+        });
+    }) || null;
+}
+
+async function isSenderGroupAdmin(sock, chatId, senderId, metadataHint = null) {
+    const firstMetadata = metadataHint || await getGroupMetadataCached(sock, chatId);
+    let participant = resolveParticipantBySender(firstMetadata, senderId);
+
+    if (!participant) {
+        const freshMetadata = await getGroupMetadataCached(sock, chatId, { force: true });
+        participant = resolveParticipantBySender(freshMetadata, senderId);
+    }
+
+    return participant?.admin === 'admin' || participant?.admin === 'superadmin';
+}
+
+function resolveSenderIdFromMessage(message) {
+    const keyParticipant = String(message?.key?.participant || '').trim();
+    if (keyParticipant) return keyParticipant;
+
+    const messageParticipant = String(message?.participant || '').trim();
+    if (messageParticipant) return messageParticipant;
+
+    const contextParticipant = String(
+        message?.message?.extendedTextMessage?.contextInfo?.participant
+        || message?.message?.imageMessage?.contextInfo?.participant
+        || message?.message?.videoMessage?.contextInfo?.participant
+        || ''
+    ).trim();
+    if (contextParticipant) return contextParticipant;
+
+    return String(message?.key?.remoteJid || '').trim();
+}
 
 async function sendFeatureDisabledNotice(sock, chatId, featureKey, text) {
     const key = `${String(chatId || '').trim()}:${String(featureKey || '').trim()}`;
@@ -269,6 +1177,7 @@ async function sendFeatureDisabledNotice(sock, chatId, featureKey, text) {
 function normalizeGroupName(name) {
     return String(name || '')
         .normalize('NFKC')
+        .replace(/[\u200D\uFE0E\uFE0F]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
@@ -384,6 +1293,18 @@ function extractProcessableIncomingText(message) {
     const content = unwrapIncomingMessageContent(message?.message);
     if (!content) return '';
 
+    const buttonReplyId = sanitizeIncomingText(content?.buttonsResponseMessage?.selectedButtonId);
+    if (buttonReplyId) return buttonReplyId;
+
+    const buttonReplyText = sanitizeIncomingText(content?.buttonsResponseMessage?.selectedDisplayText);
+    if (buttonReplyText) return buttonReplyText;
+
+    const listReplyId = sanitizeIncomingText(content?.listResponseMessage?.singleSelectReply?.selectedRowId);
+    if (listReplyId) return listReplyId;
+
+    const listReplyTitle = sanitizeIncomingText(content?.listResponseMessage?.title);
+    if (listReplyTitle) return listReplyTitle;
+
     const conversation = sanitizeIncomingText(content.conversation);
     if (conversation) return conversation;
 
@@ -407,11 +1328,181 @@ function isReminderPrivateCommandToken(commandToken) {
         || normalized === '/lembretes'
         || normalized === '/lembretefixo'
         || normalized === '/stoplembrete'
+        || normalized === '/stoplembretes'
         || normalized === '/stoplembretefixo'
+        || normalized === '/stoplembretesfixos'
         || normalized === '/testelembrete'
+        || normalized === '/testelembretes'
         || normalized === '/editarlembrete'
         || normalized === '/apagarlembrete'
         || normalized === '/agendar';
+}
+
+function parseNewsletterInviteCode(value) {
+    const safe = String(value || '').trim();
+    if (!safe) return '';
+    try {
+        const parsed = new URL(safe);
+        const parts = parsed.pathname.split('/').filter(Boolean);
+        if (parts.length >= 2 && parts[0].toLowerCase() === 'channel') {
+            return String(parts[1] || '').trim();
+        }
+        return safe;
+    } catch (_) {
+        return safe.replace(/^\/+|\/+$/g, '');
+    }
+}
+
+async function resolveConfiguredJobChannelTarget(sock) {
+    const explicitJid = String(process.env.IMAVY_JOB_CHANNEL_JID || process.env.IMAVY_JOB_CHANNEL_JIDS || '').split(',').map((item) => item.trim()).find(Boolean) || '';
+    if (explicitJid) {
+        return { id: explicitJid, name: explicitJid };
+    }
+
+    const inviteCodeRaw = String(process.env.IMAVY_JOB_CHANNEL_INVITE_CODE || process.env.IMAVY_JOB_CHANNEL_INVITE_CODES || '').split(',').map((item) => item.trim()).find(Boolean) || '';
+    const inviteCode = parseNewsletterInviteCode(inviteCodeRaw);
+    if (!inviteCode) {
+        throw new Error('Canal de vagas nao configurado em IMAVY_JOB_CHANNEL_INVITE_CODE/IMAVY_JOB_CHANNEL_JID.');
+    }
+
+    if (typeof sock?.newsletterMetadata !== 'function') {
+        throw new Error('Socket atual nao suporta resolucao de canal/newsletter.');
+    }
+
+    const metadata = await sock.newsletterMetadata('invite', inviteCode);
+    if (!metadata?.id) {
+        throw new Error('Nao foi possivel resolver o canal configurado.');
+    }
+
+    return {
+        id: String(metadata.id).trim(),
+        name: String(metadata.name || metadata.id).trim() || String(metadata.id).trim()
+    };
+}
+
+function isMarch2026Job(job, includeUndated = true) {
+    const publishedAt = Number(job?.publishedAt || 0);
+    if (!Number.isFinite(publishedAt) || publishedAt <= 0) {
+        return includeUndated;
+    }
+
+    const date = new Date(publishedAt);
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth();
+    return year === 2026 && month === 2;
+}
+
+async function startMarchJobsBackfill(options = {}) {
+    if (marchJobsBackfillStatus.running) {
+        throw new Error('Ja existe um backfill de vagas de marco em andamento.');
+    }
+
+    if (!activeSock) {
+        throw new Error('Socket principal indisponivel.');
+    }
+
+    const delayMs = Math.max(120000, Number(options.delayMs || 180000));
+    const includeUndated = options.includeUndated !== false;
+    const target = await resolveConfiguredJobChannelTarget(activeSock);
+    const jobs = await collectJobs();
+    const marchJobs = jobs
+        .filter((job) => isMarch2026Job(job, includeUndated))
+        .sort((a, b) => {
+            const aTs = Number(a?.publishedAt || 0);
+            const bTs = Number(b?.publishedAt || 0);
+            if (!aTs && !bTs) return String(a?.title || '').localeCompare(String(b?.title || ''));
+            if (!aTs) return -1;
+            if (!bTs) return 1;
+            return aTs - bTs;
+        });
+
+    marchJobsBackfillStatus = {
+        running: true,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        targetId: target.id,
+        targetName: target.name,
+        delayMs,
+        total: marchJobs.length,
+        sent: 0,
+        failed: 0,
+        includeUndated,
+        errors: []
+    };
+
+    logger.info('job_march_backfill_started', {
+        targetId: target.id,
+        targetName: target.name,
+        delayMs,
+        total: marchJobs.length,
+        includeUndated
+    });
+
+    (async () => {
+        try {
+            for (let index = 0; index < marchJobs.length; index += 1) {
+                const job = marchJobs[index];
+                const sent = await sendSafeMessage(activeSock, target.id, buildJobPayload(job, { targetType: target.targetType || 'newsletter' }));
+                if (!sent) {
+                    marchJobsBackfillStatus.failed += 1;
+                    marchJobsBackfillStatus.errors.push(`Falha ao enviar: ${job?.title || 'vaga sem titulo'}`);
+                } else {
+                    marchJobsBackfillStatus.sent += 1;
+                    logger.info('job_march_backfill_sent', {
+                        index: index + 1,
+                        total: marchJobs.length,
+                        title: job?.title || '',
+                        url: job?.url || '',
+                        targetId: target.id
+                    });
+                }
+
+                if (index < marchJobs.length - 1) {
+                    await new Promise((resolve) => setTimeout(resolve, delayMs));
+                }
+            }
+        } catch (error) {
+            marchJobsBackfillStatus.errors.push(error?.message || String(error));
+            logger.error('job_march_backfill_failed', {
+                error: error?.message || String(error)
+            });
+        } finally {
+            marchJobsBackfillStatus.running = false;
+            marchJobsBackfillStatus.finishedAt = new Date().toISOString();
+            logger.info('job_march_backfill_finished', marchJobsBackfillStatus);
+        }
+    })().catch((error) => {
+        marchJobsBackfillStatus.running = false;
+        marchJobsBackfillStatus.finishedAt = new Date().toISOString();
+        marchJobsBackfillStatus.errors.push(error?.message || String(error));
+        logger.error('job_march_backfill_failed', {
+            error: error?.message || String(error)
+        });
+    });
+
+    return {
+        ok: true,
+        started: true,
+        targetId: target.id,
+        targetName: target.name,
+        delayMs,
+        total: marchJobs.length,
+        includeUndated
+    };
+}
+
+async function resolveNewsletterName(sock, jid) {
+    const safeJid = String(jid || '').trim();
+    if (!safeJid.endsWith('@newsletter') || typeof sock?.newsletterMetadata !== 'function') {
+        return '';
+    }
+
+    try {
+        const metadata = await sock.newsletterMetadata('jid', safeJid);
+        return String(metadata?.name || '').trim();
+    } catch (_) {
+        return '';
+    }
 }
 
 async function maybeHandleWelcomeParticipants(sock, groupId, participants) {
@@ -437,7 +1528,7 @@ async function maybeHandleWelcomeParticipants(sock, groupId, participants) {
 
     let groupSubject = '';
     try {
-        const groupMetadata = await sock.groupMetadata(safeGroupId);
+        const groupMetadata = await getGroupMetadataCached(sock, safeGroupId);
         groupSubject = groupMetadata?.subject || '';
     } catch (e) {
         console.warn('Nao foi possivel obter nome do grupo para filtro de boas-vindas:', e.message);
@@ -459,34 +1550,38 @@ async function maybeHandleWelcomeParticipants(sock, groupId, participants) {
 
 function loadAllowedGroupNames() {
     const allowed = new Set();
+    const groupIds = new Set();
     try {
         const allowedPath = path.join(__dirname, 'allowed_groups.json');
         if (!fs.existsSync(allowedPath)) {
-            return allowed;
+            return { names: allowed, ids: groupIds };
         }
         const parsed = JSON.parse(fs.readFileSync(allowedPath, 'utf8'));
         if (Array.isArray(parsed)) {
-            parsed
-                .map((entry) => {
-                    if (typeof entry === 'string') return entry;
-                    if (entry && typeof entry === 'object' && typeof entry.name === 'string') return entry.name;
-                    return '';
-                })
-                .map(normalizeGroupName)
-                .filter(Boolean)
-                .forEach((name) => allowed.add(name));
+            parsed.forEach((entry) => {
+                let name = '';
+                if (typeof entry === 'string') {
+                    name = entry;
+                } else if (entry && typeof entry === 'object' && typeof entry.name === 'string') {
+                    name = entry.name;
+                    const groupId = String(entry.groupId || '').trim();
+                    if (groupId) groupIds.add(groupId);
+                }
+                const normalized = normalizeGroupName(name);
+                if (normalized) allowed.add(normalized);
+            });
         }
     } catch (e) {
         console.warn('Falha ao ler allowed_groups.json:', e.message);
     }
-    return allowed;
+    return { names: allowed, ids: groupIds };
 }
 
 function getAllowedGroupsSnapshot() {
     if (allowedGroupsState.loadedAt <= 0 || allowedGroupsState.normalizedNames.size === 0) {
         const local = loadAllowedGroupNames();
-        allowedGroupsState.normalizedNames = local;
-        allowedGroupsState.groupIds = new Set();
+        allowedGroupsState.normalizedNames = local.names;
+        allowedGroupsState.groupIds = local.ids;
         allowedGroupsState.loadedAt = Date.now();
         allowedGroupsState.source = 'file';
     }
@@ -510,9 +1605,9 @@ async function refreshAllowedGroupsCache(force = false) {
     }
 
     allowedGroupsState.loadingPromise = (async () => {
-        const localNames = loadAllowedGroupNames();
-        const normalizedNames = new Set(localNames);
-        const groupIds = new Set();
+        const local = loadAllowedGroupNames();
+        const normalizedNames = new Set(local.names);
+        const groupIds = new Set(local.ids);
         let source = 'file';
 
         const remote = await fetchAllowedGroupsFromSupabase();
@@ -657,6 +1752,89 @@ async function handleDashboardSyncEndpoint(req, res) {
     }
 }
 
+async function handlePrivateJobProfileSyncEndpoint(req, res) {
+    const syncSecret = getPrivateJobProfileSyncSecret();
+    if (!syncSecret) {
+        res.writeHead(503, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+            ok: false,
+            error: 'PRIVATE_JOB_PROFILE_SYNC_SECRET nao configurado no bot.'
+        }));
+        return;
+    }
+
+    if (!isPrivateJobProfileSyncAuthorized(req)) {
+        res.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+            ok: false,
+            error: 'Nao autorizado para sincronizacao de perfis de vagas.'
+        }));
+        return;
+    }
+
+    if (req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+            ok: true,
+            endpoint: 'private-job-profile-sync',
+            hasActiveSocket: Boolean(activeSock)
+        }));
+        return;
+    }
+
+    if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'Metodo nao permitido.' }));
+        return;
+    }
+
+    try {
+        const payload = await readJsonBody(req, 256 * 1024);
+        const rawProfiles = Array.isArray(payload?.profiles)
+            ? payload.profiles
+            : Array.isArray(payload?.events)
+                ? payload.events
+                : [payload?.profile || payload];
+        const profiles = rawProfiles.filter((item) => item && typeof item === 'object');
+        const notify = payload?.notify === true;
+        const results = [];
+
+        for (const profilePayload of profiles) {
+            const saved = await syncExternalPrivateJobProfile({
+                ...profilePayload,
+                source: profilePayload?.source || payload?.source || 'site-sync'
+            });
+            results.push({
+                jid: saved?.jid || '',
+                active: saved?.active !== false,
+                jobType: saved?.jobType || '',
+                city: saved?.city || '',
+                state: saved?.state || ''
+            });
+
+            if (notify && activeSock && saved?.jid) {
+                await sendSafeMessage(activeSock, saved.jid, {
+                    text: 'Seu cadastro de vagas foi sincronizado com sucesso. A partir de agora vou considerar seu perfil nas proximas vagas compativeis.'
+                });
+            }
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+            ok: true,
+            synced: results.length,
+            notify: notify && Boolean(activeSock),
+            results
+        }));
+    } catch (error) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+            ok: false,
+            error: error.message || 'Falha ao sincronizar perfil de vagas.'
+        }));
+    }
+}
+
 function resolveParticipantName(message, senderId) {
     const pushName = String(message?.pushName || '').trim();
     if (pushName) {
@@ -685,59 +1863,87 @@ function publishInteractionForDashboard(message, senderId, groupSubject, chatId,
     });
 }
 
-async function startBot() {
+function scheduleFullProcessRestart(reason = 'unknown', delayMs = 5000) {
+    if (pendingFullRestartTimer) {
+        return;
+    }
+    console.warn(`[WA] Reinicio completo agendado em ${Math.round(delayMs / 1000)}s. Motivo: ${reason}`);
+    pendingFullRestartTimer = setTimeout(() => {
+        process.exit(1);
+    }, Math.max(1000, delayMs));
+}
+
+async function startBot(options = {}) {
+    if (startBotInFlight) {
+        console.log('[WA] startBot ignorado: inicializacao ja em andamento.');
+        return;
+    }
+    startBotInFlight = true;
     console.log("===============================================");
     console.log('Iniciando iMavyAgent - Respostas Pre-Definidas');
     console.log("===============================================");
 
-    debugLog('[DEBUG] ensureCoreConfigFiles...');
-    await ensureCoreConfigFiles();
-    await refreshAllowedGroupsCache(true);
     try {
-        const backfill = await backfillRankingFromCurrentMonth({ maxRows: 50000 });
-        console.log('[RANKING] Backfill mensal:', backfill);
-    } catch (error) {
-        console.warn('[RANKING] Falha no backfill mensal:', error.message || String(error));
-    }
-
-    debugLog('[DEBUG] restoreSessionFromBackup...');
-    // Tentar restaurar sessao do backup se necessario
-    restoreSessionFromBackup();
-
-    debugLog('[DEBUG] useMultiFileAuthState...');
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-
-    debugLog('[DEBUG] fetchLatestBaileysVersion...');
-    const { version } = await fetchLatestBaileysVersion();
-
-    debugLog('[DEBUG] Criando socket...');
-
-    const sock = makeWASocket({
-        auth: state,
-        version,
-        printQRInTerminal: false,
-        syncFullHistory: false,
-        markOnlineOnConnect: true,
-        browser: ['iMavyAgent', 'Chrome', '10.0'],
-        defaultQueryTimeoutMs: undefined,
-        keepAliveIntervalMs: 30000,
-        connectTimeoutMs: 60000,
-        qrTimeout: 60000,
-        retryRequestDelayMs: 250,
-        maxMsgRetryCount: 5,
-        getMessage: async (key) => {
-            // Best practice: never fabricate an empty text message as fallback.
-            // Returning undefined avoids phantom blank payloads during retry flows.
-            return undefined;
+        if (options?.forceFullRestart) {
+            console.warn('[WA] Start solicitado com reinicio completo da sessao/socket.');
         }
-    });
 
-    // Anexar guarda de saida (Monkey Patch)
-    attachOutgoingGuard(sock);
+        debugLog('[DEBUG] ensureCoreConfigFiles...');
+        await ensureCoreConfigFiles();
+        await refreshAllowedGroupsCache(true);
+        try {
+            const backfill = await backfillRankingFromCurrentMonth({ maxRows: 50000 });
+            console.log('[RANKING] Backfill mensal:', backfill);
+        } catch (error) {
+            console.warn('[RANKING] Falha no backfill mensal:', error.message || String(error));
+        }
 
-    sock.ev.on('creds.update', saveCreds);
+        debugLog('[DEBUG] restoreSessionFromBackup...');
+        restoreSessionFromBackup();
 
-    sock.ev.on('connection.update', async (update) => {
+        const authPath = path.join(__dirname, 'auth_info');
+        const brokenSessions = String(process.env.WA_BROKEN_SESSION_IDS || '')
+            .split(',')
+            .map((value) => value.trim())
+            .filter(Boolean);
+        if (brokenSessions.length > 0) {
+            const removed = removeBrokenSessionFiles(authPath, brokenSessions);
+            console.log('[WA] Sessoes quebradas removidas:', removed);
+        }
+        const sessionHygiene = sanitizeAuthStateDir(authPath);
+        console.log('[WA] Higienizacao da sessao:', sessionHygiene);
+
+        debugLog('[DEBUG] useMultiFileAuthState...');
+        const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+
+        debugLog('[DEBUG] fetchLatestBaileysVersion...');
+        const { version } = await fetchLatestBaileysVersion();
+
+        debugLog('[DEBUG] Criando socket...');
+
+        const sock = makeWASocket({
+            auth: state,
+            version,
+            printQRInTerminal: false,
+            syncFullHistory: false,
+            markOnlineOnConnect: true,
+            browser: ['iMavyAgent', 'Chrome', '10.0'],
+            defaultQueryTimeoutMs: undefined,
+            keepAliveIntervalMs: 30000,
+            connectTimeoutMs: 60000,
+            qrTimeout: 60000,
+            retryRequestDelayMs: 250,
+            maxMsgRetryCount: 5,
+            getMessage: async (key) => {
+                return undefined;
+            }
+        });
+
+        attachOutgoingGuard(sock);
+
+        sock.ev.on('creds.update', saveCreds);
+
+        sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr && connection !== 'open') {
@@ -768,50 +1974,108 @@ async function startBot() {
         console.log('Status da conexao:', connection);
 
         if (connection === 'open') {
+            activeSock = sock;
             logger.info('Conectado ao WhatsApp');
+            if (pendingFullRestartTimer) {
+                clearTimeout(pendingFullRestartTimer);
+                pendingFullRestartTimer = null;
+            }
             resetReconnectAttempts();
             setConnected(true);
+            setHealthEscalationHandler(({ reason }) => {
+                scheduleFullProcessRestart(`health_monitor:${reason}`, 5000);
+            });
 
             // Iniciar servicos apenas uma vez apos conexao bem-sucedida
             try {
                 scheduleGroupMessages(sock);
                 scheduleBackups();
                 startScheduler(sock);
+                initGroupResponderSchedulers(sock);
+
                 // Iniciar sistema de lembretes apenas uma vez por ciclo de conexao
                 if (!global.__imavyLembretesInitialized) {
                     initLembretes(sock);
                     global.__imavyLembretesInitialized = true;
                 }
+
                 scheduleSupabaseBackup();
                 startAutoPromo(sock);
-                await startNewsForwarder(sock);
-                await startJobForwarder(sock);
-                await startPrivateJobAlerts(sock);
                 startHealthMonitor();
                 startSessionBackup();
+                startCryptoCacheWarmer();
+
                 if (BUY_ALERT_ENABLED) {
-                    await startBuyAlertNotifier(sock, {
-                        onBuyProcessed: async (buyEvent) => {
-                            await intelEngine.registerOnchainBuy(buyEvent);
-                        }
+                    await startBootService('BUY ALERT', async () => {
+                        await startBuyAlertNotifier(sock, {
+                            onBuyProcessed: async (buyEvent) => {
+                                await intelEngine.registerOnchainBuy(buyEvent);
+                            }
+                        });
                     });
                 } else {
                     logger.info('BUY ALERT desabilitado por configuracao (BUY_ALERT_ENABLED=false).');
                 }
-                console.log('Todos os servicos iniciados com sucesso');
+
+                await startBootService('news forwarder', async () => {
+                    await startNewsForwarder(sock);
+                });
+                await startBootService('job forwarder', async () => {
+                    await startJobForwarder(sock);
+                });
+                await startBootService('private job alerts', async () => {
+                    await startPrivateJobAlerts(sock);
+                });
+                await startBootService('job test publisher', async () => {
+                    await startJobTestPublisher(sock);
+                });
+
+                console.log('Boot principal concluido');
             } catch (e) {
-                console.error('Erro ao iniciar servicos:', e.message);
+                console.error('Erro ao iniciar servicos principais:', e.message);
             }
         }
 
         if (connection === 'close') {
+            const wasActiveSock = activeSock === sock;
+            if (activeSock === sock) {
+                activeSock = null;
+            }
+            try {
+                flushScheduledAutomationStateWithoutReminders('whatsapp_connection_closed');
+            } catch (error) {
+                logger.warn('scheduled_automation_flush_failed', {
+                    error: error?.message || String(error)
+                });
+            }
             const reason = lastDisconnect?.error?.output?.statusCode;
+            const reasonName = (() => {
+                const map = {
+                    [DisconnectReason.badSession]: 'Sessao invalida',
+                    [DisconnectReason.connectionClosed]: 'Conexao fechada',
+                    [DisconnectReason.connectionLost]: 'Conexao perdida',
+                    [DisconnectReason.connectionReplaced]: 'Conexao substituida',
+                    [DisconnectReason.loggedOut]: 'Logout manual',
+                    [DisconnectReason.restartRequired]: 'Reinicio necessario',
+                    [DisconnectReason.timedOut]: 'Timeout',
+                    [DisconnectReason.unavailableService]: 'Servico indisponivel'
+                };
+                return map[reason] || `Desconhecido (${reason ?? 'sem_codigo'})`;
+            })();
             setConnected(false);
+            logger.warn('whatsapp_connection_closed', {
+                reason,
+                reasonName,
+                hadActiveSock: wasActiveSock
+            });
             global.__imavyLembretesInitialized = false;
+            resetLembretesRuntime();
             stopNewsForwarder();
             stopJobForwarder();
             stopPrivateJobAlerts();
+            stopJobTestPublisher();
             await stopBuyAlertNotifier();
+            stopCryptoCacheWarmer();
 
             if (reason === DisconnectReason.loggedOut) {
                 console.log('Sessao desconectada manualmente. Deletando credenciais antigas...');
@@ -833,10 +2097,9 @@ async function startBot() {
                 handleConnectionUpdate(update, startBot);
             }
         }
-    });
+        });
 
-    // Evento de mensagens recebidas
-    sock.ev.on('messages.upsert', async (msgUpsert) => {
+        sock.ev.on('messages.upsert', async (msgUpsert) => {
         const upsertType = String(msgUpsert?.type || '').toLowerCase();
         if (upsertType && upsertType !== 'notify' && upsertType !== 'append') {
             return;
@@ -887,7 +2150,7 @@ async function startBot() {
             if (isGroup && messageTimestamp < botStartTime) continue;
 
             // ========== 2. SEPARACAO DE CONTEXTO ==========
-            const senderId = message.key.participant || message.key.remoteJid;
+            const senderId = resolveSenderIdFromMessage(message);
             const chatId = message.key.remoteJid;
 
             // Extrair texto apenas de conversation/extendedTextMessage.text
@@ -907,6 +2170,49 @@ async function startBot() {
                     textLen: messageText.length
                 });
 
+                if (chatId?.endsWith('@newsletter')) {
+                    const channelName = await resolveNewsletterName(sock, chatId);
+                    logger.info('newsletter_seen', {
+                        chatId,
+                        channelName,
+                        textLen: messageText.length
+                    });
+                    if (matchesConfiguredJobSourceChannel({ chatId, channelName })) {
+                        const parsedJob = registerIncomingJobChannelMessage({
+                            chatId,
+                            channelName,
+                            text: messageText,
+                            messageId,
+                            receivedAt: messageTimestamp
+                        });
+
+                        if (parsedJob) {
+                            const relayResult = await sendJobToConfiguredTargets(sock, parsedJob, {
+                                includeGroups: true,
+                                delayMs: 1200
+                            });
+                            logger.info('job_channel_source_relayed', {
+                                chatId,
+                                channelName,
+                                title: parsedJob.title,
+                                sent: relayResult.sent,
+                                failed: relayResult.failed,
+                                targets: relayResult.targets.map((item) => `${item.targetType}:${item.subject}`)
+                            });
+                        }
+                    }
+                    continue;
+                }
+
+                if (isGroup) {
+                    const relayedFsxOfficialPurchase = await maybeRelayFsxOfficialPurchase(sock, message, unwrappedContent, messageText, {
+                        upsertType
+                    });
+                    if (relayedFsxOfficialPurchase) {
+                        continue;
+                    }
+                }
+
                 // Intelligence mode: analisar todas as conversas sem bloquear o loop principal.
                 if (runtimeControlState.features.intelEnabled) {
                     intelEngine.processMessage(message, chatId, messageTimestamp, {
@@ -922,7 +2228,29 @@ async function startBot() {
                 // ========== 3. FLUXO PRIVADO (VENDAS) - DESABILITADO ==========
                 if (!isGroup) {
                     processingStage = 'private';
+
+                    // ========== 3.1. AUTO ATENDIMENTO (VENDAS) ==========
                     const privateText = String(messageText || '').trim().toLowerCase();
+                    const isValoresCommand = privateText.startsWith('/valores');
+                    const interestDetected = hasText && detectClientInterest(messageText);
+                    
+                    if (isValoresCommand || interestDetected) {
+                        if (shouldSendAttendance(senderId)) {
+                            logger.info('auto_attendance_triggered', { chatId, senderId, isCommand: isValoresCommand });
+                            await sendAttendanceMessage(sock, chatId);
+                            const clientNumber = getNumberFromJid(senderId) || senderId;
+                            await notifyAttendants(sock, senderId, clientNumber, getAdmins, messageText);
+                            continue; 
+                        }
+                    }
+                    if (shouldSkipDuplicatePrivateMessage(message, messageText)) {
+                        logger.info('private_message_duplicate_skipped', {
+                            chatId,
+                            senderId,
+                            messageId
+                        });
+                        continue;
+                    }
                     const privateCommandToken = privateText.split(/\s+/)[0] || '';
                     const isReminderPvCommand = isReminderPrivateCommandToken(privateCommandToken);
                     const hasPrivateWizard = hasPendingPrivateWizard(senderId);
@@ -944,6 +2272,24 @@ async function startBot() {
                         await leadEngine.handleEngagementCommand(sock, chatId, {
                             allowedGroupNames: Array.from(allowedGroups)
                         });
+                        continue;
+                    }
+
+                    if (messageText.toLowerCase().startsWith('/cap')) {
+                        if (!runtimeControlState.features.commandsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await handleCap(sock, message, messageText);
+                        continue;
+                    }
+
+                    if (messageText.toLowerCase().startsWith('/curso')) {
+                        if (!runtimeControlState.features.commandsEnabled) {
+                            await sendFeatureDisabledNotice(sock, chatId, 'commands', 'Comandos estao temporariamente desativados pelo dashboard.');
+                            continue;
+                        }
+                        await handleCurso(sock, message, messageText);
                         continue;
                     }
 
@@ -1022,7 +2368,7 @@ async function startBot() {
                 let groupDescription = '';
                 let groupMetadata = null;
                 try {
-                    groupMetadata = await sock.groupMetadata(chatId);
+                    groupMetadata = await getGroupMetadataCached(sock, chatId);
                     groupSubject = groupMetadata.subject || '';
                     groupDescription = String(groupMetadata.desc || '').trim();
                     debugLog(`[DEBUG] Nome do grupo obtido: "${groupSubject}"`);
@@ -1032,7 +2378,8 @@ async function startBot() {
 
                 const normalizedGroupSubject = normalizeGroupName(groupSubject);
                 const isAllowedByName = Boolean(groupSubject) && ALLOWED_GROUP_NAMES.has(normalizedGroupSubject);
-                const isAllowedById = ALLOWED_GROUP_IDS.has(chatId);
+                const isDefaultAllowedId = DEFAULT_INTEL_GROUPS.includes(chatId);
+                const isAllowedById = ALLOWED_GROUP_IDS.has(chatId) || isDefaultAllowedId;
                 if (!isAllowedByName && !isAllowedById) {
                     console.log(`Ignorado: Grupo "${groupSubject}" nao esta na lista permitida.`);
                     // DEBUG: Listar permitidos se falhar
@@ -1060,6 +2407,18 @@ async function startBot() {
                     continue;
                 }
 
+                if (isAllowedByName && !ALLOWED_GROUP_IDS.has(chatId) && !isDefaultAllowedId) {
+                    try {
+                        const bindResult = await bindAllowedGroupId(groupSubject, chatId);
+                        if (bindResult?.updated) {
+                            await refreshAllowedGroupsCache(true);
+                            console.log(`Grupo autorizado vinculado ao ID: "${groupSubject}" -> ${chatId}`);
+                        }
+                    } catch (error) {
+                        console.warn('Falha ao vincular groupId ao grupo autorizado:', error?.message || String(error));
+                    }
+                }
+
                 console.log('Grupo autorizado:', groupSubject);
                 if (isGroupBotPaused(chatId)) {
                     continue;
@@ -1068,7 +2427,7 @@ async function startBot() {
                 if (isRestrictedGroup) {
                     console.log(`Modo restrito ativo para o grupo: "${groupSubject}"`);
                 }
-                const groupPermissions = await getAllowedGroupPermissions(groupSubject);
+                const groupPermissions = await getAllowedGroupPermissions(groupSubject, chatId);
                 const canReadForLeads = Boolean(groupPermissions?.leadsRead);
                 const canReadForEngagement = Boolean(groupPermissions?.engagement);
 
@@ -1164,21 +2523,27 @@ async function startBot() {
                 }
 
                 if (runtimeControlState.features.moderationEnabled && groupPermissions.spam) {
+                    if (!senderId || senderId === chatId) {
+                        logger.warn('moderation_sender_unresolved', {
+                            chatId,
+                            messageId,
+                            senderId
+                        });
+                        continue;
+                    }
                     // 4.2. MODERACAO MINIMALISTA (2 regras: REPEAT + LINK)
                     // Verificar se e admin do bot ou do grupo
                     let isUserAdmin = false;
                     try {
                         const isBotAdmin = await isAuthorized(senderId);
-                        const metadataForAdmin = groupMetadata || await sock.groupMetadata(chatId);
-                        const participant = metadataForAdmin.participants.find(p => p.id === senderId);
-                        const isGroupAdmin = participant?.admin === 'admin' || participant?.admin === 'superadmin';
+                        const isGroupAdmin = await isSenderGroupAdmin(sock, chatId, senderId, groupMetadata);
                         isUserAdmin = isBotAdmin || isGroupAdmin;
                     } catch (e) {
                         console.error('Erro ao verificar admin:', e.message);
                     }
 
                     // Aplicar anti-spam
-                    const violation = checkViolation(messageText, chatId, senderId, isUserAdmin);
+                    const violation = await checkViolation(messageText, chatId, senderId, isUserAdmin);
 
                     if (violation.violated) {
                         console.log(`VIOLACAO: ${violation.rule} - User: ${senderId}`);
@@ -1186,7 +2551,10 @@ async function startBot() {
                         // Deletar mensagem
                         let deleteError = null;
                         try {
-                            await sendSafeMessage(sock, chatId, { delete: message.key });
+                            const deleted = await sendSafeMessage(sock, chatId, { delete: message.key });
+                            if (!deleted) {
+                                throw new Error('delete retornou vazio');
+                            }
                             console.log('Mensagem deletada');
                         } catch (e) {
                             deleteError = 'Nao consegui apagar a mensagem (sem permissao).';
@@ -1276,7 +2644,10 @@ async function startBot() {
     // Evento alternativo para capturar mudancas no grupo
     sock.ev.on('groups.update', async (updates) => {
         console.log('Atualizacao de grupos:', JSON.stringify(updates, null, 2));
-    });
+        });
+    } finally {
+        startBotInFlight = false;
+    }
 }
 
 startBot();
