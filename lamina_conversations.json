@@ -1,0 +1,18 @@
+{
+  "225919675449527@lid": {
+    "userId": "225919675449527@lid",
+    "firstSeenAt": "2026-04-02T04:35:20.987Z",
+    "lastSeenAt": "2026-04-02T04:35:20.987Z",
+    "totalInteractions": 1,
+    "contexts": {
+      "use_saved": 1
+    },
+    "samples": [
+      {
+        "at": "2026-04-02T04:35:20.987Z",
+        "context": "use_saved",
+        "text": "/usarlamina"
+      }
+    ]
+  }
+}

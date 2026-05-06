@@ -1,0 +1,16 @@
+{
+  "savedAt": "2026-04-13T18:10:54.797Z",
+  "reason": "periodic_flush",
+  "reminders": {
+    "intervalGroups": 0,
+    "dailyGroups": 0
+  },
+  "laminas": {
+    "total": 0,
+    "active": 0
+  },
+  "shill": {
+    "total": 0,
+    "active": 0
+  }
+}

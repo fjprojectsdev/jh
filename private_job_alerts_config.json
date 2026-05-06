@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "subscriptions": [
+    {
+      "jid": "246265120075930@lid",
+      "label": "246265120075930@lid",
+      "role": "jovem_aprendiz",
+      "city": "Porto Velho/RO",
+      "active": true
+    }
+  ]
+}

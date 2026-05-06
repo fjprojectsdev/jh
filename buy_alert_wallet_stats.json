@@ -1,0 +1,20 @@
+{
+  "updatedAt": "2026-04-02T04:36:12.794Z",
+  "wallets": {
+    "0x1a4f320be23d08c52321abcc5c2610d58b4ba814": {
+      "totalBuys": 1,
+      "firstSeenAt": "2026-04-02T04:36:12.282Z",
+      "lastSeenAt": "2026-04-02T04:36:12.282Z",
+      "symbols": {
+        "FSX": {
+          "buys": 1,
+          "totalUsd": 29.045134,
+          "totalBrl": 150.81395378160002,
+          "firstBuyAt": "2026-04-02T04:36:12.282Z",
+          "lastBuyAt": "2026-04-02T04:36:12.282Z",
+          "lastTxHash": "0x2e1a14ecc1beb4cc7f596fb72039c372d4dda65805ec8015c268514f40fe900b"
+        }
+      }
+    }
+  }
+}

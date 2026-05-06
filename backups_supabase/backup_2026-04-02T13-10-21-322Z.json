@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-04-02T13:10:21.322Z",
+  "data": {
+    "bannedWords": [],
+    "allowedGroups": [],
+    "admins": [],
+    "lembretes": [],
+    "scheduledMessages": [],
+    "adminLogs": []
+  }
+}

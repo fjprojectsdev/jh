@@ -1,0 +1,50 @@
+{
+  "updatedAt": "2026-04-02T04:35:20.991Z",
+  "addGroup": [],
+  "lamina": [
+    [
+      "225919675449527@lid",
+      {
+        "step": "useSavedChoose",
+        "mode": "useSaved",
+        "availableItems": [
+          {
+            "title": "Cripto Jornal Recuperada",
+            "textBody": "📰 CriptoJornal\n\n1. Banco do Brasil lança Pix no Exterior para pagamentos na Argentina\nO Banco do Brasil lançou o serviço Pix no Exterior em parceria com o Banco Patagonia, permitindo que brasileiros realizem pagamentos em lojas físicas na Argentina usando o Pix, com conversão automática de moeda.\nhttps://criptojornal.com.br/Noticia?slug=banco-do-brasil-enables-pix-payment-in-argentina-4uk8njqrh\n\n2. Strategy compra US$ 1,3 bilhão em bitcoin usando ações ordinárias\nA emissão contínua de ações ordinárias dilui o valor das participações dos acionistas existentes\nhttps://criptojornal.com.br/Noticia?slug=strategy-compra-us-13-bilho-em-bitcoin-usando-aes--74toivle2\n\n3. Bitcoin sobe 5% e recupera níveis de janeiro\nA bitcoin registou esta quarta-feira uma subida acentuada, de cerca de 5%, voltando assim aos valores que se registavam no mês de janeiro. Valor teve\nhttps://criptojornal.com.br/Noticia?slug=bitcoin-sobe-5-e-recupera-nveis-de-janeiro-e9taps6ea",
+            "imageSource": "https://images.unsplash.com/photo-1611162616305-c69b3fa7fbe0?w=800",
+            "imageBase64": "",
+            "groups": [
+              {
+                "id": "120363420942677345@g.us",
+                "subject": "TESTE IMAVY"
+              }
+            ],
+            "createdAt": "2026-03-30T00:00:00.000Z",
+            "updatedAt": "2026-03-30T00:00:00.000Z",
+            "createdBy": "system_recovery"
+          }
+        ]
+      }
+    ]
+  ],
+  "stopLamina": [],
+  "ranking": [],
+  "laminaShill": [],
+  "shill": [],
+  "news": [],
+  "partner": [],
+  "reminder": [
+    [
+      "5511999999999@s.whatsapp.net",
+      {
+        "type": "lembrete",
+        "step": "group",
+        "targetGroupId": "",
+        "targetGroupName": "",
+        "message": "",
+        "intervalo": null,
+        "encerramento": null
+      }
+    ]
+  ]
+}
