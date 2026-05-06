@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendSafeMessage } from './messageHandler.js';
+import { isGroupPartner } from './adminCommands.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const STRIKES_FILE = path.join(__dirname, '..', 'strikes.json');
@@ -43,6 +44,28 @@ function getFirstNonEmptyText(...values) {
     return '';
 }
 
+function deepFindTextByKeys(node, depth = 0, visited = new Set()) {
+    if (!node || typeof node !== 'object' || depth > 6) return '';
+    if (visited.has(node)) return '';
+    visited.add(node);
+
+    const preferredKeys = ['text', 'caption', 'contentText', 'description', 'title', 'footerText'];
+    for (const key of preferredKeys) {
+        const value = node?.[key];
+        if (typeof value === 'string' && value.trim()) {
+            return value;
+        }
+    }
+
+    for (const value of Object.values(node)) {
+        if (!value || typeof value !== 'object') continue;
+        const found = deepFindTextByKeys(value, depth + 1, visited);
+        if (found) return found;
+    }
+
+    return '';
+}
+
 function extractTextFromContent(content, depth = 0) {
     if (!content || typeof content !== 'object' || depth > 6) return '';
 
@@ -53,6 +76,16 @@ function extractTextFromContent(content, depth = 0) {
         content.videoMessage?.caption,
         content.documentMessage?.caption,
         content.documentWithCaptionMessage?.message?.documentMessage?.caption,
+        content.requestPaymentMessage?.noteMessage?.extendedTextMessage?.text,
+        content.requestPaymentMessage?.noteMessage?.conversation,
+        content.requestPaymentMessage?.noteMessage?.imageMessage?.caption,
+        content.requestPaymentMessage?.noteMessage?.videoMessage?.caption,
+        content.requestPaymentMessage?.noteMessage?.documentMessage?.caption,
+        content.invoiceMessage?.extendedTextMessage?.text,
+        content.invoiceMessage?.noteMessage?.extendedTextMessage?.text,
+        content.invoiceMessage?.noteMessage?.conversation,
+        content.orderMessage?.caption,
+        content.groupInviteMessage?.caption,
         content.buttonsResponseMessage?.selectedDisplayText,
         content.buttonsResponseMessage?.selectedButtonId,
         content.templateButtonReplyMessage?.selectedDisplayText,
@@ -69,7 +102,9 @@ function extractTextFromContent(content, depth = 0) {
         content.viewOnceMessageV2?.message,
         content.viewOnceMessageV2Extension?.message,
         content.editedMessage?.message,
-        content.documentWithCaptionMessage?.message
+        content.documentWithCaptionMessage?.message,
+        content.requestPaymentMessage?.noteMessage,
+        content.invoiceMessage?.noteMessage
     ];
 
     for (const nested of wrappedNodes) {
@@ -77,7 +112,7 @@ function extractTextFromContent(content, depth = 0) {
         if (nestedText) return nestedText;
     }
 
-    return '';
+    return deepFindTextByKeys(content, depth);
 }
 
 // Extrair texto de qualquer tipo comum de mensagem
@@ -314,7 +349,7 @@ export function resetStrikes(chatId, userId) {
 }
 
 // Verificar violação
-export function checkViolation(messageText, chatId, userId, isAdmin) {
+export async function checkViolation(messageText, chatId, userId, isAdmin) {
     // Admins sao isentos
     if (isAdmin) return { violated: false };
 
@@ -323,6 +358,9 @@ export function checkViolation(messageText, chatId, userId, isAdmin) {
 
     // REGRA 1: Anti-link
     if (hasLink(messageText)) {
+        if (await isGroupPartner(chatId, userId)) {
+            return { violated: false };
+        }
         console.log(`LINK bloqueado: ${userId}`);
         return { violated: true, rule: 'LINK' };
     }

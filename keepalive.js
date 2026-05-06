@@ -1,14 +1,17 @@
-// keepalive.js - Mantém o bot vivo e monitora a saúde da conexão
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { refreshAuthBackup, sanitizeAuthStateDir } from './functions/waSessionHygiene.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let lastHeartbeat = Date.now();
 let isConnected = false;
+let healthHeartbeatTimer = null;
+let healthCheckTimer = null;
+let sessionBackupTimer = null;
+let healthEscalationFn = null;
 
-// Atualizar heartbeat
 export function updateHeartbeat() {
     lastHeartbeat = Date.now();
     const statusFile = path.join(__dirname, '.bot_status');
@@ -19,96 +22,107 @@ export function updateHeartbeat() {
     }));
 }
 
-// Marcar como conectado
 export function setConnected(status) {
     isConnected = status;
     updateHeartbeat();
 }
 
-// Verificar se o bot está vivo
+export function setHealthEscalationHandler(handler) {
+    healthEscalationFn = typeof handler === 'function' ? handler : null;
+}
+
 export function checkHealth() {
     const now = Date.now();
     const timeSinceLastHeartbeat = now - lastHeartbeat;
-    const maxIdleTime = 5 * 60 * 1000; // 5 minutos
+    const maxIdleTime = 5 * 60 * 1000;
 
     if (timeSinceLastHeartbeat > maxIdleTime) {
-        console.log('⚠️ Bot parece estar travado. Último heartbeat:', new Date(lastHeartbeat).toISOString());
+        console.log('Bot parece estar travado. Ultimo heartbeat:', new Date(lastHeartbeat).toISOString());
         return false;
     }
 
     return true;
 }
 
-// Iniciar monitoramento
 export function startHealthMonitor() {
-    // Atualizar heartbeat a cada 30 segundos
-    setInterval(() => {
+    if (healthHeartbeatTimer || healthCheckTimer) {
+        return;
+    }
+
+    healthHeartbeatTimer = setInterval(() => {
         updateHeartbeat();
     }, 30000);
 
-    // Verificar saúde a cada minuto
-    setInterval(() => {
+    healthCheckTimer = setInterval(() => {
         const healthy = checkHealth();
         if (!healthy) {
-            console.log('❌ Bot não está respondendo. Considere reiniciar.');
+            console.log('Bot nao esta respondendo. Considere reiniciar.');
+            if (healthEscalationFn) {
+                try {
+                    healthEscalationFn({ reason: 'heartbeat_stalled', lastHeartbeat });
+                } catch (error) {
+                    console.error('Erro ao escalar problema de saude:', error.message);
+                }
+            }
         }
     }, 60000);
 
-    console.log('💓 Monitor de saúde iniciado');
+    console.log('Monitor de saude iniciado');
 }
 
-// Salvar estado da sessão periodicamente
 export function startSessionBackup() {
-    setInterval(() => {
+    if (sessionBackupTimer) {
+        return;
+    }
+
+    sessionBackupTimer = setInterval(() => {
         try {
             const authPath = path.join(__dirname, 'auth_info');
             const backupPath = path.join(__dirname, 'auth_backup');
 
             if (fs.existsSync(authPath)) {
-                // Criar backup da sessão
-                if (fs.existsSync(backupPath)) {
-                    fs.rmSync(backupPath, { recursive: true, force: true });
-                }
-
-                // Copiar recursivamente
-                fs.cpSync(authPath, backupPath, { recursive: true });
-                console.log('💾 Backup da sessão criado:', new Date().toISOString());
+                const backupResult = refreshAuthBackup(authPath, backupPath);
+                console.log('Backup da sessao criado:', {
+                    at: new Date().toISOString(),
+                    removedFiles: backupResult.removedFiles,
+                    remainingFiles: backupResult.remainingFiles
+                });
             }
-        } catch (e) {
-            console.error('Erro ao fazer backup da sessão:', e.message);
+        } catch (error) {
+            console.error('Erro ao fazer backup da sessao:', error.message);
         }
-    }, 30 * 60 * 1000); // A cada 30 minutos
+    }, 30 * 60 * 1000);
 
-    console.log('💾 Backup automático de sessão iniciado');
+    console.log('Backup automatico de sessao iniciado');
 }
 
-// Restaurar sessão do backup se necessário
 export function restoreSessionFromBackup() {
     try {
         const authPath = path.join(__dirname, 'auth_info');
         const backupPath = path.join(__dirname, 'auth_backup');
 
         if (!fs.existsSync(authPath) && fs.existsSync(backupPath)) {
-            console.log('🔄 Restaurando sessão do backup...');
+            console.log('Restaurando sessao do backup...');
             fs.cpSync(backupPath, authPath, { recursive: true });
-            console.log('✅ Sessão restaurada do backup');
+            const hygiene = sanitizeAuthStateDir(authPath);
+            console.log('Sessao restaurada do backup');
+            console.log('Sessao restaurada higienizada:', hygiene);
             return true;
         }
-    } catch (e) {
-        console.error('Erro ao restaurar sessão:', e.message);
+    } catch (error) {
+        console.error('Erro ao restaurar sessao:', error.message);
     }
     return false;
 }
 
-// Limpar backup da sessão (usado ao desconectar manualmente)
 export function clearSessionBackup() {
     try {
         const backupPath = path.join(__dirname, 'auth_backup');
         if (fs.existsSync(backupPath)) {
             fs.rmSync(backupPath, { recursive: true, force: true });
-            console.log('🗑️ Backup da sessão removido preventivamente');
+            console.log('Backup da sessao removido preventivamente');
         }
-    } catch (e) {
-        console.error('Erro ao limpar backup da sessão:', e.message);
+    } catch (error) {
+        console.error('Erro ao limpar backup da sessao:', error.message);
     }
 }

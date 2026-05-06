@@ -2,13 +2,24 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { isAuthorized, checkAuth } from './authManager.js';
+import { getNumberFromJid } from './utils.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ALLOWED_GROUPS_FILE = path.join(__dirname, '..', 'allowed_groups.json');
 const ALLOWED_USERS_FILE = path.join(__dirname, '..', 'allowed_users.json');
+const GROUP_PARTNERS_FILE = path.join(__dirname, '..', 'group_partners.json');
 
 // Re-export for compatibility
 export { isAuthorized, checkAuth };
+
+function normalizeGroupName(name) {
+    return String(name || '')
+        .normalize('NFKC')
+        .replace(/[\u200D\uFE0E\uFE0F]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
 
 function buildDefaultPermissions() {
     return {
@@ -46,7 +57,7 @@ function normalizeGroupEntry(entry) {
     if (typeof entry === 'string') {
         const name = entry.trim();
         if (!name) return null;
-        return { name, permissions: buildDefaultPermissions() };
+        return { name, groupId: '', permissions: buildDefaultPermissions() };
     }
 
     if (entry && typeof entry === 'object') {
@@ -54,6 +65,7 @@ function normalizeGroupEntry(entry) {
         if (!name) return null;
         return {
             name,
+            groupId: typeof entry.groupId === 'string' ? entry.groupId.trim() : '',
             permissions: normalizePermissions(entry.permissions || {})
         };
     }
@@ -98,6 +110,54 @@ async function writeAllowedUsers(list) {
     await fs.writeFile(ALLOWED_USERS_FILE, data, 'utf8');
 }
 
+function normalizePartnerId(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    if (/@(c\.us|s\.whatsapp\.net|lid)$/i.test(raw)) {
+        return raw;
+    }
+
+    const digits = getNumberFromJid(raw);
+    if (!digits) return '';
+    return `${digits}@c.us`;
+}
+
+function normalizePartnerIds(values) {
+    const list = Array.isArray(values) ? values : [values];
+    const unique = [];
+    const seen = new Set();
+
+    for (const value of list) {
+        const normalized = normalizePartnerId(value);
+        if (!normalized || seen.has(normalized)) continue;
+        seen.add(normalized);
+        unique.push(normalized);
+    }
+
+    return unique;
+}
+
+async function readGroupPartners() {
+    try {
+        const raw = await fs.readFile(GROUP_PARTNERS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+async function writeGroupPartners(data) {
+    await fs.writeFile(GROUP_PARTNERS_FILE, JSON.stringify(data, null, 2), 'utf8');
+}
+
+function matchPartnerId(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    return getNumberFromJid(a) === getNumberFromJid(b);
+}
+
 export async function addAllowedGroup(senderId, groupName, options = {}) {
     if (!(await isAuthorized(senderId))) {
         return { success: false, message: 'Acesso negado. Voce nao tem permissao para usar este comando.' };
@@ -128,7 +188,8 @@ export async function addAllowedGroup(senderId, groupName, options = {}) {
         }
 
         const permissions = normalizePermissions(options.permissions || {});
-        current.push({ name, permissions });
+        const groupId = typeof options.groupId === 'string' ? options.groupId.trim() : '';
+        current.push({ name, groupId, permissions });
         await writeAllowedGroups(current);
 
         return {
@@ -193,13 +254,131 @@ export async function removeAllowedGroup(senderId, groupName) {
     }
 }
 
-export async function getAllowedGroupPermissions(groupName) {
+export async function getAllowedGroupPermissions(groupName, groupId = '') {
     const safeName = String(groupName || '').trim();
-    if (!safeName) return buildDefaultPermissions();
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeName && !safeGroupId) return buildDefaultPermissions();
 
     const entries = await readAllowedGroupEntries();
-    const found = entries.find((entry) => entry.name === safeName);
+    const normalizedSafeName = normalizeGroupName(safeName);
+    const found = entries.find((entry) => {
+        if (safeGroupId && String(entry.groupId || '').trim() === safeGroupId) {
+            return true;
+        }
+        return normalizedSafeName && normalizeGroupName(entry.name) === normalizedSafeName;
+    });
     if (!found) return buildDefaultPermissions();
 
     return normalizePermissions(found.permissions || {});
 }
+
+export async function bindAllowedGroupId(groupName, groupId) {
+    const safeName = String(groupName || '').trim();
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeName || !safeGroupId) return { updated: false, reason: 'missing-data' };
+
+    const entries = await readAllowedGroupEntries();
+    const normalizedSafeName = normalizeGroupName(safeName);
+    let updated = false;
+
+    for (const entry of entries) {
+        if (normalizeGroupName(entry.name) !== normalizedSafeName) continue;
+        if (String(entry.groupId || '').trim() === safeGroupId) {
+            return { updated: false, reason: 'already-bound' };
+        }
+        entry.groupId = safeGroupId;
+        updated = true;
+        break;
+    }
+
+    if (!updated) {
+        return { updated: false, reason: 'group-not-found' };
+    }
+
+    await writeAllowedGroups(entries);
+    return { updated: true };
+}
+
+export async function addGroupPartner(currentUserId, groupId, partnerId) {
+    const safeGroupId = String(groupId || '').trim();
+    const safePartnerIds = normalizePartnerIds(partnerId);
+
+    if (!safeGroupId.endsWith('@g.us')) {
+        return { success: false, message: 'Grupo invalido. Informe um ID de grupo valido.' };
+    }
+
+    if (!safePartnerIds.length) {
+        return { success: false, message: 'Usuario invalido. Informe @usuario ou numero/ID valido.' };
+    }
+
+    try {
+        const data = await readGroupPartners();
+        const current = Array.isArray(data[safeGroupId]) ? data[safeGroupId] : [];
+        if (safePartnerIds.some((candidate) => current.some((item) => matchPartnerId(item, candidate)))) {
+            return { success: false, message: `⚠️ ${safePartnerIds[0]} ja esta na lista de parceiros deste grupo.` };
+        }
+
+        current.push(...safePartnerIds);
+        current.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        data[safeGroupId] = current;
+        await writeGroupPartners(data);
+        return { success: true, message: `✅ Parceiro adicionado: ${safePartnerIds[0]}` };
+    } catch (error) {
+        console.error('Erro ao adicionar parceiro:', error);
+        return { success: false, message: '❌ Falha ao salvar parceiro. Veja os logs.' };
+    }
+}
+
+export async function removeGroupPartner(currentUserId, groupId, partnerId) {
+    const safeGroupId = String(groupId || '').trim();
+    const safePartnerIds = normalizePartnerIds(partnerId);
+
+    if (!safeGroupId.endsWith('@g.us')) {
+        return { success: false, message: 'Grupo invalido. Informe um ID de grupo valido.' };
+    }
+
+    if (!safePartnerIds.length) {
+        return { success: false, message: 'Usuario invalido. Informe @usuario ou numero/ID valido.' };
+    }
+
+    try {
+        const data = await readGroupPartners();
+        const current = Array.isArray(data[safeGroupId]) ? data[safeGroupId] : [];
+        const filtered = current.filter((item) => !safePartnerIds.some((candidate) => matchPartnerId(item, candidate)));
+
+        if (filtered.length === current.length) {
+            return { success: false, message: `⚠️ ${safePartnerIds[0]} nao esta na lista de parceiros deste grupo.` };
+        }
+
+        if (filtered.length) {
+            data[safeGroupId] = filtered;
+        } else {
+            delete data[safeGroupId];
+        }
+
+        await writeGroupPartners(data);
+        return { success: true, message: `✅ Parceiro removido: ${safePartnerIds[0]}` };
+    } catch (error) {
+        console.error('Erro ao remover parceiro:', error);
+        return { success: false, message: '❌ Falha ao salvar alteracao. Veja os logs.' };
+    }
+}
+
+export async function listGroupPartners(groupId) {
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeGroupId.endsWith('@g.us')) return [];
+
+    const data = await readGroupPartners();
+    const current = Array.isArray(data[safeGroupId]) ? data[safeGroupId] : [];
+    return current.slice();
+}
+
+export async function isGroupPartner(groupId, userId) {
+    const safeGroupId = String(groupId || '').trim();
+    if (!safeGroupId.endsWith('@g.us') || !userId) return false;
+
+    const data = await readGroupPartners();
+    const current = Array.isArray(data[safeGroupId]) ? data[safeGroupId] : [];
+    return current.some((item) => matchPartnerId(item, userId));
+}
+

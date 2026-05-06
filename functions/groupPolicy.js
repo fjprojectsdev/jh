@@ -3,6 +3,7 @@ export const RESTRICTED_GROUP_NAME = 'SQUAD Web3 | @AlexCPO_';
 function normalizeGroupName(name) {
     return String(name || '')
         .normalize('NFKC')
+        .replace(/[\u200D\uFE0E\uFE0F]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();

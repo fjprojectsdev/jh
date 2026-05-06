@@ -87,6 +87,28 @@ export const supabase = (configured || !allowFallback)
     ? createClient(supabaseUrl, supabaseKey)
     : createFallbackSupabaseClient();
 
+const optionalStorageWarnings = new Set();
+
+function warnOptionalStorage(key, error) {
+    const message = error?.message || String(error || 'erro desconhecido');
+    const signature = `${key}:${message}`;
+    if (optionalStorageWarnings.has(signature)) return;
+    optionalStorageWarnings.add(signature);
+    console.warn(`[database] armazenamento opcional indisponivel para ${key}: ${message}`);
+}
+
+function mapPrivateJobProfileRow(row) {
+    if (!row) return null;
+    const profile = row.profile && typeof row.profile === 'object' ? row.profile : {};
+    return {
+        ...profile,
+        jid: row.jid || profile.jid || '',
+        active: row.active !== false && profile.active !== false,
+        createdAt: row.created_at || profile.createdAt || null,
+        updatedAt: row.updated_at || profile.updatedAt || null
+    };
+}
+
 // Strikes
 export async function getStrikes(userId) {
     const { data } = await supabase.from('strikes').select('*').eq('user_id', userId).single();
@@ -299,4 +321,140 @@ export async function getPromoMessages() {
 export async function addPromoMessage(message) {
     const { error } = await supabase.from('promo_messages').insert({ message, active: true });
     return !error;
+}
+
+// Private Job Profiles
+export async function getPrivateJobProfile(jid) {
+    try {
+        const { data, error } = await supabase.from('private_job_profiles').select('*').eq('jid', jid).single();
+        if (error) {
+            if (error.code === 'PGRST116') return null;
+            warnOptionalStorage('private_job_profiles.get', error);
+            return null;
+        }
+        return mapPrivateJobProfileRow(data);
+    } catch (error) {
+        warnOptionalStorage('private_job_profiles.get', error);
+        return null;
+    }
+}
+
+export async function getPrivateJobProfiles() {
+    try {
+        const { data, error } = await supabase.from('private_job_profiles').select('*').eq('active', true);
+        if (error) {
+            warnOptionalStorage('private_job_profiles.list', error);
+            return [];
+        }
+        return Array.isArray(data) ? data.map(mapPrivateJobProfileRow).filter(Boolean) : [];
+    } catch (error) {
+        warnOptionalStorage('private_job_profiles.list', error);
+        return [];
+    }
+}
+
+export async function upsertPrivateJobProfile(profile) {
+    try {
+        const now = new Date().toISOString();
+        const payload = {
+            jid: profile?.jid,
+            active: profile?.active !== false,
+            profile,
+            created_at: profile?.createdAt || now,
+            updated_at: now
+        };
+        const { error } = await supabase.from('private_job_profiles').upsert(payload, { onConflict: 'jid' });
+        if (error) {
+            warnOptionalStorage('private_job_profiles.upsert', error);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        warnOptionalStorage('private_job_profiles.upsert', error);
+        return false;
+    }
+}
+
+export async function getPrivateJobConversation(jid) {
+    try {
+        const { data, error } = await supabase.from('private_job_conversations').select('*').eq('jid', jid).single();
+        if (error) {
+            if (error.code === 'PGRST116') return null;
+            warnOptionalStorage('private_job_conversations.get', error);
+            return null;
+        }
+        const conversation = data?.conversation;
+        return conversation && typeof conversation === 'object'
+            ? { ...conversation, updatedAt: data.updated_at || conversation.updatedAt || null }
+            : null;
+    } catch (error) {
+        warnOptionalStorage('private_job_conversations.get', error);
+        return null;
+    }
+}
+
+export async function upsertPrivateJobConversation(jid, conversation) {
+    try {
+        const now = new Date().toISOString();
+        const { error } = await supabase.from('private_job_conversations').upsert({
+            jid,
+            conversation,
+            updated_at: now
+        }, { onConflict: 'jid' });
+        if (error) {
+            warnOptionalStorage('private_job_conversations.upsert', error);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        warnOptionalStorage('private_job_conversations.upsert', error);
+        return false;
+    }
+}
+
+export async function deletePrivateJobConversation(jid) {
+    try {
+        const { error } = await supabase.from('private_job_conversations').delete().eq('jid', jid);
+        if (error) {
+            warnOptionalStorage('private_job_conversations.delete', error);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        warnOptionalStorage('private_job_conversations.delete', error);
+        return false;
+    }
+}
+
+export async function getPrivateJobDeliveryState(jid) {
+    try {
+        const { data, error } = await supabase.from('private_job_delivery_state').select('*').eq('jid', jid).single();
+        if (error) {
+            if (error.code === 'PGRST116') return null;
+            warnOptionalStorage('private_job_delivery_state.get', error);
+            return null;
+        }
+        return data?.state && typeof data.state === 'object' ? data.state : null;
+    } catch (error) {
+        warnOptionalStorage('private_job_delivery_state.get', error);
+        return null;
+    }
+}
+
+export async function upsertPrivateJobDeliveryState(jid, state) {
+    try {
+        const { error } = await supabase.from('private_job_delivery_state').upsert({
+            jid,
+            state,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'jid' });
+        if (error) {
+            warnOptionalStorage('private_job_delivery_state.upsert', error);
+            return false;
+        }
+        return true;
+    } catch (error) {
+        warnOptionalStorage('private_job_delivery_state.upsert', error);
+        return false;
+    }
 }

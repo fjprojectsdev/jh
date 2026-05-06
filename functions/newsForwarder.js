@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fetch from 'node-fetch';
+import OpenAI from 'openai';
 
 import { sendSafeMessage } from './messageHandler.js';
 import { logger } from './logger.js';
@@ -13,12 +15,55 @@ const DEFAULT_FEED_URL = String(process.env.IMAVY_NEWS_FEED_URL || 'https://www.
 const DEFAULT_TARGET_GROUP = String(process.env.IMAVY_NEWS_TARGET_GROUP || 'DESENVOLVIMENTO IA').trim();
 const DEFAULT_INTERVAL_MINUTES = Math.max(2, Number.parseInt(process.env.IMAVY_NEWS_INTERVAL_MINUTES || '10', 10) || 10);
 const DEFAULT_BOOTSTRAP_SEND = Math.max(0, Number.parseInt(process.env.IMAVY_NEWS_BOOTSTRAP_SEND || '0', 10) || 0);
+const DEFAULT_SEND_DELAY_MS = Math.max(1000, Number.parseInt(process.env.IMAVY_NEWS_SEND_DELAY_MS || '12000', 10) || 12000);
 const MAX_SEEN_URLS = 500;
 const MAX_SENT_URLS = 500;
 const MAX_DESCRIPTION_LENGTH = 220;
+const NEWSLETTER_CACHE_TTL_MS = Math.max(5 * 60 * 1000, Number.parseInt(process.env.IMAVY_NEWSLETTER_CACHE_TTL_MS || String(60 * 60 * 1000), 10) || (60 * 60 * 1000));
+const NEWS_TRANSLATION_CACHE_TTL_MS = Math.max(30 * 60 * 1000, Number.parseInt(process.env.IMAVY_NEWS_TRANSLATION_CACHE_TTL_MS || String(24 * 60 * 60 * 1000), 10) || (24 * 60 * 60 * 1000));
+const NEWS_TRANSLATION_ENABLED = String(process.env.IMAVY_NEWS_TRANSLATE_TO_PTBR || 'true').trim().toLowerCase() !== 'false';
+const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
+const GROQ_API_KEY = String(process.env.GROQ_API_KEY || '').trim();
+const OPENROUTER_API_KEY = String(process.env.OPENROUTER_API_KEY || '').trim();
+const OPENAI_MODEL = String(process.env.OPENAI_MODEL || 'gpt-4o-mini').trim();
+const GROQ_MODEL = String(process.env.IMAVY_GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
+const OPENROUTER_MODEL = String(process.env.IMAVY_OPENROUTER_MODEL || 'google/gemini-2.0-flash-exp:free').trim();
+const AI_PROVIDER = String(process.env.IMAVY_AI_PROVIDER || 'openai,groq,openrouter')
+    .split(',')
+    .map((p) => p.trim().toLowerCase())
+    .filter(Boolean);
+const ENGLISH_NEWS_HOSTS = new Set([
+    'feeds.bbci.co.uk',
+    'www.bbc.com',
+    'bbc.com',
+    'www.aljazeera.com',
+    'aljazeera.com',
+    'rss.dw.com',
+    'dw.com',
+    'www.dw.com'
+]);
+const NEWS_PRESETS = Object.freeze({
+    monitor24h: Object.freeze({
+        key: 'monitor24h',
+        label: 'Monitor 24h Brasil + Mundo',
+        description: 'Noticias continuas do Brasil e do mundo com fontes estaveis em RSS.',
+        feedUrls: Object.freeze([
+            'https://agenciabrasil.ebc.com.br/rss/ultimasnoticias/feed.xml',
+            'https://g1.globo.com/rss/g1/',
+            'https://feeds.folha.uol.com.br/emcimadahora/rss091.xml',
+            'https://g1.globo.com/rss/g1/mundo/',
+            'https://feeds.bbci.co.uk/news/world/rss.xml',
+            'https://www.aljazeera.com/xml/rss/all.xml',
+            'https://rss.dw.com/rdf/rss-en-all'
+        ])
+    })
+});
 
 let pollTimer = null;
 let pollingInFlight = false;
+const newsletterTargetCache = new Map();
+const newsTranslationCache = new Map();
+const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 function normalizeGroupName(value) {
     return String(value || '')
@@ -66,6 +111,13 @@ function normalizeFeedUrl(rawUrl) {
     }
 }
 
+function normalizePresetKey(value) {
+    return String(value || '')
+        .normalize('NFKC')
+        .trim()
+        .toLowerCase();
+}
+
 function readTag(block, tagName) {
     const match = String(block || '').match(new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, 'i'));
     return match ? decodeXmlEntities(match[1]).trim() : '';
@@ -94,6 +146,167 @@ function cleanArticleUrl(rawUrl) {
     } catch (_) {
         return safeUrl;
     }
+}
+
+function extractHostname(rawUrl) {
+    try {
+        return new URL(String(rawUrl || '').trim()).hostname.toLowerCase();
+    } catch (_) {
+        return '';
+    }
+}
+
+function isLikelyEnglishNewsSource(article, subscription) {
+    const hosts = [
+        extractHostname(subscription?.feedUrl),
+        extractHostname(article?.url)
+    ].filter(Boolean);
+    return hosts.some((host) => ENGLISH_NEWS_HOSTS.has(host));
+}
+
+async function callGroqTranslation(messages) {
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+            model: GROQ_MODEL,
+            messages,
+            max_tokens: 500,
+            temperature: 0.2
+        })
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`Groq API error (${response.status}): ${errorData.error?.message || response.statusText}`);
+    }
+
+    return response.json();
+}
+
+async function callOpenRouterTranslation(messages) {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+            'HTTP-Referer': 'https://github.com/imavybot',
+            'X-Title': 'iMavyBot'
+        },
+        body: JSON.stringify({
+            model: OPENROUTER_MODEL,
+            messages,
+            max_tokens: 500,
+            temperature: 0.2
+        })
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`OpenRouter API error (${response.status}): ${errorData.error?.message || response.statusText}`);
+    }
+
+    return response.json();
+}
+
+function extractTranslationResult(rawText, fallback) {
+    const raw = String(rawText || '').trim();
+    if (!raw) return fallback;
+
+    try {
+        const parsed = JSON.parse(raw);
+        return {
+            title: String(parsed?.title || fallback.title || '').trim() || fallback.title,
+            description: String(parsed?.description || fallback.description || '').trim() || fallback.description
+        };
+    } catch (_) {
+        return fallback;
+    }
+}
+
+async function translateArticleToPtBr(article, subscription) {
+    if (!NEWS_TRANSLATION_ENABLED) return article;
+    if (!isLikelyEnglishNewsSource(article, subscription)) return article;
+
+    const cacheKey = `${article.url}|pt-br`;
+    const cached = newsTranslationCache.get(cacheKey);
+    if (cached && (Date.now() - cached.cachedAt) < NEWS_TRANSLATION_CACHE_TTL_MS) {
+        return {
+            ...article,
+            title: cached.value.title,
+            description: cached.value.description
+        };
+    }
+
+    const fallback = {
+        title: article.title,
+        description: article.description
+    };
+
+    const messages = [
+        {
+            role: 'system',
+            content: 'Traduza noticias para portugues do Brasil. Preserve nomes proprios, siglas, numeros e contexto jornalistico. Responda somente em JSON com as chaves "title" e "description".'
+        },
+        {
+            role: 'user',
+            content: JSON.stringify({
+                title: article.title,
+                description: article.description
+            })
+        }
+    ];
+
+    const providers = AI_PROVIDER.length ? AI_PROVIDER : ['openai', 'groq', 'openrouter'];
+    for (const provider of providers) {
+        try {
+            let responseText = '';
+            if (provider === 'openai' && openai) {
+                const data = await openai.chat.completions.create({
+                    model: OPENAI_MODEL,
+                    messages,
+                    max_tokens: 500,
+                    temperature: 0.2,
+                    response_format: { type: 'json_object' }
+                });
+                responseText = data?.choices?.[0]?.message?.content?.trim() || '';
+            } else if (provider === 'groq' && GROQ_API_KEY) {
+                const data = await callGroqTranslation(messages);
+                responseText = data?.choices?.[0]?.message?.content?.trim() || '';
+            } else if (provider === 'openrouter' && OPENROUTER_API_KEY) {
+                const data = await callOpenRouterTranslation(messages);
+                responseText = data?.choices?.[0]?.message?.content?.trim() || '';
+            } else {
+                continue;
+            }
+
+            const translated = extractTranslationResult(responseText, fallback);
+            newsTranslationCache.set(cacheKey, {
+                cachedAt: Date.now(),
+                value: translated
+            });
+            logger.info('news_forwarder_translated', {
+                provider,
+                url: article.url
+            });
+            return {
+                ...article,
+                title: translated.title,
+                description: translated.description
+            };
+        } catch (error) {
+            logger.warn('news_forwarder_translation_failed', {
+                provider,
+                url: article.url,
+                error: error?.message || String(error)
+            });
+        }
+    }
+
+    return article;
 }
 
 function parseFeedItems(xml) {
@@ -250,15 +463,16 @@ function buildNewsPayload(article) {
 
 async function sendArticles(sock, targetGroup, articles) {
     for (const article of articles) {
-        const sent = await sendSafeMessage(sock, targetGroup.id, buildNewsPayload(article));
+        const translatedArticle = await translateArticleToPtBr(article, targetGroup.subscription || null);
+        const sent = await sendSafeMessage(sock, targetGroup.id, buildNewsPayload(translatedArticle));
         if (sent) {
             logger.info('news_forwarder_sent', {
                 group: targetGroup.subject,
-                title: article.title,
-                url: article.url
+                title: translatedArticle.title,
+                url: translatedArticle.url
             });
         }
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, DEFAULT_SEND_DELAY_MS));
     }
 }
 
@@ -281,20 +495,84 @@ function mergeSentUrls(current = [], extraUrls = []) {
     ])).slice(-MAX_SENT_URLS);
 }
 
-function resolveSubscriptionTarget(groups, subscription) {
+async function resolveNewsletterTarget(sock, subscription) {
+    const explicitJid = String(
+        subscription?.newsletterJid
+        || subscription?.channelJid
+        || ''
+    ).trim();
+    const displayName = String(
+        subscription?.newsletterName
+        || subscription?.channelName
+        || subscription?.groupName
+        || 'Canal'
+    ).trim();
+
+    if (explicitJid) {
+        return { id: explicitJid, subject: displayName || explicitJid, targetType: 'newsletter', subscription };
+    }
+
+    const inviteCode = String(
+        subscription?.newsletterInviteCode
+        || subscription?.channelInviteCode
+        || ''
+    ).trim();
+
+    if (!inviteCode || typeof sock?.newsletterMetadata !== 'function') {
+        return null;
+    }
+
+    const cacheKey = inviteCode.toLowerCase();
+    const cached = newsletterTargetCache.get(cacheKey);
+    if (cached && (Date.now() - cached.cachedAt) < NEWSLETTER_CACHE_TTL_MS) {
+        return cached.value;
+    }
+
+    try {
+        const metadata = await sock.newsletterMetadata('invite', inviteCode);
+        if (!metadata?.id) {
+            return null;
+        }
+
+        const resolved = {
+            id: String(metadata.id).trim(),
+            subject: String(metadata.name || displayName || metadata.id).trim() || String(metadata.id).trim(),
+            targetType: 'newsletter',
+            subscription
+        };
+        newsletterTargetCache.set(cacheKey, {
+            cachedAt: Date.now(),
+            value: resolved
+        });
+        return resolved;
+    } catch (error) {
+        logger.warn('news_forwarder_newsletter_lookup_failed', {
+            inviteCode,
+            error: error?.message || String(error)
+        });
+        return null;
+    }
+}
+
+async function resolveSubscriptionTarget(sock, groups, subscription) {
     const byId = String(subscription?.groupId || '').trim();
     const byName = normalizeGroupName(subscription?.groupName);
+    const targetType = String(subscription?.targetType || '').trim().toLowerCase();
+
+    if (targetType === 'newsletter' || subscription?.newsletterJid || subscription?.channelJid || subscription?.newsletterInviteCode || subscription?.channelInviteCode) {
+        return resolveNewsletterTarget(sock, subscription);
+    }
 
     if (byId && groups[byId]) {
         const group = groups[byId];
-        return { id: byId, subject: String(group?.subject || byId).trim() || byId };
+        return { id: byId, subject: String(group?.subject || byId).trim() || byId, targetType: 'group', subscription };
     }
 
     if (!byName) return null;
 
     for (const [id, group] of Object.entries(groups || {})) {
         if (normalizeGroupName(group?.subject) === byName) {
-            return { id, subject: String(group?.subject || id).trim() || id };
+            return { id, subject: String(group?.subject || id).trim() || id, targetType: 'group', subscription };
         }
     }
 
@@ -302,12 +580,14 @@ function resolveSubscriptionTarget(groups, subscription) {
 }
 
 async function pollSubscription(sock, groups, subscription, state) {
-    const targetGroup = resolveSubscriptionTarget(groups, subscription);
+    const targetGroup = await resolveSubscriptionTarget(sock, groups, subscription);
     if (!targetGroup) {
         logger.warn('news_forwarder_group_not_found', {
             groupId: subscription?.groupId || '',
             groupName: subscription?.groupName || '',
-            feedUrl: subscription?.feedUrl || ''
+            feedUrl: subscription?.feedUrl || '',
+            targetType: subscription?.targetType || '',
+            newsletterInviteCode: subscription?.newsletterInviteCode || subscription?.channelInviteCode || ''
         });
         return;
     }
@@ -350,6 +630,7 @@ async function pollSubscription(sock, groups, subscription, state) {
         logger.info('news_forwarder_initialized', {
             targetGroup: targetGroup.subject,
             feedUrl,
+            targetType: targetGroup.targetType || 'group',
             bootstrapSent: bootstrapItems.length,
             trackedItems: items.length
         });
@@ -381,7 +662,14 @@ async function pollNews(sock) {
             return;
         }
 
-        const groups = await sock.groupFetchAllParticipating();
+        let groups = {};
+        try {
+            groups = await sock.groupFetchAllParticipating();
+        } catch (error) {
+            logger.warn('news_forwarder_group_fetch_failed', {
+                error: error?.message || String(error)
+            });
+        }
         const state = loadState();
 
         for (const subscription of subscriptions) {
@@ -409,6 +697,15 @@ async function pollNews(sock) {
 
 export function listNewsSubscriptions() {
     return loadConfig().subscriptions || [];
+}
+
+export function listNewsPresets() {
+    return Object.values(NEWS_PRESETS).map((preset) => ({
+        key: preset.key,
+        label: preset.label,
+        description: preset.description,
+        feedUrls: [...preset.feedUrls]
+    }));
 }
 
 export function upsertNewsSubscription({ groupId = '', groupName = '', feedUrl = '' } = {}) {
@@ -477,6 +774,31 @@ export function upsertMultipleNewsSubscriptions({ groupId = '', groupName = '', 
     };
 }
 
+export function upsertNewsPresetSubscriptions({ groupId = '', groupName = '', presetKey = '' } = {}) {
+    const preset = NEWS_PRESETS[normalizePresetKey(presetKey)];
+    if (!preset) {
+        return { ok: false, message: 'Preset de noticias invalido.' };
+    }
+
+    const result = upsertMultipleNewsSubscriptions({
+        groupId,
+        groupName,
+        feedUrls: preset.feedUrls
+    });
+
+    if (!result.ok) {
+        return result;
+    }
+
+    return {
+        ...result,
+        preset: {
+            key: preset.key,
+            label: preset.label
+        }
+    };
+}
+
 export function removeNewsSubscription(groupId, groupName = '') {
     const safeGroupId = String(groupId || '').trim();
     const safeGroupName = normalizeGroupName(groupName);
@@ -502,13 +824,61 @@ export function removeNewsSubscription(groupId, groupName = '') {
     };
 }
 
+export function removeMultipleNewsSubscriptions({ groupId = '', groupName = '', feedUrls = [] } = {}) {
+    const safeGroupId = String(groupId || '').trim();
+    const safeGroupName = normalizeGroupName(groupName);
+    const normalizedFeeds = new Set(
+        (Array.isArray(feedUrls) ? feedUrls : [])
+            .map((item) => normalizeFeedUrl(item))
+            .filter(Boolean)
+    );
+
+    if ((!safeGroupId && !safeGroupName) || normalizedFeeds.size === 0) {
+        return { ok: false, removed: 0 };
+    }
+
+    const config = loadConfig();
+    const before = config.subscriptions.length;
+    config.subscriptions = config.subscriptions.filter((item) => {
+        const itemGroupId = String(item.groupId || '').trim();
+        const itemGroupName = normalizeGroupName(item.groupName);
+        const itemFeed = normalizeFeedUrl(item.feedUrl);
+        const matchesById = safeGroupId && itemGroupId === safeGroupId;
+        const matchesByName = safeGroupName && itemGroupName === safeGroupName;
+        const matchesGroup = matchesById || matchesByName;
+        if (!matchesGroup) return true;
+        return !normalizedFeeds.has(itemFeed);
+    });
+    const removed = before - config.subscriptions.length;
+    saveConfig(config);
+
+    return {
+        ok: removed > 0,
+        removed
+    };
+}
+
+export function removeNewsPresetSubscriptions({ groupId = '', groupName = '', presetKey = '' } = {}) {
+    const preset = NEWS_PRESETS[normalizePresetKey(presetKey)];
+    if (!preset) {
+        return { ok: false, removed: 0 };
+    }
+
+    return removeMultipleNewsSubscriptions({
+        groupId,
+        groupName,
+        feedUrls: preset.feedUrls
+    });
+}
+
 export async function startNewsForwarder(sock) {
     if (pollTimer) {
         return;
     }
 
     logger.info('news_forwarder_started', {
-        intervalMinutes: DEFAULT_INTERVAL_MINUTES
+        intervalMinutes: DEFAULT_INTERVAL_MINUTES,
+        sendDelayMs: DEFAULT_SEND_DELAY_MS
     });
 
     await pollNews(sock);

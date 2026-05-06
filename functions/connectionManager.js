@@ -4,6 +4,9 @@ import { DisconnectReason } from "@whiskeysockets/baileys";
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAYS = [3000, 5000, 10000, 15000, 30000]; // Delays progressivos
+const UNSTABLE_WINDOW_MS = Number(process.env.WA_UNSTABLE_WINDOW_MS || 10 * 60 * 1000);
+const UNSTABLE_CLOSE_THRESHOLD = Number(process.env.WA_UNSTABLE_CLOSE_THRESHOLD || 4);
+const recentCloseEvents = [];
 
 export function getReconnectDelay() {
     const index = Math.min(reconnectAttempts, RECONNECT_DELAYS.length - 1);
@@ -17,6 +20,24 @@ export function incrementReconnectAttempts() {
 
 export function resetReconnectAttempts() {
     reconnectAttempts = 0;
+}
+
+export function registerConnectionClose(reason) {
+    const now = Date.now();
+    recentCloseEvents.push({ at: now, reason });
+    while (recentCloseEvents.length && (now - recentCloseEvents[0].at) > UNSTABLE_WINDOW_MS) {
+        recentCloseEvents.shift();
+    }
+    return recentCloseEvents.length;
+}
+
+export function clearConnectionInstability() {
+    recentCloseEvents.length = 0;
+}
+
+export function shouldForceFullReconnect(reason) {
+    if (reason === DisconnectReason.loggedOut) return false;
+    return recentCloseEvents.length >= UNSTABLE_CLOSE_THRESHOLD;
 }
 
 export function shouldReconnect(reason) {
@@ -50,18 +71,30 @@ export function handleConnectionUpdate(update, startBotCallback) {
     if (connection === 'open') {
         console.log('✅ Conectado com sucesso ao WhatsApp!');
         resetReconnectAttempts();
+        clearConnectionInstability();
         return { status: 'connected' };
     }
     
     if (connection === 'close') {
         const reason = lastDisconnect?.error?.output?.statusCode;
         const reasonName = getDisconnectReasonName(reason);
+        const closeCount = registerConnectionClose(reason);
         
         console.log(`❌ Conexão fechada: ${reasonName}`);
-        
+        console.log(`📉 Fechamentos recentes na janela: ${closeCount}/${UNSTABLE_CLOSE_THRESHOLD}`);
+
         if (reason === DisconnectReason.loggedOut) {
             console.log('⚠️ Logout detectado. Será necessário escanear QR code novamente.');
             return { status: 'logged_out', needsQR: true };
+        }
+
+        if (shouldForceFullReconnect(reason)) {
+            const delay = Math.max(getReconnectDelay(), 15000);
+            console.log(`♻️ Sessao instavel detectada. Reinicio completo em ${delay / 1000}s...`);
+            setTimeout(() => {
+                startBotCallback({ forceFullRestart: true, reason, closeCount });
+            }, delay);
+            return { status: 'force_full_restart', delay, closeCount };
         }
         
         if (shouldReconnect(reason)) {

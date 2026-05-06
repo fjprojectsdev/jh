@@ -1,3 +1,4 @@
+import { generateWAMessageFromContent, proto } from '@whiskeysockets/baileys';
 import { logger } from './logger.js';
 
 const INVISIBLE_CHAR_REGEX = /[\u200B\u200C\u200D\u2060\uFEFF]/g;
@@ -111,7 +112,7 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
             if (!content || !content.trim()) return null;
             const cleanText = sanitizeText(content);
             if (!cleanText) return null;
-            return await sock.sendMessage(chatId, { text: cleanText }, options);
+            return await sendMessageWithRetry(sock, chatId, { text: cleanText }, options);
         }
 
         if (!content || typeof content !== 'object') {
@@ -180,7 +181,7 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
             return null;
         }
 
-        return await sock.sendMessage(chatId, finalContent, options);
+        return await sendMessageWithRetry(sock, chatId, finalContent, options);
     } catch (error) {
         logger.error('sendSafeMessage: Erro ao enviar', { chatId, error: error.message });
         return null;
@@ -189,5 +190,128 @@ export async function sendSafeMessage(sock, chatId, content, options = {}) {
 
 export async function sendPlainText(sock, chatId, text) {
     return sendSafeMessage(sock, chatId, { text });
+}
+
+export async function sendInteractiveButtonsMessage(sock, chatId, payload = {}, options = {}) {
+    const fallbackText = sanitizeText(payload.fallbackText || payload.text || '');
+    try {
+        if (!sock || typeof sock.relayMessage !== 'function' || !sock?.user?.id) {
+            return fallbackText ? sendSafeMessage(sock, chatId, { text: fallbackText }, options) : null;
+        }
+
+        const text = sanitizeText(payload.text || '');
+        const footer = sanitizeText(payload.footer || '');
+        const buttons = Array.isArray(payload.buttons)
+            ? payload.buttons
+                .map((button) => ({
+                    buttonId: sanitizeText(button?.id || ''),
+                    buttonText: { displayText: sanitizeText(button?.text || '') },
+                    type: proto.Message.ButtonsMessage.Button.Type.RESPONSE
+                }))
+                .filter((button) => button.buttonId && button.buttonText.displayText)
+                .slice(0, 3)
+            : [];
+
+        if (!text || !buttons.length) {
+            return fallbackText ? sendSafeMessage(sock, chatId, { text: fallbackText || text }, options) : null;
+        }
+
+        const message = generateWAMessageFromContent(
+            chatId,
+            {
+                buttonsMessage: proto.Message.ButtonsMessage.fromObject({
+                    contentText: text,
+                    footerText: footer || undefined,
+                    headerType: proto.Message.ButtonsMessage.HeaderType.EMPTY,
+                    buttons
+                })
+            },
+            {
+                userJid: sock.user.id,
+                quoted: options.quoted,
+                ephemeralExpiration: options.ephemeralExpiration
+            }
+        );
+
+        await sock.relayMessage(chatId, message.message, { messageId: message.key.id });
+        return message;
+    } catch (error) {
+        logger.warn('sendInteractiveButtonsMessage: fallback para texto', { chatId, error: error?.message || String(error) });
+        return fallbackText ? sendSafeMessage(sock, chatId, { text: fallbackText }, options) : null;
+    }
+}
+
+export async function sendInteractiveListMessage(sock, chatId, payload = {}, options = {}) {
+    const fallbackText = sanitizeText(payload.fallbackText || payload.text || '');
+    try {
+        if (!sock || typeof sock.relayMessage !== 'function' || !sock?.user?.id) {
+            return fallbackText ? sendSafeMessage(sock, chatId, { text: fallbackText }, options) : null;
+        }
+
+        const title = sanitizeText(payload.title || '');
+        const description = sanitizeText(payload.text || '');
+        const buttonText = sanitizeText(payload.buttonText || 'Escolher');
+        const footer = sanitizeText(payload.footer || '');
+        const sections = Array.isArray(payload.sections)
+            ? payload.sections
+                .map((section) => ({
+                    title: sanitizeText(section?.title || ''),
+                    rows: Array.isArray(section?.rows)
+                        ? section.rows
+                            .map((row) => ({
+                                rowId: sanitizeText(row?.id || ''),
+                                title: sanitizeText(row?.title || ''),
+                                description: sanitizeText(row?.description || '')
+                            }))
+                            .filter((row) => row.rowId && row.title)
+                        : []
+                }))
+                .filter((section) => section.rows.length > 0)
+            : [];
+
+        if (!description || !sections.length) {
+            return fallbackText ? sendSafeMessage(sock, chatId, { text: fallbackText || description || title }, options) : null;
+        }
+
+        const message = generateWAMessageFromContent(
+            chatId,
+            {
+                listMessage: proto.Message.ListMessage.fromObject({
+                    title: title || undefined,
+                    description,
+                    buttonText,
+                    footerText: footer || undefined,
+                    listType: proto.Message.ListMessage.ListType.SINGLE_SELECT,
+                    sections
+                })
+            },
+            {
+                userJid: sock.user.id,
+                quoted: options.quoted,
+                ephemeralExpiration: options.ephemeralExpiration
+            }
+        );
+
+        await sock.relayMessage(chatId, message.message, { messageId: message.key.id });
+        return message;
+    } catch (error) {
+        logger.warn('sendInteractiveListMessage: fallback para texto', { chatId, error: error?.message || String(error) });
+        return fallbackText ? sendSafeMessage(sock, chatId, { text: fallbackText }, options) : null;
+    }
+}
+
+async function sendMessageWithRetry(sock, chatId, finalContent, options = {}) {
+    try {
+        return await sock.sendMessage(chatId, finalContent, options);
+    } catch (error) {
+        const message = String(error?.message || error || '');
+        if (!/connection closed|timed out|socket closed/i.test(message)) {
+            throw error;
+        }
+
+        logger.warn('sendSafeMessage: retry apos falha transiente', { chatId, error: message });
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return await sock.sendMessage(chatId, finalContent, options);
+    }
 }
 

@@ -1,6 +1,7 @@
 // IA para Moderação de Mensagens
 import OpenAI from 'openai';
 import Groq from 'groq-sdk';
+import { logger } from './logger.js';
 
 const groq = new Groq({ 
     apiKey: process.env.GROQ_API_KEY || 'your-groq-api-key-here'
@@ -12,6 +13,7 @@ const openrouter = new OpenAI({
 });
 
 export async function analyzeMessage(text) {
+    const startedAt = Date.now();
     try {
         const response = await groq.chat.completions.create({
             model: "llama-3.3-70b-versatile",
@@ -38,6 +40,11 @@ UNSAFE: [motivo] - se viola alguma regra`
         
         const result = response.choices[0].message.content.trim();
         const safe = result.startsWith('SAFE');
+        logger.debug('ai_moderation', {
+            ms: Date.now() - startedAt,
+            ok: true,
+            safe
+        });
         
         return {
             safe,
@@ -45,6 +52,10 @@ UNSAFE: [motivo] - se viola alguma regra`
             rawResponse: result
         };
     } catch (error) {
+        logger.warn('ai_moderation_failed', {
+            ms: Date.now() - startedAt,
+            error: error.message
+        });
         console.error('❌ Erro na análise de IA:', error.message);
         return { safe: true, reason: 'Erro na IA', error: error.message };
     }

@@ -16,7 +16,6 @@ if (typeof global.WebSocket === 'undefined') {
 }
 
 const logger = createLogger(config.logLevel);
-const BUY_ALERT_PROMO_SYMBOLS = new Set(['NIX', 'SNAP', 'SNAPPY']);
 let promoImageMissingWarned = false;
 
 function shortWallet(address) {
@@ -29,8 +28,8 @@ function shortWallet(address) {
 
 function formatUsd(value) {
     return value.toLocaleString('en-US', {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
+        minimumFractionDigits: 3,
+        maximumFractionDigits: 3
     });
 }
 
@@ -40,41 +39,185 @@ function formatTokenAmount(value) {
     }
 
     if (value >= 1_000_000) {
-        return value.toLocaleString('en-US', { maximumFractionDigits: 0 });
+        return value.toLocaleString('en-US', { maximumFractionDigits: 1 });
     }
 
     if (value >= 10_000) {
-        return value.toLocaleString('en-US', { maximumFractionDigits: 2 });
+        return value.toLocaleString('en-US', { maximumFractionDigits: 3 });
     }
 
     if (value >= 1) {
-        return value.toLocaleString('en-US', { maximumFractionDigits: 4 });
+        return value.toLocaleString('en-US', { maximumFractionDigits: 5 });
     }
 
-    return value.toLocaleString('en-US', { maximumFractionDigits: 8 });
+    return value.toLocaleString('en-US', { maximumFractionDigits: 9 });
+}
+
+function buildDexviewTokenUrl(tokenAddress, chain = 'bsc') {
+    const safeToken = String(tokenAddress || '').trim();
+    if (!/^0x[a-f0-9]{40}$/i.test(safeToken)) {
+        return null;
+    }
+    const safeChain = String(chain || 'bsc').trim().toLowerCase() || 'bsc';
+    return `https://www.dexview.com/${safeChain}/${safeToken}`;
+}
+
+function buildDexscreenerPairUrl(pairAddress, chain = 'bsc') {
+    const safePair = String(pairAddress || '').trim();
+    if (!/^0x[a-f0-9]{40}$/i.test(safePair)) {
+        return null;
+    }
+    const safeChain = String(chain || 'bsc').trim().toLowerCase() || 'bsc';
+    return `https://dexscreener.com/${safeChain}/${safePair}`;
 }
 
 function buildMessage(payload) {
-    return [
-        `🟢 NOVA COMPRA | ${payload.symbol}`,
+    const lines = [
+        `BUY ALERT | ${payload.symbol}`,
         '',
-        `💰 USD: $${formatUsd(payload.usdValue)}`,
-        `🪙 Tokens: ${formatTokenAmount(payload.tokenAmount)}`,
-        `👤 Wallet: ${shortWallet(payload.wallet)}`,
-        `🔗 Tx: https://bscscan.com/tx/${payload.txHash}`,
-        `📊 Chart: https://dexscreener.com/bsc/${payload.pair}`,
-        '🌐 BSC'
-    ].join('\n');
+        `USD: ${formatUsd(payload.usdValue)}`,
+        `Tokens: ${formatTokenAmount(payload.tokenAmount)}`,
+        `Wallet: ${shortWallet(payload.wallet)}`,
+        'Origem: Swap na BSC',
+        `Tx: https://bscscan.com/tx/${payload.txHash}`,
+        'BSC'
+    ];
+
+    const dexviewUrl = buildDexviewTokenUrl(payload.token);
+    const dexscreenerUrl = buildDexscreenerPairUrl(payload.pair);
+    if (dexviewUrl) {
+        lines.splice(lines.length - 1, 0, `Dexview: ${dexviewUrl}`);
+    }
+    if (dexscreenerUrl) {
+        lines.splice(lines.length - 1, 0, `Dexscreener: ${dexscreenerUrl}`);
+    }
+
+    return lines.join('\n');
 }
 
-function resolvePromoImageUrl() {
-    const raw = String(process.env.BUY_ALERT_PROMO_IMAGE || '').trim();
-    const candidates = raw
-        ? [raw]
-        : [
-            path.resolve(process.cwd(), 'assets', 'buy-alert-vellora.png'),
-            path.resolve(process.cwd(), '..', 'assets', 'buy-alert-vellora.png')
-        ];
+function normalizeTxHash(txHash) {
+    const safe = String(txHash || '').trim().toLowerCase();
+    return /^0x[a-f0-9]{64}$/.test(safe) ? safe : '';
+}
+
+function loadRuntimeState(filePath) {
+    const state = {
+        filePath,
+        lastBlockNumber: null,
+        sentTxHashes: {}
+    };
+
+    try {
+        if (!filePath || !fs.existsSync(filePath)) {
+            return state;
+        }
+
+        const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const lastBlockNumber = Number(parsed?.lastBlockNumber);
+        if (Number.isFinite(lastBlockNumber) && lastBlockNumber >= 0) {
+            state.lastBlockNumber = lastBlockNumber;
+        }
+        if (parsed?.sentTxHashes && typeof parsed.sentTxHashes === 'object') {
+            state.sentTxHashes = parsed.sentTxHashes;
+        }
+    } catch (error) {
+        logger.warn('Falha ao carregar estado persistido do BUY ALERT. Iniciando vazio.', {
+            filePath,
+            error: error.message
+        });
+    }
+
+    return state;
+}
+
+function saveRuntimeState(state) {
+    if (!state || !state.filePath) {
+        return;
+    }
+
+    fs.mkdirSync(path.dirname(state.filePath), { recursive: true });
+    fs.writeFileSync(state.filePath, JSON.stringify({
+        updatedAt: new Date().toISOString(),
+        lastBlockNumber: state.lastBlockNumber,
+        sentTxHashes: state.sentTxHashes || {}
+    }, null, 2), 'utf8');
+}
+
+function setRuntimeLastBlock(state, blockNumber) {
+    const safeBlock = Number(blockNumber);
+    if (!state || !Number.isFinite(safeBlock) || safeBlock < 0) {
+        return;
+    }
+
+    if (state.lastBlockNumber !== null && safeBlock < state.lastBlockNumber) {
+        return;
+    }
+
+    state.lastBlockNumber = safeBlock;
+    saveRuntimeState(state);
+}
+
+function hasSentTxHash(state, txHash) {
+    const key = normalizeTxHash(txHash);
+    return Boolean(key && state?.sentTxHashes && state.sentTxHashes[key]);
+}
+
+function markSentTxHash(state, txHash, meta = {}) {
+    const key = normalizeTxHash(txHash);
+    if (!state || !key) {
+        return;
+    }
+
+    if (!state.sentTxHashes || typeof state.sentTxHashes !== 'object') {
+        state.sentTxHashes = {};
+    }
+
+    state.sentTxHashes[key] = {
+        txHash: key,
+        sentAt: new Date().toISOString(),
+        ...meta
+    };
+    saveRuntimeState(state);
+}
+
+function buildTxTimingMeta(buyEvent) {
+    const timestampMs = Number(buyEvent?.blockTimestampMs || 0);
+    const nowMs = Date.now();
+    const ageMs = timestampMs > 0 ? nowMs - timestampMs : null;
+
+    return {
+        txHash: buyEvent?.txHash || null,
+        blockNumber: Number.isFinite(Number(buyEvent?.blockNumber)) ? Number(buyEvent.blockNumber) : null,
+        txTimestampUtc: timestampMs > 0 ? new Date(timestampMs).toISOString() : (buyEvent?.blockTimestampUtc || null),
+        serverNowUtc: new Date(nowMs).toISOString(),
+        ageMinutes: ageMs === null ? buyEvent?.ageMinutes ?? null : Number((ageMs / 60_000).toFixed(3)),
+        source: buyEvent?.source || null
+    };
+}
+
+function isTxOlderThanMax(timingMeta, maxTxAgeMs) {
+    if (!timingMeta?.txTimestampUtc) {
+        return false;
+    }
+    const timestampMs = Date.parse(timingMeta.txTimestampUtc);
+    return Number.isFinite(timestampMs) && Date.now() - timestampMs > maxTxAgeMs;
+}
+
+function logBuyDecision(message, timingMeta, meta = {}, level = 'info') {
+    const method = typeof logger[level] === 'function' ? level : 'info';
+    logger[method](message, {
+        ...(timingMeta || {}),
+        ...meta
+    });
+}
+
+function resolveMediaUrl(rawValue) {
+    const raw = String(rawValue || '').trim();
+    if (!raw) {
+        return null;
+    }
+
+    const candidates = [raw];
 
     for (const candidate of candidates) {
         if (/^https?:\/\//i.test(candidate)) {
@@ -90,20 +233,20 @@ function resolvePromoImageUrl() {
     return null;
 }
 
+function resolvePromoImageUrl() {
+    return resolveMediaUrl(process.env.BUY_ALERT_PROMO_IMAGE)
+        || resolveMediaUrl(path.resolve(process.cwd(), 'assets', 'buy-alert-vellora.png'))
+        || resolveMediaUrl(path.resolve(process.cwd(), '..', 'assets', 'buy-alert-vellora.png'));
+}
+
 function buildMessagePayload(payload) {
     const text = buildMessage(payload);
-    const symbol = String(payload.symbol || '').trim().toUpperCase();
-
-    if (!BUY_ALERT_PROMO_SYMBOLS.has(symbol)) {
-        return { text };
-    }
-
     const imageUrl = resolvePromoImageUrl();
+
     if (!imageUrl) {
         if (!promoImageMissingWarned) {
             promoImageMissingWarned = true;
             logger.warn('Imagem promocional BUY ALERT nao encontrada; fallback para texto.', {
-                symbol,
                 envVar: 'BUY_ALERT_PROMO_IMAGE'
             });
         }
@@ -119,9 +262,12 @@ function buildMessagePayload(payload) {
 async function run() {
     logger.info('Inicializando imavy-bsc-buy-notifier...', {
         tokens: config.tokens.map((t) => t.symbol),
-        groupName: config.whatsapp.groupName
+        groupName: config.whatsapp.groupName,
+        maxTxAgeMinutes: Number((config.filters.maxTxAgeMs / 60_000).toFixed(3)),
+        stateFile: config.stateFile
     });
 
+    const runtimeState = loadRuntimeState(config.stateFile);
     const httpProvider = new JsonRpcProvider(config.bsc.httpUrl);
 
     const detectors = config.tokens.map((tokenConfig) => new BuyDetector({
@@ -168,54 +314,96 @@ async function run() {
         heartbeatMs: config.bsc.heartbeatMs,
         pollIntervalMs: config.bsc.pollIntervalMs,
         pollBatchSize: config.bsc.pollBatchSize,
+        maxTxAgeMs: config.filters.maxTxAgeMs,
         wsBackoffStepsMs: config.bsc.wsBackoffStepsMs,
+        initialPollCursor: runtimeState.lastBlockNumber,
+        onPollCursorUpdated: async (blockNumber) => {
+            setRuntimeLastBlock(runtimeState, blockNumber);
+        },
         logger
     });
 
     listener.on('buy', async (buyEvent) => {
         try {
+            const timingMeta = buildTxTimingMeta(buyEvent);
+
+            if (!normalizeTxHash(buyEvent.txHash)) {
+                logBuyDecision('BUY IGNORADO: hash invalido', timingMeta, {
+                    symbol: buyEvent.symbol,
+                    reason: 'invalid-tx-hash'
+                }, 'warn');
+                return;
+            }
+
+            if (!timingMeta.txTimestampUtc) {
+                logBuyDecision('BUY IGNORADO: timestamp UTC da transacao indisponivel', timingMeta, {
+                    symbol: buyEvent.symbol,
+                    reason: 'missing-block-timestamp'
+                }, 'warn');
+                return;
+            }
+
+            if (isTxOlderThanMax(timingMeta, config.filters.maxTxAgeMs)) {
+                logBuyDecision('BUY IGNORADO: transacao antiga', timingMeta, {
+                    symbol: buyEvent.symbol,
+                    maxAgeMinutes: Number((config.filters.maxTxAgeMs / 60_000).toFixed(3)),
+                    reason: 'older-than-max-age'
+                });
+                return;
+            }
+
+            if (hasSentTxHash(runtimeState, buyEvent.txHash)) {
+                logBuyDecision('BUY IGNORADO: hash ja publicado anteriormente', timingMeta, {
+                    symbol: buyEvent.symbol,
+                    reason: 'already-published'
+                });
+                return;
+            }
+
             const dedupKey = `${buyEvent.txHash}:${buyEvent.logIndex}`;
             if (dedupFilter.isDuplicateAndMark(dedupKey)) {
-                logger.debug('Swap duplicado ignorado.', {
-                    key: dedupKey,
-                    symbol: buyEvent.symbol
+                logBuyDecision('BUY IGNORADO: duplicado em memoria', timingMeta, {
+                    symbol: buyEvent.symbol,
+                    dedupKey,
+                    reason: 'memory-duplicate'
                 });
                 return;
             }
 
             const bnbPrice = priceService.getPrice();
             if (!Number.isFinite(bnbPrice) || bnbPrice <= 0) {
-                logger.warn('Preco BNB indisponivel. Compra ignorada temporariamente.', {
+                logBuyDecision('BUY IGNORADO: preco BNB indisponivel', timingMeta, {
                     symbol: buyEvent.symbol,
-                    txHash: buyEvent.txHash
-                });
+                    reason: 'bnb-price-unavailable'
+                }, 'warn');
                 return;
             }
 
             const usdValue = buyEvent.bnbIn * bnbPrice;
             if (!Number.isFinite(usdValue) || usdValue <= config.filters.minUsdAlert) {
-                logger.debug('Compra abaixo do valor minimo. Ignorada.', {
+                logBuyDecision('BUY IGNORADO: abaixo do minimo USD', timingMeta, {
                     symbol: buyEvent.symbol,
-                    txHash: buyEvent.txHash,
-                    usdValue
+                    usdValue,
+                    minUsdAlert: config.filters.minUsdAlert,
+                    reason: 'below-min-usd'
                 });
                 return;
             }
 
             if (cooldownFilter.isInCooldown(buyEvent.symbol)) {
-                logger.debug('Compra em cooldown. Ignorada.', {
+                logBuyDecision('BUY IGNORADO: cooldown ativo', timingMeta, {
                     symbol: buyEvent.symbol,
-                    txHash: buyEvent.txHash
+                    reason: 'cooldown-active'
                 });
                 return;
             }
 
             const suspicious = await mevFilter.isSuspicious(buyEvent.txHash);
             if (suspicious) {
-                logger.warn('Compra suspeita de MEV/arbitragem ignorada.', {
+                logBuyDecision('BUY IGNORADO: filtro MEV/arbitragem', timingMeta, {
                     symbol: buyEvent.symbol,
-                    txHash: buyEvent.txHash
-                });
+                    reason: 'mev-filter'
+                }, 'warn');
                 return;
             }
 
@@ -240,16 +428,23 @@ async function run() {
                 tokenAmount: buyEvent.tokenOut,
                 wallet,
                 txHash: buyEvent.txHash,
+                token: buyEvent.token,
                 pair: buyEvent.pair
             });
 
             await whatsappClient.sendMessageWithRetry(messagePayload);
-
-            logger.info('Alerta BUY enviado com sucesso.', {
+            markSentTxHash(runtimeState, buyEvent.txHash, {
+                stream: 'swap-listener',
                 symbol: buyEvent.symbol,
-                txHash: buyEvent.txHash,
+                blockNumber: Number(buyEvent.blockNumber),
+                txTimestampUtc: timingMeta.txTimestampUtc
+            });
+
+            logBuyDecision('BUY PUBLICADO: Swap na BSC', timingMeta, {
+                symbol: buyEvent.symbol,
                 usdValue,
-                source: buyEvent.source
+                source: buyEvent.source,
+                reason: 'published'
             });
         } catch (error) {
             logger.error('Erro ao processar evento BUY.', {
@@ -284,6 +479,9 @@ async function run() {
         } catch (_) {}
         try {
             priceService.stop();
+        } catch (_) {}
+        try {
+            saveRuntimeState(runtimeState);
         } catch (_) {}
         process.exit(0);
     }

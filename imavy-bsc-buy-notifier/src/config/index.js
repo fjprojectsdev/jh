@@ -1,9 +1,10 @@
 const path = require('path');
 const dotenv = require('dotenv');
-const { TOKENS, WBNB } = require('./tokens');
-const HARD_MIN_USD_ALERT = 200;
+const HARD_MIN_USD_ALERT = 50;
 
 dotenv.config();
+
+const { TOKENS, WBNB } = require('./tokens');
 
 function env(name, fallback = '') {
     const value = process.env[name];
@@ -52,6 +53,7 @@ const config = {
     appName: 'imavy-bsc-buy-notifier',
     nodeEnv: env('NODE_ENV', 'production'),
     logLevel: env('LOG_LEVEL', 'info'),
+    stateFile: path.resolve(process.cwd(), env('BUY_ALERT_STATE_FILE', './buy_alert_notifier_state.json')),
 
     bsc: {
         wsUrl: assertRequired('BSC_WS_URL', env('BSC_WS_URL')),
@@ -66,6 +68,7 @@ const config = {
         minUsdAlert: Math.max(HARD_MIN_USD_ALERT, envNumber('MIN_USD_ALERT', HARD_MIN_USD_ALERT)),
         tokenCooldownMs: envNumber('TOKEN_COOLDOWN_MS', 8_000),
         dedupTtlMs: envNumber('DEDUP_TTL_MS', 24 * 60 * 60 * 1_000),
+        maxTxAgeMs: Math.max(1_000, envNumber('BUY_ALERT_MAX_TX_AGE_MINUTES', 5) * 60_000),
         enableMevFilter: envBoolean('ENABLE_MEV_FILTER', true),
         mevSwapLimit: envNumber('MEV_SWAP_LIMIT', 3)
     },

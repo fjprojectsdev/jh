@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 import cron from 'node-cron';
 
-import { sendSafeMessage } from './messageHandler.js';
+import { sendSafeMessage, sanitizeText } from './messageHandler.js';
 import { analyzeJobForPublishing } from './jobAnalyzer.js';
 import { collectJobChannelJobs } from './jobChannelSource.js';
 import { logger } from './logger.js';
@@ -31,6 +31,12 @@ const JOB_CHANNEL_INVITE_CODES = Array.from(new Set(
     String(process.env.IMAVY_JOB_CHANNEL_INVITE_CODES || process.env.IMAVY_JOB_CHANNEL_INVITE_CODE || '')
         .split(',')
         .map((item) => normalizeNewsletterInviteCode(item))
+        .filter(Boolean)
+));
+const JOB_PREVIEW_TARGETS = Array.from(new Set(
+    String(process.env.IMAVY_JOB_PREVIEW_TARGETS || process.env.IMAVY_PRIVATE_JOB_TARGETS || '')
+        .split(',')
+        .map((item) => normalizeExternalJid(item))
         .filter(Boolean)
 ));
 const EMPREGOS_PVH_API_URL = String(process.env.IMAVY_EMPREGOSPVH_API_URL || 'https://api.empregospvh.com.br').trim().replace(/\/+$/, '');
@@ -468,7 +474,12 @@ const newsletterTargetCache = new Map();
 
 function getDefaultConfig() {
     return {
-        enabled: true
+        enabled: true,
+        preview: {
+            enabled: false,
+            previewOnly: false,
+            targets: [...JOB_PREVIEW_TARGETS]
+        }
     };
 }
 
@@ -481,7 +492,16 @@ function loadConfig() {
         }
         const parsed = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
         return {
-            enabled: parsed?.enabled !== false
+            enabled: parsed?.enabled !== false,
+            preview: {
+                enabled: parsed?.preview?.enabled === true,
+                previewOnly: parsed?.preview?.previewOnly === true,
+                targets: Array.from(new Set(
+                    (Array.isArray(parsed?.preview?.targets) ? parsed.preview.targets : JOB_PREVIEW_TARGETS)
+                        .map((item) => normalizeExternalJid(item))
+                        .filter(Boolean)
+                ))
+            }
         };
     } catch (_) {
         return getDefaultConfig();
@@ -491,15 +511,36 @@ function loadConfig() {
 function saveConfig(config) {
     fs.writeFileSync(CONFIG_FILE, JSON.stringify({
         updatedAt: new Date().toISOString(),
-        enabled: config?.enabled !== false
+        enabled: config?.enabled !== false,
+        preview: {
+            enabled: config?.preview?.enabled === true,
+            previewOnly: config?.preview?.previewOnly === true,
+            targets: Array.from(new Set(
+                (Array.isArray(config?.preview?.targets) ? config.preview.targets : [])
+                    .map((item) => normalizeExternalJid(item))
+                    .filter(Boolean)
+            ))
+        }
     }, null, 2), 'utf8');
 }
 
 function normalizeSpace(value) {
-    return String(value || '')
+    return sanitizeText(String(value || ''))
         .normalize('NFKC')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function normalizeExternalJid(value) {
+    const safe = String(value || '').trim();
+    if (!safe) return '';
+    if (/@(c\.us|s\.whatsapp\.net|lid)$/i.test(safe)) {
+        return safe;
+    }
+
+    const digits = safe.replace(/\D+/g, '');
+    if (!digits) return '';
+    return `${digits}@c.us`;
 }
 
 function normalizeGroupName(value) {
@@ -1050,6 +1091,91 @@ function buildRequirementBullets(value) {
 
     if (parts.length === 0) return '';
     return parts.map((item) => `\u2022 ${item}`).join('\n');
+}
+
+function extractRequirementItems(value) {
+    const text = normalizeSpace(String(value || ''));
+    if (!text) return [];
+
+    const normalized = text
+        .replace(/\s*[|;]\s*/g, ', ')
+        .replace(/\s+-\s+/g, ', ')
+        .replace(/\s*[•·]\s*/g, ', ')
+        .replace(/\n+/g, ', ');
+
+    return Array.from(new Set(
+        normalized
+            .split(',')
+            .map((item) => cleanLine(item, 120))
+            .filter(Boolean)
+            .filter((item) => item.length >= 3)
+    )).slice(0, 3);
+}
+
+function toUpperLocationLabel(value) {
+    const safe = formatLocation(value || 'Local não informado');
+    return safe.toUpperCase();
+}
+
+function formatSalaryLabel(value) {
+    const safe = cleanLine(value, 120);
+    return safe || 'Salário não informado';
+}
+
+function formatCompanyLabel(value) {
+    const safe = cleanLine(value, 80);
+    return safe || 'Empresa não informada';
+}
+
+function formatRequirementsSection(job) {
+    const items = extractRequirementItems(job.requirements);
+    if (!items.length) {
+        return ['- Requisitos não informados'];
+    }
+    return items.map((item) => `- ${item}`);
+}
+
+function buildJobActivities(job) {
+    const base = cleanLine(job.shortDescription || job.summary, 240);
+    return base || 'Detalhes da vaga não informados.';
+}
+
+function buildJobFooterLines(targetType) {
+    const siteUrl = 'http://empregospvh.com.br';
+    const channelUrl = 'https://whatsapp.com/channel/0029VbCuxQ8BKfi1ZJaHhw0R';
+
+    if (targetType === 'newsletter') {
+        return [
+            '',
+            '🌐 Mais vagas: empregospvh.com.br'
+        ];
+    }
+
+    if (targetType === 'group') {
+        return [
+            '',
+            '📲 Compartilhe com alguém que precisa!',
+            '',
+            `🌐 Mais vagas: ${siteUrl}`,
+            '',
+            '📢 Canal de vagas:',
+            channelUrl
+        ];
+    }
+
+    if (targetType === 'preview') {
+        return [
+            '',
+            '🧪 Prévia privada para validação antes do envio geral.',
+            '',
+            '🌐 Mais vagas: empregospvh.com.br'
+        ];
+    }
+
+    return [
+        '',
+        '🌐 Mais vagas: empregospvh.com.br'
+    ];
 }
 
 function stripEmoji(value) {
@@ -1666,8 +1792,56 @@ async function resolvePublishTargets(sock, groups, options = {}) {
     return { resolved: targets, missing };
 }
 
+async function sendJobPreviewTargets(sock, job, previewTargets = [], options = {}) {
+    const targets = Array.from(new Set(
+        (Array.isArray(previewTargets) ? previewTargets : [])
+            .map((item) => normalizeExternalJid(item))
+            .filter(Boolean)
+    ));
+    const delayMs = Math.max(500, Number(options.delayMs || 1200));
+    let sent = 0;
+    let failed = 0;
+
+    for (let index = 0; index < targets.length; index += 1) {
+        const jid = targets[index];
+        const delivered = await sendSafeMessage(sock, jid, buildJobPayload(job, {
+            targetType: 'preview'
+        }));
+
+        if (delivered) {
+            sent += 1;
+        } else {
+            failed += 1;
+        }
+        if (index < targets.length - 1) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+    }
+
+    return { sent, failed, targets };
+}
+
 export async function sendJobToConfiguredTargets(sock, job, options = {}) {
     if (!sock) return { sent: 0, failed: 0, targets: [] };
+
+    const config = loadConfig();
+    const previewTargets = Array.isArray(config?.preview?.targets) ? config.preview.targets : [];
+    let preview = { sent: 0, failed: 0, targets: [] };
+
+    if (config?.preview?.enabled && previewTargets.length > 0) {
+        preview = await sendJobPreviewTargets(sock, job, previewTargets, options);
+    }
+
+    if (config?.preview?.enabled && config?.preview?.previewOnly && options.forcePublishTargets !== true) {
+        return {
+            sent: 0,
+            failed: 0,
+            targets: [],
+            preview,
+            skippedPublish: true,
+            api: { skipped: true, reason: 'preview_only' }
+        };
+    }
 
     const groups = typeof sock.groupFetchAllParticipating === 'function'
         ? await sock.groupFetchAllParticipating()
@@ -1694,7 +1868,7 @@ export async function sendJobToConfiguredTargets(sock, job, options = {}) {
 
     const apiResult = await postJobToEmpregosPvh(job);
 
-    return { sent, failed, targets, api: apiResult };
+    return { sent, failed, targets, preview, api: apiResult };
 }
 
 export function buildJobPayload(job, options = {}) {
@@ -1703,7 +1877,14 @@ export function buildJobPayload(job, options = {}) {
     const siteUrl = 'http://empregospvh.com.br';
     const channelUrl = 'https://whatsapp.com/channel/0029VbCuxQ8BKfi1ZJaHhw0R';
     const targetType = String(options.targetType || '').trim().toLowerCase();
-    const footerLines = targetType === 'newsletter'
+    const footerLines = buildJobFooterLines(targetType);
+    const requirements = formatRequirementsSection(job);
+    const salary = formatSalaryLabel(job.salaryInfo);
+    const company = formatCompanyLabel(job.company);
+    const location = formatLocation(job.location || 'Local não informado');
+    const cityLabel = toUpperLocationLabel(job.location || 'Local não informado');
+    const activities = buildJobActivities(job);
+    const legacyFooterLines = targetType === 'newsletter'
         ? [
             '',
             '━━━━━━━━━━━━━━━━━━━━━━',
@@ -1724,7 +1905,7 @@ export function buildJobPayload(job, options = {}) {
                 channelUrl
             ]
             : [];
-    const lines = [
+    const legacyLines = [
         `📌 VAGA: ${cleanLine(job.title, 110)}`,
         '',
         job.company ? `🏢 Empresa: ${cleanLine(job.company, 80)}` : '',
@@ -1742,6 +1923,29 @@ export function buildJobPayload(job, options = {}) {
         '',
         '🔗 Candidatura:',
         cleanLine(job.applyInfo, 220),
+        safeUrl,
+        ...legacyFooterLines
+    ].filter((line, index, array) => {
+        if (line !== '') return true;
+        return array[index - 1] !== '' && array[index + 1] !== '';
+    });
+
+    const lines = [
+        `🚨 NOVA VAGA EM ${cityLabel}`,
+        '',
+        `💼 Cargo: ${cleanLine(job.title || 'Cargo não informado', 110)}`,
+        `🏢 Empresa: ${company}`,
+        `📍 Local: ${location}`,
+        `💰 Salário: ${salary}`,
+        '',
+        '✅ Requisitos:',
+        '',
+        ...requirements,
+        '',
+        '📝 Atividades:',
+        activities,
+        '',
+        '🔗 Candidate-se aqui:',
         safeUrl,
         ...footerLines
     ].filter((line, index, array) => {
@@ -2100,8 +2304,26 @@ async function pollJobs(sock) {
         }
 
         const jobsToSend = analyzedFreshJobs.slice(0, MAX_JOBS_PER_RUN);
+        const previewEnabled = config?.preview?.enabled === true;
+        const previewOnly = config?.preview?.previewOnly === true;
+        const previewTargets = Array.isArray(config?.preview?.targets) ? config.preview.targets : [];
         for (let jobIndex = 0; jobIndex < jobsToSend.length; jobIndex += 1) {
             const job = jobsToSend[jobIndex];
+            if (previewEnabled && previewTargets.length > 0) {
+                const previewResult = await sendJobPreviewTargets(sock, job, previewTargets, { delayMs: 1200 });
+                logger.info('job_forwarder_preview_sent', {
+                    title: job.title,
+                    url: job.url,
+                    sent: previewResult.sent,
+                    failed: previewResult.failed,
+                    targets: previewResult.targets
+                });
+            }
+
+            if (previewEnabled && previewOnly) {
+                continue;
+            }
+
             for (const targetGroup of targetGroups) {
                 const sent = await sendSafeMessage(sock, targetGroup.id, buildJobPayload(job, { targetType: targetGroup.targetType }));
                 if (sent) {
@@ -2120,6 +2342,23 @@ async function pollJobs(sock) {
             if (jobIndex < jobsToSend.length - 1) {
                 await new Promise((resolve) => setTimeout(resolve, JOB_DELAY_BETWEEN_POSTS_MS));
             }
+        }
+
+        if (previewEnabled && previewOnly) {
+            state.initialized = true;
+            state.seenUrls = mergeStateEntries(state.seenUrls, [
+                ...filteredFreshJobs.map((job) => normalizeUrl(job.url)),
+                ...jobsToSend.map((job) => normalizeUrl(job.url))
+            ]);
+            state.seenFingerprints = mergeStateEntries(state.seenFingerprints, [
+                ...filteredFreshJobs.map((job) => jobFingerprint(job)),
+                ...jobsToSend.map((job) => jobFingerprint(job))
+            ]);
+            state.lastRunAt = new Date().toISOString();
+            saveState(state);
+            cycleStats.previewOnly = true;
+            logger.info('job_forwarder_cycle_summary', cycleStats);
+            return;
         }
 
         try {

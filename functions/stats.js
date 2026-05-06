@@ -27,7 +27,22 @@ export function getStats() {
         const lembretesPath = path.join(__dirname, '..', 'lembretes.json');
         if (fs.existsSync(lembretesPath)) {
             const data = JSON.parse(fs.readFileSync(lembretesPath, 'utf8'));
-            lembretesAtivos = Object.keys(data).length;
+            if (data && typeof data === 'object' && (data.interval || data.daily)) {
+                const interval = data.interval && typeof data.interval === 'object' ? data.interval : {};
+                const daily = data.daily && typeof data.daily === 'object' ? data.daily : {};
+
+                const totalInterval = Object.values(interval).reduce((sum, value) => {
+                    if (Array.isArray(value)) return sum + value.length;
+                    if (value && typeof value === 'object') return sum + 1;
+                    return sum;
+                }, 0);
+
+                const totalDaily = Object.keys(daily).length;
+                lembretesAtivos = totalInterval + totalDaily;
+            } else if (data && typeof data === 'object') {
+                // Compatibilidade com formato legado (1 lembrete intervalar por grupo)
+                lembretesAtivos = Object.keys(data).length;
+            }
         }
     } catch (e) {}
     

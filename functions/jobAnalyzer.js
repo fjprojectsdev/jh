@@ -1,6 +1,12 @@
 import OpenAI from 'openai';
 
 import { logger } from './logger.js';
+import { sanitizeText } from './messageHandler.js';
+import {
+    buildJobCompatibilityPrompt,
+    buildJobExtractionPrompt,
+    buildJobFilteringPrompt
+} from './jobPrompts.js';
 
 const OPENAI_API_KEY = String(process.env.OPENAI_API_KEY || '').trim();
 const GROQ_API_KEY = String(process.env.GROQ_API_KEY || '').trim();
@@ -10,7 +16,7 @@ const GROQ_MODEL = String(process.env.IMAVY_GROQ_MODEL || 'llama-3.3-70b-versati
 const openai = OPENAI_API_KEY ? new OpenAI({ apiKey: OPENAI_API_KEY }) : null;
 
 function normalizeSpace(value) {
-    return String(value || '')
+    return sanitizeText(String(value || ''))
         .normalize('NFKC')
         .replace(/\s+/g, ' ')
         .trim();
@@ -215,6 +221,20 @@ async function callOpenAiJson(messages) {
 }
 
 function buildMessages(job) {
+    const rawScrapedText = JSON.stringify({
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        area: job.area,
+        role: job.role,
+        summary: job.summary,
+        requirements: job.requirements,
+        salaryInfo: job.salaryInfo,
+        applyInfo: job.applyInfo,
+        sourceLabel: job.sourceLabel,
+        url: job.url
+    });
+
     return [
         {
             role: 'system',
@@ -223,7 +243,8 @@ function buildMessages(job) {
                 'Responda somente JSON valido com as chaves:',
                 'publish (boolean),',
                 'reason (string curta),',
-                'title, company, location, area, role, summary, requirements, salaryInfo, applyInfo.',
+                'title, company, location, area, role, summary, requirements, salaryInfo, applyInfo,',
+                'workType, technologies, seniority, shortDescription.',
                 'Objetivo: enviar vagas de Porto Velho/RO em portugues claro, sem HTML, sem codigo, sem lixo visual.',
                 'Regras:',
                 '- Rejeite vagas em ingles, internacionais, europeias, claramente remotas ou sem relacao real com Porto Velho/RO.',
@@ -231,6 +252,10 @@ function buildMessages(job) {
                 '- Summary: 1 a 2 frases curtas.',
                 '- Requirements: itens principais em uma frase curta.',
                 '- ApplyInfo: explique como se candidatar com base no texto; se nao houver detalhes, diga para acessar o link da vaga.',
+                '- WorkType deve ser remoto, hibrido, presencial ou null.',
+                '- Technologies deve ser array JSON de tecnologias principais ou array vazio.',
+                '- Seniority deve ser junior, pleno, senior, estagio/aprendiz ou null.',
+                '- ShortDescription deve ter no maximo 200 caracteres.',
                 '- Nao invente dados ausentes.',
                 '- Remova HTML, CSS, JS, nomes de classes, hashtags, rastros de codigo e termos quebrados.',
                 '- Se houver texto confuso ou sujo, limpe antes de resumir.'
@@ -238,19 +263,7 @@ function buildMessages(job) {
         },
         {
             role: 'user',
-            content: JSON.stringify({
-                title: job.title,
-                company: job.company,
-                location: job.location,
-                area: job.area,
-                role: job.role,
-                summary: job.summary,
-                requirements: job.requirements,
-                salaryInfo: job.salaryInfo,
-                applyInfo: job.applyInfo,
-                sourceLabel: job.sourceLabel,
-                url: job.url
-            })
+            content: buildJobExtractionPrompt(rawScrapedText)
         }
     ];
 }
@@ -268,6 +281,14 @@ function normalizeAiResult(result, job) {
         requirements: compactList(removeSalaryInfo(result?.requirements || job.requirements), 420),
         salaryInfo: truncate(stripNoise(result?.salaryInfo || job.salaryInfo || extractSalaryInfo(job.requirements || '')), 120),
         applyInfo: truncate(stripNoise(result?.applyInfo || job.applyInfo || 'Acesse o link da vaga para se candidatar.'), 220),
+        workType: normalizeSpace(result?.workType || result?.tipo_de_trabalho || ''),
+        technologies: Array.isArray(result?.technologies)
+            ? result.technologies.map((item) => truncate(stripNoise(item), 40)).filter(Boolean).slice(0, 8)
+            : Array.isArray(result?.tecnologias_principais)
+                ? result.tecnologias_principais.map((item) => truncate(stripNoise(item), 40)).filter(Boolean).slice(0, 8)
+                : [],
+        seniority: truncate(stripNoise(result?.seniority || result?.senioridade || ''), 40) || null,
+        shortDescription: truncate(stripNoise(result?.shortDescription || result?.descricao_resumida || result?.summary || job.summary), 200),
         sourceLabel: job.sourceLabel,
         url: job.url
     };
@@ -278,6 +299,88 @@ function normalizeAiResult(result, job) {
         return { publish: false, reason: 'vaga_filtrada_pos_analise' };
     }
     return merged;
+}
+
+export function buildStructuredJobExtractionPrompt(scrapedText) {
+    return buildJobExtractionPrompt(scrapedText);
+}
+
+export function buildStructuredJobFilteringPrompt(jobs) {
+    return buildJobFilteringPrompt(jobs);
+}
+
+export function buildStructuredJobCompatibilityPrompt(profile, job) {
+    return buildJobCompatibilityPrompt(profile, job);
+}
+
+export async function evaluateJobCompatibility(job, profile = {}) {
+    const startedAt = Date.now();
+    const messages = [
+        {
+            role: 'system',
+            content: [
+                'Voce avalia compatibilidade entre perfil e vaga.',
+                'Responda somente JSON valido com as chaves: score, motivo.',
+                'Score deve ser inteiro de 0 a 100.',
+                'Motivo deve ser uma frase curta.'
+            ].join('\n')
+        },
+        {
+            role: 'user',
+            content: buildJobCompatibilityPrompt({
+                area: profile.jobType || profile.area || 'geral',
+                interesse: Array.isArray(profile.keywords) && profile.keywords.length
+                    ? profile.keywords.join(', ')
+                    : profile.jobType || 'geral',
+                experiencia: profile.experiencePreference || profile.seniority || 'qualquer',
+                nivel: profile.experiencePreference || profile.seniority || 'qualquer'
+            }, {
+                title: job?.title || '',
+                company: job?.company || '',
+                location: job?.location || '',
+                workType: job?.workType || '',
+                technologies: Array.isArray(job?.technologies) ? job.technologies : [],
+                seniority: job?.seniority || '',
+                summary: job?.summary || '',
+                requirements: job?.requirements || '',
+                url: job?.url || ''
+            })
+        }
+    ];
+
+    try {
+        const result = GROQ_API_KEY
+            ? await callGroqJson(messages)
+            : openai
+                ? await callOpenAiJson(messages)
+                : null;
+
+        if (!result || typeof result !== 'object') {
+            return null;
+        }
+
+        const parsedScore = Number.parseInt(result.score ?? result.score_de_compatibilidade, 10);
+        const score = Number.isFinite(parsedScore)
+            ? Math.max(0, Math.min(100, parsedScore))
+            : null;
+
+        logger.debug('job_compatibility_analyzer', {
+            provider: GROQ_API_KEY ? 'groq' : 'openai',
+            ms: Date.now() - startedAt,
+            score
+        });
+
+        return {
+            score,
+            motivo: normalizeSpace(result.motivo || result.motivo_da_classificacao || '')
+        };
+    } catch (error) {
+        logger.warn('job_compatibility_analyzer_failed', {
+            ms: Date.now() - startedAt,
+            error: error?.message || String(error)
+        });
+        return null;
+    }
 }
 
 export async function analyzeJobForPublishing(job) {
